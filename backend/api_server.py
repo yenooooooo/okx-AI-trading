@@ -127,14 +127,17 @@ async def async_trading_loop():
                         position_side = bot_global_state["symbols"][symbol]["position"]
 
                         if entry > 0 and current_price:
+                            # 레버리지 적용 (기본값 1)
+                            leverage = bot_global_state["symbols"][symbol].get("leverage", 1)
+
                             if position_side == "LONG":
-                                pnl = ((current_price - entry) / entry) * 100
+                                pnl = ((current_price - entry) / entry) * 100 * leverage
                                 bot_global_state["symbols"][symbol]["highest_price"] = max(
                                     bot_global_state["symbols"][symbol].get("highest_price", current_price),
                                     current_price
                                 )
                             elif position_side == "SHORT":
-                                pnl = ((entry - current_price) / entry) * 100
+                                pnl = ((entry - current_price) / entry) * 100 * leverage
                                 bot_global_state["symbols"][symbol]["lowest_price"] = min(
                                     bot_global_state["symbols"][symbol].get("lowest_price", current_price),
                                     current_price
@@ -170,7 +173,7 @@ async def async_trading_loop():
                                         pnl_percent=pnl_percent,
                                         amount=amount,
                                         exit_reason=risk_action,
-                                        leverage=1
+                                        leverage=leverage
                                     )
 
                                     # 3. 브리핑 강화 알림

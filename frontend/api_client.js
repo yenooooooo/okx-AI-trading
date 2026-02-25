@@ -96,11 +96,10 @@ async function syncBotStatus() {
         const response = await fetch(`${API_URL}/status`);
         const data = await response.json();
 
-        // 1. Balance (REST API 데이터는 웹소켓이 없을 때만 업데이트하여 UI 충돌 방지)
-        if (!priceWs || priceWs.readyState !== WebSocket.OPEN) {
-            updateNumberText('current-balance', data.balance);
-            updateNumberText('balance-krw', data.balance * 1350, val => `≈ ${Math.floor(val).toLocaleString()} KRW`);
-        }
+        // 1. Balance (REST API 데이터는 웹소켓 상태와 무관하게 항상 동기화)
+        // 웹소켓은 더 이상 잔고를 건드리지 않으므로, 여기서 무조건 업데이트해야 함.
+        updateNumberText('current-balance', data.balance);
+        updateNumberText('balance-krw', data.balance * 1350, val => `≈ ${Math.floor(val).toLocaleString()} KRW`);
 
         // 2. Position
         const symbols = data.symbols || {};
