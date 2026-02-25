@@ -50,13 +50,31 @@ ai_brain_state = {
 
 trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
+_engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
+
+@app_server.on_event("startup")
+async def startup_event():
+    """서버 시작 시 OKXEngine 1회만 초기화 (load_markets 블로킹 방지)"""
+    global _engine
+    init_db()
+    logger.info("API 서버 시작 - OKXEngine 초기화 중...")
+    loop = asyncio.get_event_loop()
+    _engine = await loop.run_in_executor(None, OKXEngine)
+    if _engine and _engine.exchange:
+        logger.info("OKXEngine 싱글톤 초기화 완료 - 모든 엔드포인트 공유 시작")
+    else:
+        logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
 async def async_trading_loop():
     """다중 심볼 백그라운드 매매 루프"""
     global bot_global_state, ai_brain_state, _trading_task
 
-    engine_api = OKXEngine()
+    engine_api = _engine  # 싱글톤 재사용 (load_markets 재호출 없음)
     strategy_instance = TradingStrategy(initial_seed=75.0)
+
+    if not engine_api or not engine_api.exchange:
+        logger.error("OKXEngine 미초기화 상태 - 매매 루프 중단")
+        return
 
     bot_global_state["logs"].append("[봇] OKX 거래소 연결 확인 및 자동매매 대기 중...")
     logger.info("자동매매 루프 시작")
@@ -284,8 +302,8 @@ async def execute_test_order():
             bot_global_state["logs"].append(err_msg)
             return {"error": "이미 포지션이 존재합니다."}
 
-        engine_api = OKXEngine()
-        if not engine_api.exchange:
+        engine_api = _engine
+        if not engine_api or not engine_api.exchange:
             return {"error": "OKX 거래소 인스턴스가 연결되지 않았습니다."}
             
         amount = 1 # 테스트 수량
@@ -326,8 +344,8 @@ async def fetch_current_status():
     """현재 봇 상태 반환 (OKX 실시간 데이터 강제 동기화)"""
     # 봇이 켜져있지 않더라도 실시간 잔고는 업데이트되어야 함
     try:
-        engine = OKXEngine()
-        if engine.exchange:
+        engine = _engine
+        if engine and engine.exchange:
             # 1. 잔고 무조건 갱신 (0이어도 반영 - 초기 로드 0 버그 수정)
             curr_bal = engine.get_usdt_balance()
             bot_global_state["balance"] = round(curr_bal, 2)
@@ -473,8 +491,8 @@ async def update_config(key: str, value: str):
 async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
     """OHLCV 캔들 데이터 (차트용)"""
     try:
-        engine = OKXEngine()
-        if not engine.exchange:
+        engine = _engine
+        if not engine or not engine.exchange:
             return {"error": "거래소 연결 실패"}
 
         ohlcv = engine.exchange.fetch_ohlcv(symbol, "1m", limit=limit)
@@ -529,7 +547,7 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
 async def run_backtest(symbol: str = "BTC/USDT:USDT", timeframe: str = "1m", limit: int = 100):
     """백테스팅 실행"""
     try:
-        backtester = Backtester(initial_seed=75.0)
+        backtester = Backtester(initial_seed=75.0, engine=_engine)
         result = backtester.run(symbol=symbol, timeframe=timeframe, limit=limit)
         return result
     except Exception as e:
@@ -562,6 +580,4 @@ async def fetch_system_logs(limit: int = 50):
     return formatted_logs
 
 if __name__ == "__main__":
-    init_db()
-    logger.info("API 서버 시작")
     uvicorn.run("api_server:app_server", host="0.0.0.0", port=8000, reload=False)

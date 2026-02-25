@@ -9,9 +9,9 @@ logger = get_logger(__name__)
 class Backtester:
     """과거 데이터를 이용한 백테스팅 엔진"""
 
-    def __init__(self, initial_seed: float = 100000.0):
+    def __init__(self, initial_seed: float = 100000.0, engine=None):
         self.initial_seed = initial_seed
-        self.engine = OKXEngine()
+        self.engine = engine if engine else OKXEngine()  # 싱글톤 주입 또는 자체 생성
         self.strategy = TradingStrategy(initial_seed=initial_seed)
 
     def run(self, symbol: str = "BTC/USDT:USDT", timeframe: str = "1m", limit: int = 100) -> Dict[str, Any]:
