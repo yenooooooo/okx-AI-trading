@@ -33,6 +33,9 @@ bot_global_state = {
 ai_brain_state = {
     "price": None,
     "rsi": None,
+    "macd": None,
+    "bollinger_upper": None,
+    "bollinger_lower": None,
     "decision": "대기 중..."
 }
 
@@ -64,49 +67,74 @@ async def async_trading_loop():
                 current_price = engine_api.get_current_price("BTC/USDT:USDT")
                 bot_global_state["current_price"] = current_price
                 
-                # 포지션 상태(PnL, TP/SL) 실시간 계산
+                # 지표 일괄 계산
+                df = strategy_instance.calculate_indicators(df)
+                latest_rsi = df['rsi'].iloc[-1]
+                latest_macd = df['macd'].iloc[-1]
+                latest_upper = df['upper_band'].iloc[-1]
+                latest_lower = df['lower_band'].iloc[-1]
+                
+                # 포지션 상태(PnL, TP/SL) 실시간 계산 및 트레일링 스탑 적용
                 if bot_global_state["position"] != "NONE":
                     entry = bot_global_state["entry_price"]
                     if entry > 0 and current_price:
                         if bot_global_state["position"] == "LONG":
                             pnl = ((current_price - entry) / entry) * 100
-                            tp = entry * (1 + strategy_instance.trailing_stop_activation)
-                            sl = entry * (1 - strategy_instance.hard_stop_loss_rate)
+                            # 최고가 갱신
+                            bot_global_state["highest_price"] = max(bot_global_state.get("highest_price", current_price), current_price)
+                            
+                            if bot_global_state.get("take_profit_price", 0) == 0:
+                                bot_global_state["take_profit_price"] = round(entry * (1 + strategy_instance.trailing_stop_activation), 2)
+                                bot_global_state["stop_loss_price"] = round(entry * (1 - strategy_instance.hard_stop_loss_rate), 2)
+                                
+                            # 트레일링 스탑 발동 (1% 이상 수익 발생 시, 최고점 대비 1.5% 아래로 손절가 갱신)
+                            if pnl >= 1.0:
+                                trailing_sl = bot_global_state["highest_price"] * (1 - 0.015)
+                                if trailing_sl > bot_global_state.get("stop_loss_price", 0):
+                                    bot_global_state["stop_loss_price"] = round(trailing_sl, 2)
+                                    msg = f"[트레일링 스탑] LONG 손절가 상향 조정: ${bot_global_state['stop_loss_price']}"
+                                    if len(bot_global_state["logs"]) == 0 or msg != bot_global_state["logs"][-1]:
+                                        bot_global_state["logs"].append(msg)
+                                        
                         elif bot_global_state["position"] == "SHORT":
                             pnl = ((entry - current_price) / entry) * 100
-                            tp = entry * (1 - strategy_instance.trailing_stop_activation)
-                            sl = entry * (1 + strategy_instance.hard_stop_loss_rate)
+                            # 최저가 갱신
+                            bot_global_state["lowest_price"] = min(bot_global_state.get("lowest_price", current_price), current_price)
+                            
+                            if bot_global_state.get("take_profit_price", 0) == 0:
+                                bot_global_state["take_profit_price"] = round(entry * (1 - strategy_instance.trailing_stop_activation), 2)
+                                bot_global_state["stop_loss_price"] = round(entry * (1 + strategy_instance.hard_stop_loss_rate), 2)
+                                
+                            if pnl >= 1.0:
+                                trailing_sl = bot_global_state["lowest_price"] * (1 + 0.015)
+                                current_sl = bot_global_state.get("stop_loss_price", 0)
+                                if current_sl == 0 or trailing_sl < current_sl:
+                                    bot_global_state["stop_loss_price"] = round(trailing_sl, 2)
+                                    msg = f"[트레일링 스탑] SHORT 손절가 하향 조정: ${bot_global_state['stop_loss_price']}"
+                                    if len(bot_global_state["logs"]) == 0 or msg != bot_global_state["logs"][-1]:
+                                        bot_global_state["logs"].append(msg)
                         
                         bot_global_state["unrealized_pnl_percent"] = round(pnl, 2)
-                        bot_global_state["take_profit_price"] = round(tp, 2)
-                        bot_global_state["stop_loss_price"] = round(sl, 2)
 
-                # 매우 얕은 RSI 계산 (전략 클래스를 import하여 쓰거나 직접 계산)
-                # 여기서는 UI 시연을 위해 간단한 직접 계산 사용
-                delta = df['close'].diff(1)
-                gain = delta.where(delta > 0, 0.0).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0.0)).rolling(window=14).mean()
-                rs = gain / loss
-                rsi = 100 - (100 / (1 + rs))
-                latest_rsi = rsi.iloc[-1]
-                
                 ai_brain_state["price"] = current_price
                 ai_brain_state["rsi"] = round(latest_rsi, 2) if not pd.isna(latest_rsi) else 50.0
+                ai_brain_state["macd"] = round(latest_macd, 2) if not pd.isna(latest_macd) else 0.0
+                ai_brain_state["bollinger_upper"] = round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0
+                ai_brain_state["bollinger_lower"] = round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0
                 
                 # 수다쟁이 모드 (상세 로직 중계)
                 decision_msg = ""
                 if pd.isna(latest_rsi):
                     decision_msg = "추세 탐색 중 - 데이터 대기"
-                elif latest_rsi < 30:
-                    decision_msg = f"현재 RSI {latest_rsi:.1f} - 초과매도 상태! 30 위로 반등할 때까지 진입 대기 중..."
-                elif latest_rsi > 70:
-                    decision_msg = f"현재 RSI {latest_rsi:.1f} - 시장 관망 중 (상단 터치 대기)"
+                elif latest_rsi <= 40 and latest_macd > df['macd_signal'].iloc[-1]:
+                    decision_msg = f"상승 감지 (RSI {latest_rsi:.1f}, MACD 상향 돌파)"
+                elif latest_rsi >= 60 and latest_macd < df['macd_signal'].iloc[-1]:
+                    decision_msg = f"하락 감지 (RSI {latest_rsi:.1f}, MACD 하향 돌파)"
                 else:
-                    decision_msg = f"현재 RSI {latest_rsi:.1f} - 시장 관망 중 (타점 아님)"
+                    decision_msg = f"현재 RSI {latest_rsi:.1f} / MACD {latest_macd:.2f} - 타점 탐색 중"
 
                 # 포지션이 비어 있을 때만 진입 시그널 판단
                 if bot_global_state["position"] == "NONE":
-                    df = strategy_instance.calculate_indicators(df)
                     signal = strategy_instance.check_entry_signal(df)
                     if signal in ["LONG", "SHORT"]:
                         decision_msg = f"조건 충족! 현재가 ${current_price}에 RSI {latest_rsi:.1f} 반등 확인. 즉시 시장가 매수({signal}) API 호출 시도!"
@@ -123,7 +151,11 @@ async def async_trading_loop():
                                 
                             bot_global_state["position"] = signal
                             bot_global_state["entry_price"] = current_price
-                            bot_global_state["logs"].append("[진입 성공] 시장가 매매 정상 체결!")
+                            bot_global_state["take_profit_price"] = 0.0
+                            bot_global_state["stop_loss_price"] = 0.0
+                            bot_global_state["highest_price"] = current_price
+                            bot_global_state["lowest_price"] = current_price
+                            bot_global_state["logs"].append(f"[진입 성공] {signal} 시장가 정상 체결! (${current_price})")
                         except Exception as api_err:
                             err_str = f"API 호출 에러: 최소 주문 수량 미달 또는 잔고 부족 ({str(api_err)})"
                             print(f"\033[91m[ERROR] {err_str}\033[0m")

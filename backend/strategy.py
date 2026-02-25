@@ -30,21 +30,39 @@ class TradingStrategy:
         df['upper_band'] = df['sma_20'] + (df['std_20'] * 2)
         df['lower_band'] = df['sma_20'] - (df['std_20'] * 2)
 
+        # 3. MACD 계산 (12, 26, 9)
+        df['ema_12'] = df['close'].ewm(span=12, adjust=False).mean()
+        df['ema_26'] = df['close'].ewm(span=26, adjust=False).mean()
+        df['macd'] = df['ema_12'] - df['ema_26']
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+
         return df
 
     def check_entry_signal(self, df):
         """
         가장 최근 캔들을 분석하여 매수/매도 진입 시그널 판단
-        (잦은 매매로 인한 수수료 손실 방지를 위해 보수적 조건 결합)
+        공격적 다중 지표 (Multi-Indicators) 적용
         """
+        if len(df) < 2:
+            return "HOLD"
+            
         latest = df.iloc[-1]
+        previous = df.iloc[-2]
         
-        # 보수적 매수(LONG) 조건: RSI 30 미만(과매도) & 종가가 볼린저 밴드 하단 터치
-        if latest['rsi'] < 30 and latest['close'] <= latest['lower_band']:
+        # [매수(LONG) 타점]: 주가가 볼린저 밴드 하단 터치 또는 이탈 AND MACD 선이 Signal 선을 상향 돌파(골든크로스) AND RSI가 40 이하
+        long_bb = latest['close'] <= latest['lower_band']
+        long_macd = (latest['macd'] > latest['macd_signal']) and (previous['macd'] <= previous['macd_signal'])
+        long_rsi = latest['rsi'] <= 40
+        
+        if long_bb and long_macd and long_rsi:
             return "LONG"
         
-        # 보수적 매도(SHORT) 조건: RSI 70 초과(과매수) & 종가가 볼린저 밴드 상단 터치
-        elif latest['rsi'] > 70 and latest['close'] >= latest['upper_band']:
+        # [매도(SHORT) 타점]: 주가가 볼린저 밴드 상단 터치 또는 돌파 AND MACD 선이 Signal 선을 하향 돌파(데드크로스) AND RSI가 60 이상
+        short_bb = latest['close'] >= latest['upper_band']
+        short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
+        short_rsi = latest['rsi'] >= 60
+        
+        if short_bb and short_macd and short_rsi:
             return "SHORT"
             
         return "HOLD"
