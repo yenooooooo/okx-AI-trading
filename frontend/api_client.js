@@ -2,6 +2,7 @@ const API_URL = `/api/v1`;
 let chart = null;
 let candleSeries = null;
 let lastLogTimestamp = '';
+let lastCandleData = null; // WebSocket 실시간 캔들 업데이트용
 
 // --- UI Utilities ---
 
@@ -183,7 +184,8 @@ async function syncBotStatus() {
         const brainState = firstSymbol ? symbolBrains[firstSymbol] : brainData;
 
         if (brainState) {
-            if (brainState.price) {
+            // WebSocket 연결 중엔 REST가 hero-price를 덮어쓰지 않음 (실시간 보호)
+            if (brainState.price && (!priceWs || priceWs.readyState !== WebSocket.OPEN)) {
                 updateNumberText('hero-price', brainState.price);
             }
             if (brainState.decision) {
@@ -352,6 +354,7 @@ async function syncChart() {
         }));
 
         candleSeries.setData(data);
+        lastCandleData = data[data.length - 1]; // 마지막 캔들 저장
     } catch (error) {
         const overlay = document.getElementById('chart-overlay');
         if (overlay) overlay.classList.remove('hidden');
@@ -478,7 +481,18 @@ function initPriceWebSocket() {
                 // 1. 메인 패널 현재가 초저지연 업데이트
                 updatePriceWithTickFlash(price);
 
-                // 2. Active Deployment 실시간 라이브 PnL (OKX 선물 ROE 공식)
+                // 2. 차트 마지막 캔들 실시간 업데이트 (close/high/low)
+                if (candleSeries && lastCandleData) {
+                    lastCandleData = {
+                        ...lastCandleData,
+                        close: price,
+                        high: Math.max(lastCandleData.high, price),
+                        low: Math.min(lastCandleData.low, price)
+                    };
+                    candleSeries.update(lastCandleData);
+                }
+
+                // 3. Active Deployment 실시간 라이브 PnL (OKX 선물 ROE 공식)
                 const posActive = document.getElementById('position-active');
                 if (posActive && !posActive.classList.contains('hidden')) {
                     const posCard = document.getElementById('active-position-card');
