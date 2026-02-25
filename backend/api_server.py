@@ -385,6 +385,14 @@ async def fetch_current_status():
                                 bot_global_state["symbols"][symbol]["unrealized_pnl"] = unrealized
                                 bot_global_state["symbols"][symbol]["leverage"] = leverage
                                 bot_global_state["symbols"][symbol]["contracts"] = contracts
+                                # TP/SL 표시용 복원 (서버 재시작 후 0.00 방지)
+                                if entry > 0 and bot_global_state["symbols"][symbol].get("take_profit_price", 0) == 0:
+                                    if side == 'LONG':
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = round(entry * 1.03, 2)
+                                        bot_global_state["symbols"][symbol]["stop_loss_price"] = round(entry * 0.98, 2)
+                                    else:
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = round(entry * 0.97, 2)
+                                        bot_global_state["symbols"][symbol]["stop_loss_price"] = round(entry * 1.02, 2)
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
     except Exception as e:
