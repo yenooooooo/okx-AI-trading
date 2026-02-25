@@ -304,25 +304,45 @@ async def fetch_current_status():
     try:
         engine = OKXEngine()
         if engine.exchange:
+            # 1. 잔고 무조건 갱신 (0이어도 반영 - 초기 로드 0 버그 수정)
             curr_bal = engine.get_usdt_balance()
-            if curr_bal > 0:
-                bot_global_state["balance"] = round(curr_bal, 2)
-            
-            # 포지션 상태 영속성 (Hydration) 강제 동기화
+            bot_global_state["balance"] = round(curr_bal, 2)
+
+            # 2. OKX 포지션 Hydration - CCXT ROE(percentage) 직접 바이패스
             try:
                 positions = engine.exchange.fetch_positions()
+                # 먼저 모든 심볼을 NONE으로 리셋
                 for sym in bot_global_state["symbols"]:
                     bot_global_state["symbols"][sym]["position"] = "NONE"
+                    bot_global_state["symbols"][sym]["unrealized_pnl_percent"] = 0.0
 
                 for pos in positions:
-                    if float(pos.get('contracts', 0) or 0) > 0:
+                    contracts = float(pos.get('contracts', 0) or 0)
+                    if contracts > 0:
                         symbol = pos.get('symbol')
                         if symbol in bot_global_state["symbols"]:
                             side = pos.get('side', '').upper()
                             if side in ['LONG', 'SHORT']:
+                                # OKX가 계산한 ROE(%) 직접 사용
+                                roe = float(pos.get('percentage', 0) or 0)
+                                unrealized = float(pos.get('unrealizedPnl', 0) or 0)
+                                leverage = float(pos.get('leverage', 1) or 1)
+                                mark = float(pos.get('markPrice', 0) or 0)
+                                entry = float(pos.get('entryPrice', 0) or 0)
+
+                                # OKX percentage가 0이면 선물 공식으로 Fallback
+                                # 공식: ((Mark - Entry) / Entry) * 100 * Leverage
+                                if roe == 0.0 and entry > 0 and mark > 0:
+                                    diff = (mark - entry) / entry if side == 'LONG' else (entry - mark) / entry
+                                    roe = round(diff * 100 * leverage, 2)
+
                                 bot_global_state["symbols"][symbol]["position"] = side
-                                bot_global_state["symbols"][symbol]["entry_price"] = float(pos.get('entryPrice', 0))
-                                bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = float(pos.get('percentage', 0))
+                                bot_global_state["symbols"][symbol]["entry_price"] = entry
+                                bot_global_state["symbols"][symbol]["current_price"] = mark
+                                bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = roe
+                                bot_global_state["symbols"][symbol]["unrealized_pnl"] = unrealized
+                                bot_global_state["symbols"][symbol]["leverage"] = leverage
+                                bot_global_state["symbols"][symbol]["contracts"] = contracts
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
     except Exception as e:
