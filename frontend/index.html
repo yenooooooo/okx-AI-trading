@@ -70,6 +70,67 @@
         </div>
     </main>
 
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-cyan-400 flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
+                        </path>
+                    </svg>
+                    실시간 AI 뇌 구조
+                </h3>
+                <span class="relative flex h-3 w-3">
+                    <span
+                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
+                </span>
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700">
+                    <p class="text-xs text-gray-400 mb-1">감시 중인 가격 (BTC)</p>
+                    <p id="brain-price" class="text-xl font-mono text-white">대기 중...</p>
+                </div>
+                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700">
+                    <p class="text-xs text-gray-400 mb-1">핵심 지표 (RSI)</p>
+                    <p id="brain-indicator" class="text-xl font-mono text-purple-400">대기 중...</p>
+                </div>
+            </div>
+            <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-700 relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-1 h-full bg-cyan-500"></div>
+                <p class="text-xs text-gray-400 mb-1">AI 현재 판단 결과</p>
+                <p id="brain-decision" class="text-sm font-medium text-green-300">서버 데이터 수신 대기 중...</p>
+            </div>
+        </div>
+
+        <div class="bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
+            <h3 class="text-lg font-bold text-yellow-400 flex items-center gap-2 mb-4">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                </svg>
+                매매 전광판 & 실시간 ROI
+            </h3>
+            <div class="overflow-y-auto h-[180px] pr-2 custom-scrollbar">
+                <table class="w-full text-left text-sm text-gray-300">
+                    <thead class="text-xs text-gray-500 uppercase bg-gray-900/50 sticky top-0">
+                        <tr>
+                            <th class="px-3 py-2 rounded-tl-lg">시간</th>
+                            <th class="px-3 py-2">포지션</th>
+                            <th class="px-3 py-2 rounded-tr-lg text-right">수익률</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trade-history-list" class="divide-y divide-gray-700">
+                        <tr>
+                            <td colspan="3" class="px-3 py-4 text-center text-gray-500 italic">아직 매매 내역이 없습니다.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <section class="flex-grow bg-[#000000] rounded-xl border border-slate-700 shadow-lg flex flex-col overflow-hidden">
         <div
             class="bg-slate-800 px-4 py-2 border-b border-slate-700 text-sm text-slate-300 font-medium flex justify-between">
