@@ -294,6 +294,7 @@ function initChart() {
     if (!container || chart) return;
 
     chart = LightweightCharts.createChart(container, {
+        autoSize: true,
         layout: {
             background: { type: 'solid', color: 'transparent' },
             textColor: '#8b949e',
