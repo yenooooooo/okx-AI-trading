@@ -58,15 +58,24 @@ class OKXEngine:
         if not self.exchange:
             return 0.0
         try:
-            # Trading 계정 잔고 조회 (total = free + collateral in open positions)
+            # 1. Trading 계정 잔고 조회 (total = free + collateral)
             trading_balance = self.exchange.fetch_balance({'type': 'trading'})
             trading_usdt = float(trading_balance.get('USDT', {}).get('total', 0.0) or 0.0)
 
-            # Funding 계정 잔고 조회
+            # 2. Funding 계정 잔고 조회
             funding_balance = self.exchange.fetch_balance({'type': 'funding'})
             funding_usdt = float(funding_balance.get('USDT', {}).get('free', 0.0) or 0.0)
 
-            return trading_usdt + funding_usdt
+            total = trading_usdt + funding_usdt
+
+            # 3. Fallback: 만약 0이면 Unified(기본) 모드로 재조회
+            if total == 0:
+                unified_balance = self.exchange.fetch_balance()
+                unified_usdt = float(unified_balance.get('USDT', {}).get('total', 0.0) or 0.0)
+                if unified_usdt > 0:
+                    return unified_usdt
+
+            return total
         except Exception as e:
             print(f"[조회 오류] 잔고 조회 실패: {e}")
             return 0.0
