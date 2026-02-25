@@ -269,7 +269,15 @@ async def execute_test_order():
             return {"error": "시스템이 중지되어 있습니다. 먼저 가동해 주세요."}
             
         symbol = list(bot_global_state["symbols"].keys())[0] if bot_global_state["symbols"] else "BTC/USDT:USDT"
-        
+
+        # 심볼이 아직 루프에서 초기화되지 않았으면 방어적으로 초기화
+        if symbol not in bot_global_state["symbols"]:
+            bot_global_state["symbols"][symbol] = {
+                "position": "NONE", "entry_price": 0.0, "current_price": 0.0,
+                "unrealized_pnl_percent": 0.0, "take_profit_price": 0.0,
+                "stop_loss_price": 0.0, "highest_price": 0.0, "lowest_price": 0.0
+            }
+
         # 포지션이 이미 있을 경우 방어
         if bot_global_state["symbols"][symbol]["position"] != "NONE":
             err_msg = "[오류] 이미 포지션을 보유 중이어서 테스트 매수를 진행할 수 없습니다."
@@ -298,7 +306,10 @@ async def execute_test_order():
             bot_global_state["symbols"][symbol]["entry_price"] = current_price
             bot_global_state["symbols"][symbol]["highest_price"] = current_price
             bot_global_state["symbols"][symbol]["lowest_price"] = current_price
-            
+            # TP/SL 가격 자동 계산 (LONG 기준: +3% TP, -2% SL)
+            bot_global_state["symbols"][symbol]["take_profit_price"] = round(float(current_price) * 1.03, 2)
+            bot_global_state["symbols"][symbol]["stop_loss_price"] = round(float(current_price) * 0.98, 2)
+
             return {"status": "success", "message": test_msg}
 
         except Exception as e:
