@@ -12,13 +12,35 @@ async function syncBotStatus() {
         document.getElementById('current-balance').innerHTML = `${data.balance} <span class="text-lg text-slate-400">USDT</span>`;
         document.getElementById('balance-krw').innerText = `≈ ${(data.balance * 1350).toLocaleString()} 원`; // 임시 환율 적용
 
-        // 2. 포지션 업데이트 (기존 코드 유지)
-        const posEl = document.getElementById('current-position');
-        posEl.innerText = data.position;
-        posEl.className = `text-3xl font-bold mb-1 ${data.position === 'LONG' ? 'text-green-500' : data.position === 'SHORT' ? 'text-red-500' : 'text-slate-500'}`;
+        // 2. 포지션 업데이트
+        if (data.position && data.position !== "NONE") {
+            document.getElementById('position-none').classList.add('hidden');
+            document.getElementById('position-active').classList.remove('hidden');
 
-        // 이 부분을 data.entryPrice 에서 data.entry_price 로 수정
-        document.getElementById('entry-price').innerText = `진입가: ${data.entry_price} USDT`;
+            // 포지션 타입 (LONG/SHORT) 및 색상 설정
+            const typeEl = document.getElementById('pos-type');
+            typeEl.innerText = data.position;
+            typeEl.className = data.position === 'LONG' ? 'text-3xl font-bold text-green-500' : 'text-3xl font-bold text-red-500';
+
+            // 진입가 및 현재가
+            document.getElementById('pos-entry').innerText = `$${parseFloat(data.entry_price).toLocaleString()}`;
+            // 현재가는 뇌구조 API에서 받아오는 값을 쓰거나 여기서 업데이트
+            if (data.current_price) document.getElementById('pos-current').innerText = `$${parseFloat(data.current_price).toLocaleString()}`;
+
+            // 실시간 수익률 (색상 동적 변경)
+            const roiEl = document.getElementById('pos-roi');
+            const roiValue = parseFloat(data.unrealized_pnl_percent || 0).toFixed(2);
+            roiEl.innerText = roiValue > 0 ? `+${roiValue}%` : `${roiValue}%`;
+            roiEl.className = roiValue > 0 ? 'text-3xl font-black text-green-400' : (roiValue < 0 ? 'text-3xl font-black text-red-400' : 'text-3xl font-black text-gray-400');
+
+            // 목표가 / 손절가
+            if (data.take_profit_price) document.getElementById('pos-tp').innerText = `$${parseFloat(data.take_profit_price).toLocaleString()}`;
+            if (data.stop_loss_price) document.getElementById('pos-sl').innerText = `$${parseFloat(data.stop_loss_price).toLocaleString()}`;
+        } else {
+            // 포지션이 없을 때
+            document.getElementById('position-none').classList.remove('hidden');
+            document.getElementById('position-active').classList.add('hidden');
+        }
 
         // 3. 로그 업데이트 (최신 로그만 화면에 렌더링)
         const logContainer = document.getElementById('log-container');

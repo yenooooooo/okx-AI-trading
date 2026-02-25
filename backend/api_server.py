@@ -22,7 +22,11 @@ bot_global_state = {
     "balance": 0.0,
     "position": "NONE",
     "entry_price": 0.0,
-    "logs": ["[시스템] API 통신 브릿지가 준비되었습니다."]
+    "logs": ["[시스템] API 통신 브릿지가 준비되었습니다."],
+    "unrealized_pnl_percent": 0.0,
+    "take_profit_price": 0.0,
+    "stop_loss_price": 0.0,
+    "current_price": 0.0
 }
 
 # AI 뇌 구조 및 판단 상태 전역 변수
@@ -58,7 +62,25 @@ async def async_trading_loop():
                 ohlcv = engine_api.exchange.fetch_ohlcv("BTC/USDT:USDT", "1m", limit=30)
                 df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 current_price = engine_api.get_current_price("BTC/USDT:USDT")
+                bot_global_state["current_price"] = current_price
                 
+                # 포지션 상태(PnL, TP/SL) 실시간 계산
+                if bot_global_state["position"] != "NONE":
+                    entry = bot_global_state["entry_price"]
+                    if entry > 0 and current_price:
+                        if bot_global_state["position"] == "LONG":
+                            pnl = ((current_price - entry) / entry) * 100
+                            tp = entry * (1 + strategy_instance.trailing_stop_activation)
+                            sl = entry * (1 - strategy_instance.hard_stop_loss_rate)
+                        elif bot_global_state["position"] == "SHORT":
+                            pnl = ((entry - current_price) / entry) * 100
+                            tp = entry * (1 - strategy_instance.trailing_stop_activation)
+                            sl = entry * (1 + strategy_instance.hard_stop_loss_rate)
+                        
+                        bot_global_state["unrealized_pnl_percent"] = round(pnl, 2)
+                        bot_global_state["take_profit_price"] = round(tp, 2)
+                        bot_global_state["stop_loss_price"] = round(sl, 2)
+
                 # 매우 얕은 RSI 계산 (전략 클래스를 import하여 쓰거나 직접 계산)
                 # 여기서는 UI 시연을 위해 간단한 직접 계산 사용
                 delta = df['close'].diff(1)

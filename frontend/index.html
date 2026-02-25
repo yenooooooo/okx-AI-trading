@@ -51,10 +51,52 @@
             <div class="text-sm text-green-400" id="balance-krw">≈ 0 원</div>
         </div>
 
-        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h2 class="text-slate-400 text-sm font-medium mb-2">현재 포지션 (BTC/USDT)</h2>
-            <div class="text-3xl font-bold text-slate-500 mb-1" id="current-position">NONE</div>
-            <div class="text-sm text-slate-400" id="entry-price">진입가: 0.00 USDT</div>
+        <div
+            class="bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl relative overflow-hidden">
+            <h3 class="text-gray-400 text-sm font-medium mb-3">현재 포지션 (실시간 현황)</h3>
+
+            <div id="position-container" class="flex flex-col gap-3">
+                <div id="position-none" class="block">
+                    <p class="text-3xl font-bold text-gray-500">NONE</p>
+                    <p class="text-sm text-gray-400 mt-1">시장 감시 및 진입 대기 중...</p>
+                </div>
+
+                <div id="position-active" class="hidden">
+                    <div class="flex justify-between items-end mb-2">
+                        <div>
+                            <span id="pos-type" class="text-3xl font-bold text-red-500">SHORT</span>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-xs text-gray-400 mb-1">실시간 수익률 (ROE)</p>
+                            <span id="pos-roi" class="text-3xl font-black text-green-400">+0.00%</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="grid grid-cols-2 gap-2 mt-4 text-sm bg-gray-900/50 p-3 rounded-xl border border-gray-700/50">
+                        <div class="flex flex-col gap-1">
+                            <span class="text-gray-500 text-xs">진입 가격</span>
+                            <span id="pos-entry" class="font-mono text-gray-200">$0.00</span>
+                        </div>
+                        <div class="flex flex-col gap-1 text-right">
+                            <span class="text-gray-500 text-xs">현재 시장가</span>
+                            <span id="pos-current" class="font-mono text-white">$0.00</span>
+                        </div>
+                    </div>
+
+                    <div
+                        class="grid grid-cols-2 gap-2 mt-2 text-sm bg-gray-900/50 p-3 rounded-xl border border-gray-700/50">
+                        <div class="flex flex-col gap-1">
+                            <span class="text-green-500/80 text-xs font-bold">🎯 목표가 (Take Profit)</span>
+                            <span id="pos-tp" class="font-mono text-green-400">$0.00</span>
+                        </div>
+                        <div class="flex flex-col gap-1 text-right">
+                            <span class="text-red-500/80 text-xs font-bold">🛡️ 손절가 (Stop Loss)</span>
+                            <span id="pos-sl" class="font-mono text-red-400">$0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
