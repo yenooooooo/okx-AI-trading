@@ -553,6 +553,19 @@ async def fetch_current_status():
 
             # 2. OKX 포지션 Hydration - CCXT ROE(percentage) 직접 바이패스
             try:
+                # 리셋 전 스냅샷: 포지션이 열려있던 심볼 저장 (수동청산 감지용)
+                prev_open = {}
+                for sym in bot_global_state["symbols"]:
+                    s = bot_global_state["symbols"][sym]
+                    if s.get("position", "NONE") not in ("NONE", "") and s.get("entry_price", 0.0) > 0:
+                        prev_open[sym] = {
+                            "position": s["position"],
+                            "entry_price": s["entry_price"],
+                            "contracts": s.get("contracts", 1),
+                            "leverage": int(s.get("leverage", 1)),
+                            "current_price": s.get("current_price", 0.0),
+                        }
+
                 positions = engine.exchange.fetch_positions()
                 # fetch_positions() 성공한 경우에만 NONE 리셋 (실패 시 기존 포지션 유지)
                 for sym in bot_global_state["symbols"]:
@@ -594,6 +607,55 @@ async def fetch_current_status():
                                     else:
                                         bot_global_state["symbols"][symbol]["take_profit_price"] = round(entry * 0.97, 2)
                                         bot_global_state["symbols"][symbol]["stop_loss_price"] = round(entry * 1.02, 2)
+                # 수동청산 감지: 직전에 열려있었으나 OKX REST 조회 후 NONE으로 바뀐 심볼
+                for sym, prev in prev_open.items():
+                    curr_pos = bot_global_state["symbols"][sym].get("position", "NONE")
+                    curr_entry = bot_global_state["symbols"][sym].get("entry_price", 0.0)
+                    # curr_entry > 0: 봇 자체 청산(entry_price=0으로 초기화)이 아님을 확인
+                    if curr_pos == "NONE" and curr_entry > 0:
+                        prev_pos = prev["position"]
+                        prev_entry = prev["entry_price"]
+                        prev_contracts = prev["contracts"]
+                        prev_leverage = prev["leverage"]
+
+                        # exit_price: 직전 current_price → 실시간 markPrice 순으로 fallback
+                        exit_price = prev.get("current_price", 0.0)
+                        if exit_price == 0 and engine and engine.exchange:
+                            exit_price = engine.get_current_price(sym) or prev_entry
+
+                        try:
+                            contract_size = float(engine.exchange.market(sym).get('contractSize', 0.01))
+                        except Exception:
+                            contract_size = 0.01
+
+                        # OKX ROE와 동일한 공식 (레버리지 포함)
+                        if prev_pos == "LONG":
+                            diff = (exit_price - prev_entry) / prev_entry
+                        else:
+                            diff = (prev_entry - exit_price) / prev_entry
+                        pnl_pct = round(diff * 100 * prev_leverage, 2)
+                        pnl_amount = round(diff * prev_entry * prev_contracts * contract_size, 4)
+
+                        # 중복 저장 방지: 즉시 entry_price 초기화
+                        bot_global_state["symbols"][sym]["entry_price"] = 0.0
+
+                        save_trade(
+                            symbol=sym,
+                            position_type=prev_pos,
+                            entry_price=prev_entry,
+                            exit_price=round(exit_price, 2),
+                            pnl=pnl_amount,
+                            pnl_percent=pnl_pct,
+                            amount=prev_contracts,
+                            exit_reason="MANUAL_CLOSE",
+                            leverage=prev_leverage
+                        )
+                        emoji = "✅" if pnl_pct >= 0 else "🔴"
+                        msg = f"{emoji} [수동청산] {sym} {prev_pos} @ {exit_price:.2f} ({pnl_pct:+.2f}%)"
+                        bot_global_state["logs"].append(msg)
+                        logger.info(msg)
+                        send_telegram_sync(msg)
+
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
     except Exception as e:
