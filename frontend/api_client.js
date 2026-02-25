@@ -540,6 +540,7 @@ function initPriceWebSocket() {
     };
 
     priceWs.onmessage = (event) => {
+        if (event.data === 'pong') return; // ping 응답 무시
         const data = JSON.parse(event.data);
         if (data && data.data && data.data.length > 0) {
             const ticker = data.data[0];
