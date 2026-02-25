@@ -72,7 +72,7 @@ function updatePriceWithTickFlash(price) {
         flashClass = 'tick-flash-red';
     }
 
-    [el1, el2].forEach(el => {
+    [el2].forEach(el => {
         if (!el) return;
         el.textContent = formattedPrice;
         el.dataset.val = price;

@@ -24,12 +24,24 @@ app_server.add_middleware(
     allow_headers=["*"],
 )
 
+class LogList(list):
+    def append(self, msg):
+        super().append(msg)
+        if len(self) > 300:
+            self.pop(0)
+        try:
+            # 에러 키워드 감지
+            lvl = "ERROR" if "[오류]" in msg or "실패" in msg else "INFO"
+            save_log(level=lvl, message=msg)
+        except Exception as e:
+            logger.error(f"DB 저장 오류: {e}")
+
 # 전역 상태 (다중 심볼 지원)
 bot_global_state = {
     "is_running": False,
     "balance": 0.0,
     "symbols": {},  # symbol별 상태
-    "logs": ["[시스템] API 통신 브릿지가 준비되었습니다."],
+    "logs": LogList(["[시스템] API 통신 브릿지가 준비되었습니다."]),
 }
 
 ai_brain_state = {
@@ -295,8 +307,26 @@ async def fetch_current_status():
             curr_bal = engine.get_usdt_balance()
             if curr_bal > 0:
                 bot_global_state["balance"] = round(curr_bal, 2)
+            
+            # 포지션 상태 영속성 (Hydration) 강제 동기화
+            try:
+                positions = engine.exchange.fetch_positions()
+                for sym in bot_global_state["symbols"]:
+                    bot_global_state["symbols"][sym]["position"] = "NONE"
+
+                for pos in positions:
+                    if float(pos.get('contracts', 0) or 0) > 0:
+                        symbol = pos.get('symbol')
+                        if symbol in bot_global_state["symbols"]:
+                            side = pos.get('side', '').upper()
+                            if side in ['LONG', 'SHORT']:
+                                bot_global_state["symbols"][symbol]["position"] = side
+                                bot_global_state["symbols"][symbol]["entry_price"] = float(pos.get('entryPrice', 0))
+                                bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = float(pos.get('percentage', 0))
+            except Exception as pe:
+                logger.warning(f"포지션 데이터 스캔 실패: {pe}")
     except Exception as e:
-        logger.warning(f"실시간 잔고 갱신 실패: {e}")
+        logger.warning(f"실시간 잔고/포지션 갱신 실패: {e}")
         
     return bot_global_state
 
