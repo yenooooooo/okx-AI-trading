@@ -57,6 +57,38 @@ function updateText(elementId, text, flash = true) {
     }
 }
 
+// Tick Flash (Green/Red) for Websocket Ultra-low latency
+function updatePriceWithTickFlash(price) {
+    const el1 = document.getElementById('current-balance');
+    const el2 = document.getElementById('hero-price');
+    const oldPrice = parseFloat(el2 ? el2.dataset.val : 0) || price;
+
+    const formattedPrice = price.toFixed(2);
+    let flashClass = '';
+
+    if (price > oldPrice) {
+        flashClass = 'tick-flash-green';
+    } else if (price < oldPrice) {
+        flashClass = 'tick-flash-red';
+    }
+
+    [el1, el2].forEach(el => {
+        if (!el) return;
+        el.textContent = formattedPrice;
+        el.dataset.val = price;
+        if (flashClass) {
+            el.classList.remove('tick-flash-green', 'tick-flash-red');
+            void el.offsetWidth; // trigger reflow
+            el.classList.add(flashClass);
+
+            // cleanup after animation
+            setTimeout(() => {
+                el.classList.remove(flashClass);
+            }, 200);
+        }
+    });
+}
+
 // --- Status Sync ---
 
 async function syncBotStatus() {
@@ -387,9 +419,66 @@ async function testOrder() {
     }
 }
 
+// --- WebSocket (0.1s Ultra-low Latency) ---
+let priceWs = null;
+
+function initPriceWebSocket() {
+    // OKX Public Demo Trading WebSocket URL
+    const wsUrl = "wss://wspap.okx.com:8443/ws/v5/public";
+
+    if (priceWs) {
+        priceWs.close();
+    }
+
+    priceWs = new WebSocket(wsUrl);
+
+    priceWs.onopen = async () => {
+        // Fetch current symbol to subscribe
+        const response = await fetch(`${API_URL}/config`);
+        const config = await response.json();
+        const symbolRaw = Array.isArray(config.symbols) ? config.symbols[0] : 'BTC/USDT:USDT';
+
+        // Convert symbol format. Ex: "BTC/USDT:USDT" -> "BTC-USDT-SWAP"
+        let okxSymbol = symbolRaw.split(':')[0].replace('/', '-');
+        if (symbolRaw.includes('USDT')) okxSymbol += '-SWAP';
+
+        const subscribeMsg = {
+            op: "subscribe",
+            args: [{
+                channel: "tickers",
+                instId: okxSymbol
+            }]
+        };
+        priceWs.send(JSON.stringify(subscribeMsg));
+        console.log("WebSocket connected. Subscribed strictly to: " + okxSymbol);
+    };
+
+    priceWs.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data && data.data && data.data.length > 0) {
+            const ticker = data.data[0];
+            const price = parseFloat(ticker.last);
+            if (!isNaN(price)) {
+                updatePriceWithTickFlash(price);
+            }
+        }
+    };
+
+    priceWs.onerror = (error) => {
+        console.error("WebSocket Error: ", error);
+    };
+
+    priceWs.onclose = () => {
+        console.log("WebSocket disconnected. Auto-reconnecting in 5 seconds...");
+        setTimeout(initPriceWebSocket, 5000); // 5초 후 자동 재시도
+    };
+}
+
+
 // --- Init & Intervals (Parallel Optimization) ---
 async function initializeApp() {
     // 순차적 페칭 대신 Promise.all을 활용해 병렬 스레드로 대기 시간 단축
+    initPriceWebSocket(); // 웹소켓 즉각 연결
     initChart();
     await Promise.all([
         syncConfig(),

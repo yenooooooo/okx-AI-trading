@@ -73,6 +73,38 @@
             }
         }
 
+        .tick-flash-green {
+            animation: tick-flash-green-anim 0.2s ease-out;
+        }
+
+        @keyframes tick-flash-green-anim {
+            0% {
+                color: #00ff88;
+                text-shadow: 0 0 10px rgba(0, 255, 136, 0.8);
+            }
+
+            100% {
+                color: inherit;
+                text-shadow: none;
+            }
+        }
+
+        .tick-flash-red {
+            animation: tick-flash-red-anim 0.2s ease-out;
+        }
+
+        @keyframes tick-flash-red-anim {
+            0% {
+                color: #ff4d4d;
+                text-shadow: 0 0 10px rgba(255, 77, 77, 0.8);
+            }
+
+            100% {
+                color: inherit;
+                text-shadow: none;
+            }
+        }
+
         /* Custom scrollbar */
         ::-webkit-scrollbar {
             width: 6px;
