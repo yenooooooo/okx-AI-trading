@@ -105,10 +105,31 @@ async function updateBrain() {
         const brainRes = await fetch(`http://${SERVER_IP}:8000/api/v1/brain`);
         if (brainRes.ok) {
             const brainData = await brainRes.json();
-            // 데이터가 비어있지 않다면 UI 업데이트
+
+            // 1) 현재가 및 판단 결과
             if (brainData.price) document.getElementById('brain-price').innerText = `$${parseFloat(brainData.price).toLocaleString()}`;
-            if (brainData.rsi !== null) document.getElementById('brain-indicator').innerText = parseFloat(brainData.rsi).toFixed(2);
             if (brainData.decision) document.getElementById('brain-decision').innerText = `🤖 ${brainData.decision}`;
+
+            // 2) RSI 업데이트
+            if (brainData.rsi) {
+                const rsiEl = document.getElementById('brain-rsi');
+                const rsiVal = parseFloat(brainData.rsi);
+                rsiEl.innerText = rsiVal.toFixed(2);
+                rsiEl.className = rsiVal <= 40 ? 'text-xl font-mono text-green-400' : (rsiVal >= 60 ? 'text-xl font-mono text-red-400' : 'text-xl font-mono text-purple-400');
+            }
+
+            // 3) MACD 업데이트 (골든/데드 크로스 색상)
+            if (brainData.macd !== undefined) {
+                const macdEl = document.getElementById('brain-macd');
+                const macdVal = parseFloat(brainData.macd).toFixed(1);
+                macdEl.innerText = macdVal;
+                macdEl.className = parseFloat(brainData.macd) > 0 ? 'text-xl font-mono text-green-400' : 'text-xl font-mono text-red-400';
+            }
+
+            // 4) 볼린저 밴드 상/하단 업데이트
+            if (brainData.bb_upper && brainData.bb_lower) {
+                document.getElementById('brain-bb').innerHTML = `상: $${parseFloat(brainData.bb_upper).toLocaleString()}<br>하: $${parseFloat(brainData.bb_lower).toLocaleString()}`;
+            }
         }
 
         // 2. 최근 거래 내역(ROI) 호출

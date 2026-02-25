@@ -129,14 +129,22 @@
                     <span class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
                 </span>
             </div>
-            <div class="grid grid-cols-2 gap-4 mb-4">
-                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700">
-                    <p class="text-xs text-gray-400 mb-1">감시 중인 가격 (BTC)</p>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
+                    <p class="text-xs text-gray-400 mb-1">현재가 (BTC)</p>
                     <p id="brain-price" class="text-xl font-mono text-white">대기 중...</p>
                 </div>
-                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700">
-                    <p class="text-xs text-gray-400 mb-1">핵심 지표 (RSI)</p>
-                    <p id="brain-indicator" class="text-xl font-mono text-purple-400">대기 중...</p>
+                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
+                    <p class="text-xs text-gray-400 mb-1">RSI (과열/침체)</p>
+                    <p id="brain-rsi" class="text-xl font-mono text-purple-400">대기 중...</p>
+                </div>
+                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
+                    <p class="text-xs text-gray-400 mb-1">MACD (추세)</p>
+                    <p id="brain-macd" class="text-xl font-mono text-blue-400">대기 중...</p>
+                </div>
+                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
+                    <p class="text-[0.65rem] text-gray-400 mb-1">볼린저 밴드 (상/하단)</p>
+                    <p id="brain-bb" class="text-xs font-mono text-gray-300 mt-1 leading-tight">대기 중...</p>
                 </div>
             </div>
             <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-700 relative overflow-hidden">

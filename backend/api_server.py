@@ -34,8 +34,8 @@ ai_brain_state = {
     "price": None,
     "rsi": None,
     "macd": None,
-    "bollinger_upper": None,
-    "bollinger_lower": None,
+    "bb_upper": None,
+    "bb_lower": None,
     "decision": "대기 중..."
 }
 
@@ -119,8 +119,8 @@ async def async_trading_loop():
                 ai_brain_state["price"] = current_price
                 ai_brain_state["rsi"] = round(latest_rsi, 2) if not pd.isna(latest_rsi) else 50.0
                 ai_brain_state["macd"] = round(latest_macd, 2) if not pd.isna(latest_macd) else 0.0
-                ai_brain_state["bollinger_upper"] = round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0
-                ai_brain_state["bollinger_lower"] = round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0
+                ai_brain_state["bb_upper"] = round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0
+                ai_brain_state["bb_lower"] = round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0
                 
                 # 수다쟁이 모드 (상세 로직 중계)
                 decision_msg = ""
