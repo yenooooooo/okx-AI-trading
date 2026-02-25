@@ -1,7 +1,4 @@
-// 배포 환경에서는 서버의 퍼블릭 IP를 입력해야 합니다. 로컬 테스트 시에는 127.0.0.1 유지.
-// 로컬 환경용 IP
-const SERVER_IP = "15.135.78.118"; // TODO: AWS EC2 등 실제 배포 시 여기에 서버의 Public IP를 입력하세요.
-const API_URL = `http://${SERVER_IP}:8000/api/v1`;
+const API_URL = `/api/v1`;
 
 async function syncBotStatus() {
     try {
@@ -102,7 +99,7 @@ setInterval(syncBotStatus, 1000);
 async function updateBrain() {
     try {
         // 1. 뇌 구조(시황 판단) 데이터 호출
-        const brainRes = await fetch(`http://${SERVER_IP}:8000/api/v1/brain`);
+        const brainRes = await fetch(`/api/v1/brain`);
         if (brainRes.ok) {
             const brainData = await brainRes.json();
 
@@ -133,7 +130,7 @@ async function updateBrain() {
         }
 
         // 2. 최근 거래 내역(ROI) 호출
-        const tradesRes = await fetch(`http://${SERVER_IP}:8000/api/v1/trades`);
+        const tradesRes = await fetch(`/api/v1/trades`);
         if (tradesRes.ok) {
             const tradesData = await tradesRes.json();
             const listEl = document.getElementById('trade-history-list');
