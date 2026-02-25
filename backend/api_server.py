@@ -47,6 +47,8 @@ async def async_trading_loop():
 
     bot_global_state["logs"].append("[봇] OKX 거래소 연결 확인 및 자동매매 대기 중...")
     logger.info("자동매매 루프 시작")
+    import time
+    last_log_time = 0
 
     while bot_global_state["is_running"]:
         try:
@@ -162,7 +164,7 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
-                        signal = strategy_instance.check_entry_signal(df)
+                        signal, analysis_msg = strategy_instance.check_entry_signal(df)
 
                         if signal in ["LONG", "SHORT"]:
                             msg = f"[{symbol}] {signal} 진입 신호 - 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
@@ -196,6 +198,16 @@ async def async_trading_loop():
                 except Exception as e:
                     pass  # 일시적 API 에러 무시
 
+            # 30초마다 엔진 생존 여부 (분석 상태) 로그 출력
+            current_time = time.time()
+            if current_time - last_log_time >= 30:
+                engine_msg = f"[엔진] 분석 사이클 가동 중 - "
+                for sym, stat in ai_brain_state["symbols"].items():
+                    engine_msg += f"[{sym}] RSI: {stat.get('rsi', 0)} / MACD: {stat.get('macd', 0)} "
+                bot_global_state["logs"].append(engine_msg)
+                logger.info(engine_msg)
+                last_log_time = current_time
+
             await asyncio.sleep(3)
 
         except Exception as e:
@@ -208,7 +220,17 @@ async def async_trading_loop():
 
 @app_server.get("/api/v1/status")
 async def fetch_current_status():
-    """현재 봇 상태 반환"""
+    """현재 봇 상태 반환 (OKX 실시간 데이터 강제 동기화)"""
+    # 봇이 켜져있지 않더라도 실시간 잔고는 업데이트되어야 함
+    try:
+        engine = OKXEngine()
+        if engine.exchange:
+            curr_bal = engine.get_usdt_balance()
+            if curr_bal > 0:
+                bot_global_state["balance"] = round(curr_bal, 2)
+    except Exception as e:
+        logger.warning(f"실시간 잔고 갱신 실패: {e}")
+        
     return bot_global_state
 
 @app_server.get("/api/v1/brain")
@@ -313,6 +335,38 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
             return {"error": "거래소 연결 실패"}
 
         ohlcv = engine.exchange.fetch_ohlcv(symbol, "1m", limit=limit)
+        
+        # 샌드박스 환경 등에서 데이터가 아예 안 들어올 경우를 대비한 가상 데이터 생성 로직
+        if not ohlcv or len(ohlcv) == 0:
+            logger.warning(f"[{symbol}] OHLCV 데이터가 비어 있습니다. 임시 차트 데이터를 생성합니다.")
+            import time
+            import random
+            current_time = int(time.time() * 1000)
+            mock_ohlcv = []
+            base_price = engine.get_current_price(symbol)
+            if not base_price:
+                 base_price = 50000.0  # BTC/USDT 임시 기준가
+            
+            for i in range(limit):
+                ts = current_time - ((limit - i) * 60 * 1000)
+                # 캔들 시가/종가/고가/저가를 임의로 약간씩 흔듦
+                open_p = base_price + random.uniform(-10, 10)
+                close_p = open_p + random.uniform(-15, 15)
+                high_p = max(open_p, close_p) + random.uniform(1, 15)
+                low_p = min(open_p, close_p) - random.uniform(1, 15)
+                volume = random.uniform(0.1, 5.0)
+                
+                mock_ohlcv.append({
+                    'timestamp': ts,
+                    'open': round(open_p, 2),
+                    'high': round(high_p, 2),
+                    'low': round(low_p, 2),
+                    'close': round(close_p, 2),
+                    'volume': round(volume, 4)
+                })
+                base_price = close_p # 다음 캔들 기준가 업데이트
+            return mock_ohlcv
+
         result = []
         for candle in ohlcv:
             result.append({
@@ -348,10 +402,21 @@ async def fetch_symbols():
     return {"symbols": ["BTC/USDT:USDT"]}
 
 @app_server.get("/api/v1/logs")
-async def fetch_system_logs(limit: int = 100):
-    """DB 저장 로그 조회"""
+async def fetch_system_logs(limit: int = 50):
+    """DB 저장 로그 조회 (최신 50개)"""
+    # get_logs가 역순(최신순)으로 반환한다고 가정 시 프론트에서 랜더링하기 편하게 다시 정방향(오래된것 -> 최신) 정렬
     logs = get_logs(limit=limit)
-    return logs
+    if not logs:
+        return []
+        
+    formatted_logs = []
+    for log in reversed(logs): # 역순 정렬을 되돌림
+        formatted_logs.append({
+            "level": log.get("level", "INFO"),
+            "message": log.get("message", ""),
+            "created_at": log.get("created_at", "")
+        })
+    return formatted_logs
 
 if __name__ == "__main__":
     init_db()

@@ -6,9 +6,23 @@ async function syncBotStatus() {
         const response = await fetch(`${API_URL}/status`);
         const data = await response.json();
 
-        // 1. 잔고 업데이트
-        document.getElementById('current-balance').innerHTML = `${data.balance} <span class="text-lg text-slate-400">USDT</span>`;
-        document.getElementById('balance-krw').innerText = `≈ ${(data.balance * 1350).toLocaleString()} 원`;
+        // 1. 잔고 업데이트 (강제 애니메이션 효과)
+        const balanceEl = document.getElementById('current-balance');
+        const krwEl = document.getElementById('balance-krw');
+
+        const newBalanceHTML = `${data.balance} <span class="text-lg text-slate-400">USDT</span>`;
+        if (balanceEl.innerHTML !== newBalanceHTML) {
+            balanceEl.innerHTML = newBalanceHTML;
+            // 값 변경 시 애니메이션 클래스 토글 (깜빡임 효과)
+            balanceEl.classList.remove('text-white');
+            balanceEl.classList.add('text-green-300');
+            setTimeout(() => {
+                balanceEl.classList.remove('text-green-300');
+                balanceEl.classList.add('text-white');
+            }, 300);
+
+            krwEl.innerText = `≈ ${(data.balance * 1350).toLocaleString()} 원`;
+        }
 
         // 2. 포지션 업데이트 (첫 번째 심볼 기준, 다중 심볼은 별도 패널에서 표시)
         const symbols = data.symbols || {};
@@ -26,10 +40,20 @@ async function syncBotStatus() {
             document.getElementById('pos-entry').innerText = `$${parseFloat(symbolData.entry_price).toLocaleString()}`;
             if (symbolData.current_price) document.getElementById('pos-current').innerText = `$${parseFloat(symbolData.current_price).toLocaleString()}`;
 
+            // 실시간 수익률 (색상 동적 변경 및 강제 갱신)
             const roiEl = document.getElementById('pos-roi');
             const roiValue = parseFloat(symbolData.unrealized_pnl_percent || 0).toFixed(2);
-            roiEl.innerText = roiValue > 0 ? `+${roiValue}%` : `${roiValue}%`;
-            roiEl.className = roiValue > 0 ? 'text-3xl font-black text-green-400' : (roiValue < 0 ? 'text-3xl font-black text-red-400' : 'text-3xl font-black text-gray-400');
+            const newRoiText = roiValue > 0 ? `+${roiValue}%` : `${roiValue}%`;
+
+            if (roiEl.innerText !== newRoiText) {
+                roiEl.innerText = newRoiText;
+                roiEl.className = roiValue > 0 ? 'text-3xl font-black text-green-400 transition-colors' : (roiValue < 0 ? 'text-3xl font-black text-red-400 transition-colors' : 'text-3xl font-black text-gray-400 transition-colors');
+                // 폰트 크기를 잠깐 키웠다 줄이는 애니메이션 효과
+                roiEl.style.transform = 'scale(1.1)';
+                setTimeout(() => {
+                    roiEl.style.transform = 'scale(1.0)';
+                }, 200);
+            }
 
             if (symbolData.take_profit_price) document.getElementById('pos-tp').innerText = `$${parseFloat(symbolData.take_profit_price).toLocaleString()}`;
             if (symbolData.stop_loss_price) document.getElementById('pos-sl').innerText = `$${parseFloat(symbolData.stop_loss_price).toLocaleString()}`;
@@ -186,19 +210,32 @@ async function syncChart() {
         const response = await fetch(`${API_URL}/ohlcv?symbol=BTC/USDT:USDT&limit=50`);
         const ohlcv = await response.json();
 
+        // 에러 객체가 반환된 경우 처리
+        if (ohlcv.error) {
+            console.error("차트 데이터 에러(서버):", ohlcv.error);
+            return;
+        }
+
+        // 배열이 아니거나 비어있는 경우 처리
+        if (!Array.isArray(ohlcv) || ohlcv.length === 0) {
+            console.warn("차트 데이터가 비어 있습니다 (0건 수신)");
+            return;
+        }
+
         const candleSeries = chart.series()[0];
         const data = ohlcv.map(candle => ({
             time: Math.floor(candle.timestamp / 1000),
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
+            open: parseFloat(candle.open),
+            high: parseFloat(candle.high),
+            low: parseFloat(candle.low),
+            close: parseFloat(candle.close),
         }));
 
         candleSeries.setData(data);
         chart.timeScale().fitContent();
+        console.log(`[차트 업데이트] ${data.length}개 캔들 동기화 성공`);
     } catch (error) {
-        console.warn("차트 동기화 실패:", error);
+        console.error("차트 통신(fetch) / 동기화 실패:", error);
     }
 }
 
@@ -316,8 +353,57 @@ async function updateBrain() {
     }
 }
 
+let lastLogTimestamp = '';
+
+async function updateLogs() {
+    try {
+        const response = await fetch(`${API_URL}/logs?limit=50`);
+        const logs = await response.json();
+
+        const logContainer = document.getElementById('system-log-terminal');
+        let newLogsAdded = false;
+
+        logs.forEach(log => {
+            // 시간순 정렬된 상태에서 최신 타임스탬프보다 이전의 로그는 필터링
+            if (!lastLogTimestamp || log.created_at > lastLogTimestamp) {
+                const logDiv = document.createElement('div');
+
+                // 로그 레벨 및 내용에 따른 색상 처리
+                const msg = log.message || '';
+                if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
+                    logDiv.className = 'text-red-400';
+                } else if (msg.includes('[봇]') || msg.includes('[진입 성공]') || msg.includes('청산')) {
+                    logDiv.className = 'text-green-400';
+                } else {
+                    logDiv.className = 'text-gray-300';
+                }
+
+                // 타임스탬프 포맷팅 가시성 향상
+                const timeStr = log.created_at ? `[${log.created_at.replace('T', ' ').substring(0, 19)}]` : '';
+                logDiv.innerText = `${timeStr} ${msg}`;
+
+                logContainer.appendChild(logDiv);
+                lastLogTimestamp = log.created_at; // 마지막 타임스탬프 갱신
+                newLogsAdded = true;
+            }
+        });
+
+        // 새 로그가 추가되었으면 자동 스크롤
+        if (newLogsAdded && logContainer) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+    } catch (error) {
+        console.warn("시스템 로그 동기화 실패:", error);
+    }
+}
+
 function clearLogs() {
     document.getElementById('log-container').innerHTML = '';
+    const sysLogContainer = document.getElementById('system-log-terminal');
+    if (sysLogContainer) {
+        sysLogContainer.innerHTML = '<div class="text-gray-500">System Logs Cleared.</div>';
+    }
 }
 
 // === 초기화 및 setInterval 설정 ===
@@ -335,3 +421,6 @@ setInterval(syncChart, 10000);
 // 30초마다 성과 분석 및 다중 심볼 업데이트
 setInterval(syncStats, 30000);
 setInterval(syncMultiSymbols, 30000);
+
+// 3초마다 시스템 로그 동기화
+setInterval(updateLogs, 3000);

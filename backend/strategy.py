@@ -42,12 +42,16 @@ class TradingStrategy:
         """
         가장 최근 캔들을 분석하여 매수/매도 진입 시그널 판단
         공격적 다중 지표 (Multi-Indicators) 적용
+        반환값: (진입신호, 상태메세지) 형태의 튜플
         """
         if len(df) < 2:
-            return "HOLD"
+            return "HOLD", "데이터 부족 대기"
             
         latest = df.iloc[-1]
         previous = df.iloc[-2]
+        
+        rsi_val = latest['rsi']
+        macd_val = latest['macd']
         
         # [매수(LONG) 타점]: 주가가 볼린저 밴드 하단 터치 또는 이탈 AND MACD 선이 Signal 선을 상향 돌파(골든크로스) AND RSI가 40 이하
         long_bb = latest['close'] <= latest['lower_band']
@@ -55,7 +59,7 @@ class TradingStrategy:
         long_rsi = latest['rsi'] <= 40
         
         if long_bb and long_macd and long_rsi:
-            return "LONG"
+            return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파)"
         
         # [매도(SHORT) 타점]: 주가가 볼린저 밴드 상단 터치 또는 돌파 AND MACD 선이 Signal 선을 하향 돌파(데드크로스) AND RSI가 60 이상
         short_bb = latest['close'] >= latest['upper_band']
@@ -63,9 +67,9 @@ class TradingStrategy:
         short_rsi = latest['rsi'] >= 60
         
         if short_bb and short_macd and short_rsi:
-            return "SHORT"
+            return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파)"
             
-        return "HOLD"
+        return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중"
 
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side):
         """
