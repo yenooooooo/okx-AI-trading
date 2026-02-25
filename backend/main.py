@@ -5,8 +5,8 @@ from strategy import TradingStrategy
 
 # --- 봇 설정 영역 ---
 SYMBOL = "BTC/USDT:USDT"  # 대상 코인 (비트코인 무기한 선물)
-TIMEFRAME = "15m"         # 15분봉 기준 (노이즈를 줄이고 안정적인 추세 파악)
-PAPER_TRADING = True      # True: 실제 주문 X (로그만 출력), False: 실제 주문 실행
+TIMEFRAME = "1m"          # 1분봉 기준 (빠른 단기매매 테스트용)
+PAPER_TRADING = False     # 실제 모의투자 계정으로 주문 실행
 # --------------------
 
 def run_bot():
@@ -61,8 +61,12 @@ def run_bot():
                     print(f" - 진입가: {entry_price} -> 청산가: {current_price}")
                     
                     if not PAPER_TRADING:
-                        # [TODO] 실제 ccxt 시장가 청산 로직 삽입 위치
-                        pass
+                        # 실제 ccxt 시장가 청산 로직
+                        amount = 1 # 테스트용 1계약 고정 청산
+                        if current_position == "LONG":
+                            engine.exchange.create_market_sell_order(SYMBOL, amount)
+                        elif current_position == "SHORT":
+                            engine.exchange.create_market_buy_order(SYMBOL, amount)
                         
                     # 포지션 초기화
                     current_position = None
@@ -79,8 +83,12 @@ def run_bot():
                     print(f"[{'모의' if PAPER_TRADING else '실제'} 신규 진입 포착] 방향: {signal} @ {current_price} USDT")
                     
                     if not PAPER_TRADING:
-                        # [TODO] 실제 ccxt 시장가 진입 로직 삽입 위치
-                        pass
+                        # 실제 ccxt 시장가 진입 로직
+                        amount = 1 # 테스트용 1계약 고정 진입
+                        if signal == "LONG":
+                            engine.exchange.create_market_buy_order(SYMBOL, amount)
+                        elif signal == "SHORT":
+                            engine.exchange.create_market_sell_order(SYMBOL, amount)
                         
                     # 포지션 기록
                     current_position = signal
