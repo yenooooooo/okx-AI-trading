@@ -295,6 +295,8 @@ async function updateConfigSymbols() {
         const symbolsJson = JSON.stringify(symbols);
         const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, { method: 'POST' });
         await response.json();
+        // 심볼 변경 즉시 WebSocket 재구독 (5초 딜레이 없이 바로 새 심볼로 전환)
+        initPriceWebSocket();
     } catch (error) {
         alert('Symbol update failed: ' + error.message);
     }
@@ -475,12 +477,14 @@ async function testOrder() {
 
 // --- WebSocket (0.1s Ultra-low Latency) ---
 let priceWs = null;
+let _wsManualRestart = false; // 수동 재시작 시 onclose 자동 재연결 타이머 중복 방지
 
 function initPriceWebSocket() {
     // OKX Public Demo Trading WebSocket URL
     const wsUrl = "wss://wspap.okx.com:8443/ws/v5/public";
 
     if (priceWs) {
+        _wsManualRestart = true; // onclose에서 5초 타이머 건너뜀
         priceWs.close();
     }
 
@@ -539,6 +543,10 @@ function initPriceWebSocket() {
     };
 
     priceWs.onclose = () => {
+        if (_wsManualRestart) {
+            _wsManualRestart = false; // 플래그 리셋 (수동 재시작이므로 타이머 없이 종료)
+            return;
+        }
         console.log("WebSocket disconnected. Auto-reconnecting in 5 seconds...");
         setTimeout(initPriceWebSocket, 5000); // 5초 후 자동 재시도
     };
