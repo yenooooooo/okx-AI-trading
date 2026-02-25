@@ -120,7 +120,7 @@ class OKXEngine:
     def close_position_and_get_pnl(self, symbol, side, amount):
         """
         포지션 시장가 청산 후 OKX 공식 실현 수익(Gross PnL + Fee = Net PnL) 확보
-        반환: (순수익금_USDT, 수익률_퍼센트, 추가조회성공여부)
+        반환: (순수익금_USDT, 평균체결가)
         """
         if not self.exchange:
             raise Exception("OKX 거래소가 연결되지 않았습니다.")
@@ -135,41 +135,38 @@ class OKXEngine:
         
         # 2. 체결 내역 업데이트 대기 (OKX 매칭 엔진 반영 시간)
         import time
-        time.sleep(1.0)
-        
-        # 3. fetch_my_trades 를 통한 영수증 조회 (수수료 및 funding fee 포함)
-        try:
-            trades = self.exchange.fetch_my_trades(symbol, limit=20)
-            matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
+        import asyncio
+        for _ in range(5): # 최대 5번 재시도 대기
+            time.sleep(1.0)
             
-            if not matching_trades:
-                time.sleep(1.5) # 한 번 더 대기
+            try:
                 trades = self.exchange.fetch_my_trades(symbol, limit=20)
                 matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
-
-            if matching_trades:
-                total_gross_pnl = 0.0
-                total_fee = 0.0
-                total_cost = 0.0
                 
-                for t in matching_trades:
-                    # OKX info 객체의 fillPnl 추출
-                    fill_pnl = float(t.get('info', {}).get('fillPnl', 0) or 0)
-                    total_gross_pnl += fill_pnl
+                if matching_trades:
+                    total_gross_pnl = 0.0
+                    total_fee = 0.0
+                    total_cost = 0.0
+                    total_amount = 0.0
                     
-                    # 수수료 추출 (OKX 네이티브 fee는 마이너스 값)
-                    raw_fee = float(t.get('info', {}).get('fee', 0) or 0)
-                    total_fee += raw_fee
-                    
-                    # 진입 가치(원금) 추정용 (cost)
-                    total_cost += t.get('cost', 0)
-                    
-                net_pnl = total_gross_pnl + total_fee
-                # 수익률 계산: CCXT cost는 레버리지가 적용된 총 가치일 수 있음
-                # OKX의 PnL 계산에 맞춰, 봇 엔진 루틴에서 수익률 재계산을 위한 기본값만 넘김
-                return net_pnl, 0.0, True
-        except Exception as e:
-            print(f"[경고] 청산 영수증(PnL) 조회 실패: {e}")
-            
-        # 영수증 조회가 실패하더라도 청산 자체는 성공했으니 None 반환
-        return None, None, False
+                    for t in matching_trades:
+                        fill_pnl = float(t.get('info', {}).get('fillPnl', 0) or 0)
+                        total_gross_pnl += fill_pnl
+                        
+                        raw_fee = float(t.get('info', {}).get('fee', 0) or 0)
+                        total_fee += raw_fee
+                        
+                        total_cost += t.get('cost', 0) # CCXT cost는 보통 price * amount
+                        total_amount += t.get('amount', 0)
+                        
+                    net_pnl = total_gross_pnl + total_fee
+                    avg_fill_price = total_cost / total_amount if total_amount > 0 else 0
+                    if avg_fill_price == 0:
+                        avg_fill_price = float(matching_trades[0].get('price', 0))
+                        
+                    return net_pnl, avg_fill_price
+            except Exception as e:
+                print(f"[경고] 청산 영수증(PnL) 조회 시도 중 예외: {e}")
+                
+        # 5번 시도(5초) 후에도 못찾으면 예외 발생시켜 fallback 방지
+        raise Exception("청산 체결 영수증(Realized PnL) 확보 실패 - 시스템 정합성을 위해 재조회 필요")
