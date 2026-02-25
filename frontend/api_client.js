@@ -332,16 +332,7 @@ function initChart() {
         timeScale: {
             timeVisible: true,
             secondsVisible: false,
-            borderColor: '#30363d',
-            localization: {
-                timeFormatter: (timestamp) => {
-                    const date = new Date(timestamp * 1000);
-                    const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
-                    const h = String(kst.getUTCHours()).padStart(2, '0');
-                    const m = String(kst.getUTCMinutes()).padStart(2, '0');
-                    return `${h}:${m}`;
-                }
-            }
+            borderColor: '#30363d'
         },
         rightPriceScale: {
             borderColor: '#30363d'
@@ -379,7 +370,7 @@ async function syncChart() {
         if (!candleSeries) return;
 
         const data = ohlcv.map(candle => ({
-            time: Math.floor(candle.timestamp / 1000),
+            time: Math.floor(candle.timestamp / 1000) + (9 * 60 * 60), // KST (+9h) 물리적 시프팅
             open: parseFloat(candle.open),
             high: parseFloat(candle.high),
             low: parseFloat(candle.low),
