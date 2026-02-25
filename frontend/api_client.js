@@ -1,5 +1,6 @@
 const API_URL = `/api/v1`;
 let chart = null;
+let candleSeries = null;
 
 async function syncBotStatus() {
     try {
@@ -199,7 +200,7 @@ function initChart() {
         },
     });
 
-    const candleSeries = chart.addCandlestickSeries();
+    candleSeries = chart.addCandlestickSeries();
     chart.timeScale().fitContent();
 }
 
@@ -222,7 +223,11 @@ async function syncChart() {
             return;
         }
 
-        const candleSeries = chart.series()[0];
+        if (!candleSeries) {
+            console.error("차트 캔들 시리즈가 초기화되지 않았습니다.");
+            return;
+        }
+
         const data = ohlcv.map(candle => ({
             time: Math.floor(candle.timestamp / 1000),
             open: parseFloat(candle.open),
@@ -360,7 +365,13 @@ async function updateLogs() {
         const response = await fetch(`${API_URL}/logs?limit=50`);
         const logs = await response.json();
 
-        const logContainer = document.getElementById('system-log-terminal');
+        let logContainer = document.getElementById('system-log-terminal');
+
+        // 터미널 엘리먼트가 없으면 조용히 종료 (HTML에 복구될 때까지 대기)
+        if (!logContainer) {
+            return;
+        }
+
         let newLogsAdded = false;
 
         logs.forEach(log => {

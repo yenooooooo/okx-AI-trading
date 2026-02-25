@@ -342,9 +342,9 @@
 
     <!-- 신규 패널 6: 실시간 시스템 로그 터미널 -->
     <section
-        class="mt-6 flex-grow bg-[#000000] rounded-2xl border border-gray-700 shadow-xl flex flex-col overflow-hidden h-64">
+        class="mt-6 flex-grow bg-[#000000] rounded-2xl border border-gray-700 shadow-xl flex flex-col overflow-hidden h-64 sticky bottom-0 z-50">
         <div
-            class="bg-gray-900 px-4 py-2 border-b border-gray-700 text-sm text-gray-400 font-medium flex justify-between items-center">
+            class="bg-gray-900 px-4 py-2 border-b border-gray-700 text-sm text-gray-400 font-medium flex justify-between items-center z-10">
             <span class="flex items-center gap-2">
                 <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -355,7 +355,8 @@
             <button onclick="clearLogs()"
                 class="text-xs text-gray-500 hover:text-white transition-colors">Clear</button>
         </div>
-        <div id="system-log-terminal" class="p-4 overflow-y-auto font-mono text-sm space-y-1 h-full custom-scrollbar">
+        <div id="system-log-terminal"
+            class="p-4 overflow-y-auto font-mono text-sm space-y-1 h-full custom-scrollbar flex flex-col z-0">
             <div class="text-gray-500">System initialized. Waiting for connection...</div>
         </div>
     </section>
