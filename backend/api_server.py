@@ -74,7 +74,48 @@ def _apply_position_ws_update(pos: dict):
         return
     pos_qty = float(pos.get('pos', 0) or 0)
     if pos_qty == 0:
-        # OKX가 포지션 종료를 알림 → 즉시 NONE 반영 (REST 1초 폴링 대기 불필요)
+        # OKX가 포지션 종료를 알림 → DB 저장 + 텔레그램 알림 후 상태 초기화
+        prev_position = bot_global_state["symbols"][symbol].get("position", "NONE")
+        prev_entry = bot_global_state["symbols"][symbol].get("entry_price", 0.0)
+        prev_contracts = bot_global_state["symbols"][symbol].get("contracts", 1)
+
+        if prev_position != "NONE" and prev_entry > 0:
+            # 수동 청산: exit_price는 OKX가 보낸 last 또는 avgPx fallback
+            exit_price = float(pos.get('last', 0) or 0)
+            if exit_price == 0:
+                exit_price = float(pos.get('avgPx', prev_entry) or prev_entry)
+
+            if prev_position == "LONG":
+                pnl_pct = (exit_price - prev_entry) / prev_entry * 100
+            else:
+                pnl_pct = (prev_entry - exit_price) / prev_entry * 100
+
+            try:
+                contract_size = float(_engine.exchange.market(symbol).get('contractSize', 0.01))
+            except Exception:
+                contract_size = 0.01
+            if prev_position == "LONG":
+                pnl_amount = (exit_price - prev_entry) * prev_contracts * contract_size
+            else:
+                pnl_amount = (prev_entry - exit_price) * prev_contracts * contract_size
+
+            save_trade(
+                symbol=symbol,
+                position_type=prev_position,
+                entry_price=prev_entry,
+                exit_price=exit_price,
+                pnl=round(pnl_amount, 4),
+                pnl_percent=round(pnl_pct, 4),
+                amount=prev_contracts,
+                exit_reason="MANUAL_CLOSE",
+                leverage=int(bot_global_state["symbols"][symbol].get("leverage", 1))
+            )
+            emoji = "✅" if pnl_pct >= 0 else "🔴"
+            msg = f"{emoji} [수동청산] {symbol} {prev_position} @ {exit_price:.2f} ({pnl_pct:+.2f}%)"
+            bot_global_state["logs"].append(msg)
+            logger.info(msg)
+            send_telegram_sync(msg)
+
         bot_global_state["symbols"][symbol]["position"] = "NONE"
         bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = 0.0
         bot_global_state["symbols"][symbol]["entry_price"] = 0.0
