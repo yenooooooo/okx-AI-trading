@@ -128,29 +128,21 @@ async function syncBotStatus() {
             updateNumberText('pos-tp', symbolData.take_profit_price);
             updateNumberText('pos-sl', symbolData.stop_loss_price);
 
-            // 레버리지값을 pos-entry의 data-leverage 속성에 심어서 웹소켓 ROE 계산 시 사용
-            const entryDomEl = document.getElementById('pos-entry');
-            if (entryDomEl) {
-                entryDomEl.dataset.leverage = symbolData.leverage || 1;
-            }
+            // OKX 프라이빗 WS → 백엔드 → REST 경로로 항상 정확한 PnL 반영
+            const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
+            updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
+            updateNumberText('pos-current', symbolData.current_price);
 
-            // 웹소켓이 아직 연결되지 않았을 때만 Fallback으로 렌더링
-            if (!priceWs || priceWs.readyState !== WebSocket.OPEN) {
-                const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
-                updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
-
-                const roiEl = document.getElementById('pos-roi');
-                if (pnl > 0) {
-                    roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
-                    posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
-                } else if (pnl < 0) {
-                    roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
-                    posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
-                } else {
-                    roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
-                    posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
-                }
-                updateNumberText('pos-current', symbolData.current_price);
+            const roiEl = document.getElementById('pos-roi');
+            if (pnl > 0) {
+                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
+                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
+            } else if (pnl < 0) {
+                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
+                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
+            } else {
+                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
+                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
             }
         }
 
@@ -535,47 +527,7 @@ function initPriceWebSocket() {
                     candleSeries.update(lastCandleData);
                 }
 
-                // 3. Active Deployment 실시간 라이브 PnL (OKX 선물 ROE 공식)
-                const posActive = document.getElementById('position-active');
-                if (posActive && !posActive.classList.contains('hidden')) {
-                    const posCard = document.getElementById('active-position-card');
-                    const posType = document.getElementById('pos-type')?.textContent?.trim();
-                    const entryPriceEl = document.getElementById('pos-entry');
-
-                    if (entryPriceEl && entryPriceEl.dataset.val) {
-                        const entryPrice = parseFloat(entryPriceEl.dataset.val);
-                        // 레버리지는 서버에서 dataset.leverage로 심어둔 값 사용 (없으면 1)
-                        const leverage = parseFloat(entryPriceEl.dataset.leverage || '1');
-
-                        if (entryPrice > 0) {
-                            let pnl = 0;
-                            // 선물 ROE 공식: ((Mark - Entry) / Entry) * 100 * Leverage
-                            if (posType === 'LONG') {
-                                pnl = ((price - entryPrice) / entryPrice) * 100 * leverage;
-                            } else if (posType === 'SHORT') {
-                                pnl = ((entryPrice - price) / entryPrice) * 100 * leverage;
-                            }
-                            pnl = Math.round(pnl * 100) / 100;
-
-                            // 현재가 및 ROE 렌더링
-                            updateNumberText('pos-current', price);
-                            updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
-
-                            // 카드 Glow 이펙트 실시간 연동
-                            const roiEl = document.getElementById('pos-roi');
-                            if (pnl > 0) {
-                                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
-                                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
-                            } else if (pnl < 0) {
-                                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
-                                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
-                            } else {
-                                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
-                                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
-                            }
-                        }
-                    }
-                }
+                // 3. pos-current 마크가격 표시 (pos-roi는 백엔드 OKX 정확값으로 처리)
             }
         }
     };

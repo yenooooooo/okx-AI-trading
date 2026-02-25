@@ -1,5 +1,9 @@
 import asyncio
 import json
+import hmac
+import hashlib
+import base64
+import time as _time
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -52,16 +56,88 @@ trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
 _engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
 
+def _generate_ws_sign(secret_key: str, timestamp: str) -> str:
+    """OKX WebSocket 인증 서명 생성 (HMAC-SHA256 Base64)"""
+    message = timestamp + "GET" + "/users/self/verify"
+    mac = hmac.new(bytes(secret_key, 'utf-8'), bytes(message, 'utf-8'), digestmod=hashlib.sha256)
+    return base64.b64encode(mac.digest()).decode('utf-8')
+
+def _apply_position_ws_update(pos: dict):
+    """OKX positions 채널 데이터 → 글로벌 상태 반영 (OKX 정확 PnL)"""
+    inst_id = pos.get('instId', '')
+    parts = inst_id.split('-')
+    if len(parts) == 3 and parts[2] == 'SWAP':
+        symbol = f"{parts[0]}/{parts[1]}:{parts[1]}"
+    else:
+        return
+    if symbol not in bot_global_state["symbols"]:
+        return
+    pos_qty = float(pos.get('pos', 0) or 0)
+    if pos_qty != 0:
+        upl_ratio = float(pos.get('uplRatio', 0) or 0)
+        upl = float(pos.get('upl', 0) or 0)
+        mark_px = float(pos.get('markPx', 0) or 0)
+        avg_px = float(pos.get('avgPx', 0) or 0)
+        bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = round(upl_ratio * 100, 4)
+        bot_global_state["symbols"][symbol]["unrealized_pnl"] = round(upl, 4)
+        if mark_px > 0:
+            bot_global_state["symbols"][symbol]["current_price"] = mark_px
+        if avg_px > 0 and bot_global_state["symbols"][symbol].get("entry_price", 0) == 0:
+            bot_global_state["symbols"][symbol]["entry_price"] = avg_px
+
+async def private_ws_loop():
+    """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
+    import websockets
+    WS_URL = "wss://wspap.okx.com:8443/ws/v5/private"  # 데모 환경
+    while True:
+        try:
+            if not _engine or not _engine.exchange:
+                await asyncio.sleep(5)
+                continue
+            async with websockets.connect(WS_URL, ping_interval=20) as ws:
+                # 인증
+                timestamp = str(int(_time.time()))
+                sign = _generate_ws_sign(_engine.secret_key, timestamp)
+                await ws.send(json.dumps({
+                    "op": "login",
+                    "args": [{"apiKey": _engine.api_key, "passphrase": _engine.password,
+                               "timestamp": timestamp, "sign": sign}]
+                }))
+                login_resp = await asyncio.wait_for(ws.recv(), timeout=10)
+                login_data = json.loads(login_resp)
+                if login_data.get('event') != 'login':
+                    logger.error(f"Private WS 로그인 실패: {login_resp}")
+                    await asyncio.sleep(5)
+                    continue
+                logger.info("Private WebSocket 로그인 성공 - positions 채널 구독")
+                await ws.send(json.dumps({
+                    "op": "subscribe",
+                    "args": [{"channel": "positions", "instType": "SWAP"}]
+                }))
+                async for message in ws:
+                    try:
+                        data = json.loads(message)
+                        if data.get('arg', {}).get('channel') == 'positions':
+                            for pos in data.get('data', []):
+                                _apply_position_ws_update(pos)
+                    except Exception as parse_err:
+                        logger.warning(f"Private WS 메시지 처리 오류: {parse_err}")
+        except Exception as e:
+            logger.warning(f"Private WS 연결 끊김, 5초 후 재연결: {e}")
+            await asyncio.sleep(5)
+
 @app_server.on_event("startup")
 async def startup_event():
-    """서버 시작 시 OKXEngine 1회만 초기화 (load_markets 블로킹 방지)"""
+    """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
     global _engine
     init_db()
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
     loop = asyncio.get_event_loop()
     _engine = await loop.run_in_executor(None, OKXEngine)
     if _engine and _engine.exchange:
-        logger.info("OKXEngine 싱글톤 초기화 완료 - 모든 엔드포인트 공유 시작")
+        logger.info("OKXEngine 싱글톤 초기화 완료")
+        asyncio.create_task(private_ws_loop())  # OKX 프라이빗 WS 시작
+        logger.info("Private WebSocket 태스크 시작")
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
