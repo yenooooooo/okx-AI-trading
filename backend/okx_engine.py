@@ -81,12 +81,16 @@ class OKXEngine:
             return 0.0
 
     def get_current_price(self, symbol="BTC/USDT:USDT"):
-        """현재가 조회"""
+        """현재가 조회 - Mark Price 우선 (선물 손절/익절 정석 기준)"""
         if not self.exchange:
             return None
         try:
             ticker = self.exchange.fetch_ticker(symbol)
-            return float(ticker['last'])
+            # Mark Price 우선 사용 (OKX 선물 청산 기준과 일치)
+            mark_price = ticker.get('info', {}).get('markPx')
+            if mark_price:
+                return float(mark_price)
+            return float(ticker['last'])  # fallback
         except Exception as e:
             print(f"[조회 오류] 현재가 조회 실패: {e}")
             return None

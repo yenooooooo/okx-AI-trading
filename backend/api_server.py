@@ -557,34 +557,34 @@ async def fetch_statistics():
     trades = get_trades(limit=1000)
 
     total_trades = len(trades)
-    win_trades = len([t for t in trades if t['pnl_percent'] and t['pnl_percent'] > 0])
+    # None 안전 처리 (DB에 NULL 저장된 경우 TypeError 방지)
+    win_trades = len([t for t in trades if (t.get('pnl_percent') or 0) > 0])
     win_rate = (win_trades / total_trades * 100) if total_trades > 0 else 0
 
-    total_pnl_percent = sum([t.get('pnl_percent', 0) for t in trades])
+    total_pnl_percent = sum([(t.get('pnl_percent') or 0) for t in trades])
 
     # Max Drawdown 계산
     max_drawdown = 0
     if trades:
-        initial_balance = 100000  # 임시값
+        initial_balance = 100000
         running_balance = initial_balance
         running_max = initial_balance
         for trade in trades:
-            pnl = trade.get('pnl', 0)
+            pnl = trade.get('pnl') or 0
             running_balance += pnl
             running_max = max(running_max, running_balance)
             drawdown = (running_max - running_balance) / running_max if running_max > 0 else 0
             max_drawdown = max(max_drawdown, drawdown)
 
-    # Sharpe Ratio 계산 (간단한 버전)
+    # Sharpe Ratio 계산
     sharpe_ratio = 0
     if total_trades > 1:
-        pnl_percent_list = [t.get('pnl_percent', 0) for t in trades]
-        if pnl_percent_list:
-            import statistics
-            mean_pnl = statistics.mean(pnl_percent_list)
-            std_pnl = statistics.stdev(pnl_percent_list) if len(pnl_percent_list) > 1 else 1
-            if std_pnl > 0:
-                sharpe_ratio = mean_pnl / std_pnl
+        import statistics
+        pnl_percent_list = [(t.get('pnl_percent') or 0) for t in trades]
+        mean_pnl = statistics.mean(pnl_percent_list)
+        std_pnl = statistics.stdev(pnl_percent_list) if len(pnl_percent_list) > 1 else 1
+        if std_pnl > 0:
+            sharpe_ratio = mean_pnl / std_pnl
 
     return {
         'total_trades': total_trades,

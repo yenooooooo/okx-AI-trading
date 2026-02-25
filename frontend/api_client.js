@@ -429,7 +429,9 @@ async function syncStats() {
         updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
         updateNumberText('stats-total-pnl', stats.total_pnl_percent || 0, val => `${val.toFixed(2)}%`);
         updateNumberText('stats-max-dd', stats.max_drawdown || 0, val => `${val.toFixed(2)}%`);
-    } catch (e) { }
+    } catch (e) {
+        console.warn("Stats Sync Failed:", e);
+    }
 }
 
 // --- Manual Override ---
@@ -559,7 +561,7 @@ async function initializeApp() {
     // 초기 렌더링 후 타이머 설정
     setInterval(syncBotStatus, 1000);
     setInterval(syncChart, 5000);       // Optimized to 5s
-    setInterval(syncStats, 30000);
+    setInterval(syncStats, 5000);
     setInterval(updateLogs, 3000);
 }
 
