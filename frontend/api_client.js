@@ -332,7 +332,16 @@ function initChart() {
         timeScale: {
             timeVisible: true,
             secondsVisible: false,
-            borderColor: '#30363d'
+            borderColor: '#30363d',
+            localization: {
+                timeFormatter: (timestamp) => {
+                    const date = new Date(timestamp * 1000);
+                    const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+                    const h = String(kst.getUTCHours()).padStart(2, '0');
+                    const m = String(kst.getUTCMinutes()).padStart(2, '0');
+                    return `${h}:${m}`;
+                }
+            }
         },
         rightPriceScale: {
             borderColor: '#30363d'
