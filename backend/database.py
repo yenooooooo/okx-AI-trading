@@ -57,23 +57,24 @@ def init_db():
 
     conn.commit()
 
-    # 기본 설정값 초기화
-    cursor.execute('SELECT COUNT(*) FROM bot_config')
-    if cursor.fetchone()[0] == 0:
-        default_config = {
-            'symbols': json.dumps(['BTC/USDT:USDT']),
-            'risk_per_trade': '0.01',
-            'hard_stop_loss_rate': '0.02',
-            'trailing_stop_activation': '0.03',
-            'trailing_stop_rate': '0.01',
-            'daily_max_loss_rate': '0.05',
-            'timeframe': '1m',
-            'leverage': '1',
-            'telegram_enabled': 'false'
-        }
-        for key, value in default_config.items():
-            cursor.execute('INSERT INTO bot_config (key, value) VALUES (?, ?)', (key, value))
-        conn.commit()
+    # 기본 설정값 초기화 (INSERT OR IGNORE: 기존 값 유지, 신규 키만 추가)
+    default_config = {
+        'symbols': json.dumps(['BTC/USDT:USDT']),
+        'risk_per_trade': '0.01',
+        'hard_stop_loss_rate': '0.02',
+        'trailing_stop_activation': '0.03',
+        'trailing_stop_rate': '0.01',
+        'daily_max_loss_rate': '0.05',
+        'timeframe': '1m',
+        'leverage': '1',
+        'telegram_enabled': 'false',
+        'manual_override_enabled': 'false',
+        'manual_amount': '1',
+        'manual_leverage': '1',
+    }
+    for key, value in default_config.items():
+        cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))
+    conn.commit()
 
     conn.close()
 

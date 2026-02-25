@@ -256,6 +256,24 @@ async function syncConfig() {
             } else if (key === 'symbols') {
                 const input = document.getElementById('config-symbols');
                 if (input && Array.isArray(val)) input.value = val.join(', ');
+            } else if (key === 'manual_override_enabled') {
+                const toggle = document.getElementById('manual-override-toggle');
+                const panel = document.getElementById('manual-override-panel');
+                const status = document.getElementById('override-status');
+                const enabled = val === true || val === 'true';
+                if (toggle) toggle.checked = enabled;
+                if (panel) panel.classList.toggle('hidden', !enabled);
+                if (status) status.textContent = enabled ? '활성 — 아래 설정값으로 자동매매' : '해제 — 잔고 비율 자동 계산';
+            } else if (key === 'manual_amount') {
+                const input = document.getElementById('manual-amount');
+                const display = document.getElementById('manual-amount-display');
+                if (input) input.value = val;
+                if (display) display.textContent = val;
+            } else if (key === 'manual_leverage') {
+                const input = document.getElementById('manual-leverage');
+                const display = document.getElementById('manual-lev-display');
+                if (input) input.value = val;
+                if (display) display.textContent = val + 'x';
             }
         }
     } catch (error) {
@@ -420,6 +438,31 @@ async function syncStats() {
         updateNumberText('stats-total-pnl', stats.total_pnl_percent || 0, val => `${val.toFixed(2)}%`);
         updateNumberText('stats-max-dd', stats.max_drawdown || 0, val => `${val.toFixed(2)}%`);
     } catch (e) { }
+}
+
+// --- Manual Override ---
+async function toggleManualOverride() {
+    const enabled = document.getElementById('manual-override-toggle').checked;
+    const panel = document.getElementById('manual-override-panel');
+    const status = document.getElementById('override-status');
+    if (panel) panel.classList.toggle('hidden', !enabled);
+    if (status) status.textContent = enabled ? '활성 — 아래 설정값으로 자동매매' : '해제 — 잔고 비율 자동 계산';
+    await fetch(`${API_URL}/config?key=manual_override_enabled&value=${enabled}`, { method: 'POST' });
+}
+
+async function saveManualOverride() {
+    const amount = document.getElementById('manual-amount').value;
+    const leverage = document.getElementById('manual-leverage').value;
+    await Promise.all([
+        fetch(`${API_URL}/config?key=manual_amount&value=${encodeURIComponent(amount)}`, { method: 'POST' }),
+        fetch(`${API_URL}/config?key=manual_leverage&value=${encodeURIComponent(leverage)}`, { method: 'POST' })
+    ]);
+    const btn = document.querySelector('[onclick="saveManualOverride()"]');
+    if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = '✓ SAVED!';
+        setTimeout(() => btn.textContent = orig, 1500);
+    }
 }
 
 // --- Test Order Function ---

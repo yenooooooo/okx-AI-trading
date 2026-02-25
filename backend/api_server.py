@@ -222,18 +222,36 @@ async def async_trading_loop():
                             logger.info(msg)
 
                             try:
-                                # 시장가 주문 (임시 1계약)
-                                amount = 1
-                                if signal == "LONG":
-                                    engine_api.exchange.create_market_buy_order(symbol, amount)
+                                # 수동 오버라이드 or 동적 포지션 사이징
+                                manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
+                                if manual_override:
+                                    trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
+                                    trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
                                 else:
-                                    engine_api.exchange.create_market_sell_order(symbol, amount)
+                                    risk_rate = float(get_config('risk_per_trade') or 0.01)
+                                    trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
+                                    size_btc = strategy_instance.calculate_position_size(curr_bal, risk_rate, current_price, trade_leverage)
+                                    try:
+                                        contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                    except Exception:
+                                        contract_size = 0.01
+                                    trade_amount = max(1, round(size_btc / contract_size))
+                                # 레버리지 거래소 적용
+                                try:
+                                    engine_api.exchange.set_leverage(trade_leverage, symbol)
+                                except Exception as lev_err:
+                                    logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
+                                if signal == "LONG":
+                                    engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                                else:
+                                    engine_api.exchange.create_market_sell_order(symbol, trade_amount)
 
                                 # 포지션 상태 업데이트
                                 bot_global_state["symbols"][symbol]["position"] = signal
                                 bot_global_state["symbols"][symbol]["entry_price"] = current_price
                                 bot_global_state["symbols"][symbol]["highest_price"] = current_price
                                 bot_global_state["symbols"][symbol]["lowest_price"] = current_price
+                                bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
                                 # TP/SL 가격 계산 (전략 파라미터 기반)
                                 sl_rate = strategy_instance.hard_stop_loss_rate
                                 tp_rate = strategy_instance.trailing_stop_activation
@@ -306,13 +324,35 @@ async def execute_test_order():
         if not engine_api or not engine_api.exchange:
             return {"error": "OKX 거래소 인스턴스가 연결되지 않았습니다."}
             
-        amount = 1 # 테스트 수량
+        # 수동 오버라이드 or 동적 포지션 사이징
+        manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
+        if manual_override:
+            trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
+            trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
+        else:
+            risk_rate = float(get_config('risk_per_trade') or 0.01)
+            trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
+            current_price_now = engine_api.get_current_price(symbol) or 1
+            curr_bal_now = engine_api.get_usdt_balance()
+            strategy_tmp = TradingStrategy(initial_seed=75.0)
+            size_btc = strategy_tmp.calculate_position_size(curr_bal_now, risk_rate, current_price_now, trade_leverage)
+            try:
+                contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+            except Exception:
+                contract_size = 0.01
+            trade_amount = max(1, round(size_btc / contract_size))
+        # 레버리지 거래소 적용
+        try:
+            engine_api.exchange.set_leverage(trade_leverage, symbol)
+        except Exception as lev_err:
+            logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
+
         try:
             # 시장가 매수
-            engine_api.exchange.create_market_buy_order(symbol, amount)
+            engine_api.exchange.create_market_buy_order(symbol, trade_amount)
             
             # 테스트 진입 로그 기록
-            test_msg = f"[{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {amount})"
+            test_msg = f"[{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
             bot_global_state["logs"].append(test_msg)
             logger.info(test_msg)
             send_telegram_sync(test_msg)

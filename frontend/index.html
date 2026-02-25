@@ -207,6 +207,46 @@
                         [테스트 진입 (Test Order)]
                     </button>
                 </div>
+
+                <!-- Manual Override -->
+                <div class="mt-5 border-t border-navy-border pt-5">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-xs text-gray-400 uppercase tracking-wide">수동 주문 오버라이드</span>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="manual-override-toggle" class="sr-only peer" onchange="toggleManualOverride()">
+                            <div class="w-9 h-5 bg-navy-900 border border-navy-border rounded-full peer peer-checked:border-neon-green after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4 peer-checked:after:bg-neon-green"></div>
+                        </label>
+                    </div>
+                    <p id="override-status" class="text-[10px] font-mono text-gray-500 mb-3">해제 — 잔고 비율 자동 계산</p>
+
+                    <div id="manual-override-panel" class="hidden space-y-4">
+                        <div>
+                            <div class="flex justify-between text-xs mb-2">
+                                <span class="text-gray-400">계약수 (Contracts)</span>
+                                <span id="manual-amount-display" class="font-mono text-neon-green">1</span>
+                            </div>
+                            <input type="number" id="manual-amount" min="1" max="9999" step="1" value="1"
+                                class="w-full bg-navy-900 border border-navy-border rounded p-2 text-neon-green text-sm font-mono focus:outline-none focus:border-neon-green text-center tracking-widest"
+                                oninput="document.getElementById('manual-amount-display').textContent = this.value">
+                        </div>
+                        <div>
+                            <div class="flex justify-between text-xs mb-2">
+                                <span class="text-gray-400">레버리지</span>
+                                <span id="manual-lev-display" class="font-mono text-neon-green">1x</span>
+                            </div>
+                            <input type="range" id="manual-leverage" min="1" max="100" step="1" value="1"
+                                class="w-full accent-neon-green"
+                                oninput="document.getElementById('manual-lev-display').textContent = this.value + 'x'">
+                            <div class="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+                                <span>1x</span><span>25x</span><span>50x</span><span>100x</span>
+                            </div>
+                        </div>
+                        <button onclick="saveManualOverride()"
+                            class="text-xs w-full py-2 bg-neon-green/20 border border-neon-green hover:bg-neon-green hover:text-navy-900 transition rounded text-neon-green font-mono tracking-widest font-bold">
+                            SAVE &amp; APPLY
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 
