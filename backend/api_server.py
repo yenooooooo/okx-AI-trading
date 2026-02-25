@@ -93,6 +93,9 @@ async def async_trading_loop():
                     latest_upper = df['upper_band'].iloc[-1]
                     latest_lower = df['lower_band'].iloc[-1]
 
+                    # 매매 시그널 및 AI 판단 상태 평가 (포지션 유무와 관계없이 항상 화면 표시를 위해 계산)
+                    signal, analysis_msg = strategy_instance.check_entry_signal(df)
+
                     # 뇌 상태 업데이트
                     if symbol not in ai_brain_state["symbols"]:
                         ai_brain_state["symbols"][symbol] = {}
@@ -103,6 +106,7 @@ async def async_trading_loop():
                         "macd": round(latest_macd, 2) if not pd.isna(latest_macd) else 0.0,
                         "bb_upper": round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0,
                         "bb_lower": round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0,
+                        "decision": analysis_msg  # 프론트엔드 출력을 위해 추가
                     })
 
                     # 포지션 상태 체크 및 리스크 관리
@@ -133,39 +137,51 @@ async def async_trading_loop():
                             )
 
                             if risk_action != "KEEP":
-                                # 포지션 청산
-                                pnl_percent = pnl
-                                pnl_amount = (curr_bal / 100) * pnl_percent if pnl_percent > 0 else 0
+                                # 1. 실제 거래소 청산 API 호출 (트랜잭션 무결성 방어)
+                                try:
+                                    amount = 1  # 임시 수량
+                                    if position_side == "LONG":
+                                        engine_api.exchange.create_market_sell_order(symbol, amount)
+                                    elif position_side == "SHORT":
+                                        engine_api.exchange.create_market_buy_order(symbol, amount)
 
-                                # DB에 거래 기록 저장
-                                save_trade(
-                                    symbol=symbol,
-                                    position_type=position_side,
-                                    entry_price=entry,
-                                    exit_price=current_price,
-                                    pnl=pnl_amount,
-                                    pnl_percent=pnl_percent,
-                                    amount=1.0,  # 임시값
-                                    exit_reason=risk_action,
-                                    leverage=1
-                                )
+                                    # 2. 거래소 API 체결 완벽 성공 시에만 내부 DB 및 상태 업데이트
+                                    pnl_percent = pnl
+                                    pnl_amount = (curr_bal / 100) * pnl_percent if pnl_percent > 0 else 0
 
-                                # 알림
-                                msg = f"[{symbol}] {position_side} 포지션 청산 - 사유: {risk_action}, 수익률: {pnl_percent:.2f}%"
-                                bot_global_state["logs"].append(msg)
-                                logger.info(msg)
-                                send_telegram_sync(msg)
+                                    save_trade(
+                                        symbol=symbol,
+                                        position_type=position_side,
+                                        entry_price=entry,
+                                        exit_price=current_price,
+                                        pnl=pnl_amount,
+                                        pnl_percent=pnl_percent,
+                                        amount=amount,
+                                        exit_reason=risk_action,
+                                        leverage=1
+                                    )
 
-                                # 포지션 초기화
-                                bot_global_state["symbols"][symbol]["position"] = "NONE"
-                                bot_global_state["symbols"][symbol]["entry_price"] = 0.0
-                                bot_global_state["symbols"][symbol]["take_profit_price"] = 0.0
-                                bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
+                                    # 3. 브리핑 강화 알림
+                                    msg = f"[청산 완료] 포지션 종료 및 거래소 체결 확인 (수익률: {pnl_percent:+.2f}%) - 사유: {risk_action}"
+                                    bot_global_state["logs"].append(msg)
+                                    logger.info(msg)
+                                    send_telegram_sync(msg)
+
+                                    # 4. 프론트엔드 포지션 초기화
+                                    bot_global_state["symbols"][symbol]["position"] = "NONE"
+                                    bot_global_state["symbols"][symbol]["entry_price"] = 0.0
+                                    bot_global_state["symbols"][symbol]["take_profit_price"] = 0.0
+                                    bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
+
+                                except Exception as e:
+                                    # API 호출 실패 시 에러만 기록하고 포지션을 유지 (DB 업데이트 안함)
+                                    err_msg = f"[{symbol}] 청산 체결 실패 (망 오류 등): {str(e)} - 다음 루프 재시도"
+                                    bot_global_state["logs"].append(err_msg)
+                                    logger.error(err_msg)
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
-                        signal, analysis_msg = strategy_instance.check_entry_signal(df)
-
+                        # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
                             msg = f"[{symbol}] {signal} 진입 신호 - 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
                             bot_global_state["logs"].append(msg)
