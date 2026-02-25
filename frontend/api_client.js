@@ -202,16 +202,20 @@ async function syncBotStatus() {
                 const macdEl = document.getElementById('brain-macd');
                 macdEl.className = macd > 0 ? 'font-mono flash-target font-bold text-neon-green' : 'font-mono flash-target font-bold text-neon-red';
 
-                // Update MACD Gauges
+                // Update MACD Gauges (동적 스케일: 최근 최대 절대값 기준)
                 const posBar = document.getElementById('macd-bar-pos');
                 const negBar = document.getElementById('macd-bar-neg');
                 if (posBar && negBar) {
+                    const absMaxMacd = Math.max(Math.abs(macd), parseFloat(posBar.dataset.maxMacd || 1));
+                    posBar.dataset.maxMacd = absMaxMacd;
+                    negBar.dataset.maxMacd = absMaxMacd;
+                    const pct = Math.min(100, (Math.abs(macd) / absMaxMacd) * 100);
                     if (macd > 0) {
                         negBar.style.width = '0%';
-                        posBar.style.width = `${Math.min(100, macd * 2)}%`; // scale factor
+                        posBar.style.width = `${pct}%`;
                     } else {
                         posBar.style.width = '0%';
-                        negBar.style.width = `${Math.min(100, Math.abs(macd) * 2)}%`;
+                        negBar.style.width = `${pct}%`;
                     }
                 }
             }
@@ -423,6 +427,7 @@ function clearLogs() {
     const logContainer = document.getElementById('system-log-terminal');
     if (logContainer) {
         logContainer.innerHTML = '<div class="text-gray-500">[system@antigravity ~]$ Buffer cleared.</div>';
+        lastLogTimestamp = ''; // 초기화하여 이후 새 로그가 다시 표시되도록 함
     }
 }
 
@@ -576,6 +581,7 @@ async function initializeApp() {
     setInterval(syncChart, 5000);       // Optimized to 5s
     setInterval(syncStats, 5000);
     setInterval(updateLogs, 3000);
+    setInterval(syncConfig, 30000);     // 외부 설정 변경 자동 반영
 }
 
 // Start

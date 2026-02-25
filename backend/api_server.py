@@ -73,7 +73,12 @@ def _apply_position_ws_update(pos: dict):
     if symbol not in bot_global_state["symbols"]:
         return
     pos_qty = float(pos.get('pos', 0) or 0)
-    if pos_qty != 0:
+    if pos_qty == 0:
+        # OKX가 포지션 종료를 알림 → 즉시 NONE 반영 (REST 1초 폴링 대기 불필요)
+        bot_global_state["symbols"][symbol]["position"] = "NONE"
+        bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = 0.0
+        bot_global_state["symbols"][symbol]["entry_price"] = 0.0
+    else:
         upl_ratio = float(pos.get('uplRatio', 0) or 0)
         upl = float(pos.get('upl', 0) or 0)
         mark_px = float(pos.get('markPx', 0) or 0)
@@ -156,6 +161,7 @@ async def async_trading_loop():
     logger.info("자동매매 루프 시작")
     import time
     last_log_time = 0
+    _circuit_breaker_last_warn = {}  # 서킷 브레이커 로그 쓰로틀 (심볼별 마지막 경고 시각)
 
     while bot_global_state["is_running"]:
         try:
@@ -187,7 +193,7 @@ async def async_trading_loop():
                         }
 
                     # OHLCV 데이터 수집
-                    ohlcv = engine_api.exchange.fetch_ohlcv(symbol, "1m", limit=30)
+                    ohlcv = engine_api.exchange.fetch_ohlcv(symbol, "1m", limit=100)
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     current_price = engine_api.get_current_price(symbol)
 
@@ -296,11 +302,14 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
-                        # 서킷 브레이커: 일일 손실 한도 초과 시 신규 진입 차단
+                        # 서킷 브레이커: 일일 손실 한도 초과 시 신규 진입 차단 (60초에 1회만 로그)
                         if strategy_instance.is_daily_drawdown_exceeded(curr_bal):
-                            cb_msg = f"[{symbol}] ⚠️ 일일 손실 한도 초과 - 신규 진입 차단 (현재 잔고: {curr_bal:.2f} USDT)"
-                            bot_global_state["logs"].append(cb_msg)
-                            logger.warning(cb_msg)
+                            now = time.time()
+                            if now - _circuit_breaker_last_warn.get(symbol, 0) >= 60:
+                                cb_msg = f"[{symbol}] ⚠️ 일일 손실 한도 초과 - 신규 진입 차단 (현재 잔고: {curr_bal:.2f} USDT)"
+                                bot_global_state["logs"].append(cb_msg)
+                                logger.warning(cb_msg)
+                                _circuit_breaker_last_warn[symbol] = now
                             continue
 
                         # signal, analysis_msg는 위에서 이미 평가됨
@@ -362,7 +371,7 @@ async def async_trading_loop():
                                 logger.error(error_msg)
 
                 except Exception as e:
-                    pass  # 일시적 API 에러 무시
+                    logger.warning(f"[{symbol}] 루프 처리 중 오류 (다음 루프 계속): {e}")
 
             # 5초마다 엔진 맥박(Pulse) 로그 출력
             current_time = time.time()
@@ -453,6 +462,7 @@ async def execute_test_order():
             bot_global_state["symbols"][symbol]["entry_price"] = current_price
             bot_global_state["symbols"][symbol]["highest_price"] = current_price
             bot_global_state["symbols"][symbol]["lowest_price"] = current_price
+            bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 정확한 수량 사용
             # TP/SL 가격 자동 계산 (LONG 기준: +3% TP, -2% SL)
             bot_global_state["symbols"][symbol]["take_profit_price"] = round(float(current_price) * 1.03, 2)
             bot_global_state["symbols"][symbol]["stop_loss_price"] = round(float(current_price) * 0.98, 2)
@@ -576,13 +586,16 @@ async def fetch_statistics():
 
     total_pnl_percent = sum([(t.get('pnl_percent') or 0) for t in trades])
 
-    # Max Drawdown 계산
+    # Max Drawdown 계산 (시간 오름차순 정렬 후 누적 계산)
     max_drawdown = 0
     if trades:
-        initial_balance = 100000
+        sorted_trades = list(reversed(trades))  # DESC → 오름차순(과거→최신)으로 정렬
+        # 첫 거래의 entry_price 기반으로 초기 잔고 추정 (하드코딩 제거)
+        first_pnl = sorted_trades[0].get('pnl') or 0
+        initial_balance = max(1.0, abs(first_pnl) * 100 if first_pnl else 100.0)
         running_balance = initial_balance
         running_max = initial_balance
-        for trade in trades:
+        for trade in sorted_trades:
             pnl = trade.get('pnl') or 0
             running_balance += pnl
             running_max = max(running_max, running_balance)
