@@ -7,10 +7,10 @@ class TradingStrategy:
         기본 시드: 100,000원 (환율에 맞춰 USDT로 변환하여 관리될 예정)
         """
         self.initial_seed = initial_seed
-        self.max_daily_loss_rate = 0.05       # 하루 최대 손실 5% 도달 시 매매 전면 중단 (서킷 브레이커)
-        self.hard_stop_loss_rate = 0.02       # 진입가 대비 2% 하락 시 무조건 손절 (파산 원천 차단)
-        self.trailing_stop_activation = 0.03  # 수익 3% 이상 도달 시 트레일링 스탑 활성화
-        self.trailing_stop_rate = 0.01        # 고점 대비 1% 하락 시 익절 처리
+        self.max_daily_loss_rate = 0.50       # [테스트] 원본: 0.05 (5%) → 사실상 서킷 브레이커 해제
+        self.hard_stop_loss_rate = 0.005      # [테스트] 원본: 0.02 (2%) → 0.5% 빠른 손절
+        self.trailing_stop_activation = 0.003 # [테스트] 원본: 0.03 (3%) → 0.3% 수익 시 트레일링 활성화
+        self.trailing_stop_rate = 0.002       # [테스트] 원본: 0.01 (1%) → 0.2% 하락 시 익절
 
     def calculate_indicators(self, df):
         """
@@ -53,20 +53,19 @@ class TradingStrategy:
         rsi_val = latest['rsi']
         macd_val = latest['macd']
         
-        # [매수(LONG) 타점]: 주가가 볼린저 밴드 하단 터치 또는 이탈 AND MACD 선이 Signal 선을 상향 돌파(골든크로스) AND RSI가 40 이하
-        long_bb = latest['close'] <= latest['lower_band']
+        # [테스트 모드] 진입 조건 완화: BB 제거, RSI 범위 확대, MACD 크로스만 유지
+        # 원본 LONG:  BB하단 AND MACD골든크로스 AND RSI<=40
+        # 원본 SHORT: BB상단 AND MACD데드크로스 AND RSI>=60
         long_macd = (latest['macd'] > latest['macd_signal']) and (previous['macd'] <= previous['macd_signal'])
-        long_rsi = latest['rsi'] <= 40
-        
-        if long_bb and long_macd and long_rsi:
+        long_rsi = latest['rsi'] <= 55   # [테스트] 원본: 40
+
+        if long_macd and long_rsi:
             return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파)"
-        
-        # [매도(SHORT) 타점]: 주가가 볼린저 밴드 상단 터치 또는 돌파 AND MACD 선이 Signal 선을 하향 돌파(데드크로스) AND RSI가 60 이상
-        short_bb = latest['close'] >= latest['upper_band']
+
         short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
-        short_rsi = latest['rsi'] >= 60
-        
-        if short_bb and short_macd and short_rsi:
+        short_rsi = latest['rsi'] >= 45  # [테스트] 원본: 60
+
+        if short_macd and short_rsi:
             return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파)"
             
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중"
