@@ -503,6 +503,19 @@ function initPriceWebSocket() {
 
     priceWs = new WebSocket(wsUrl);
 
+    // OKX WebSocket keepalive: 25초마다 ping 전송 (30초 타임아웃 방지)
+    let _wsPingInterval = null;
+    priceWs.addEventListener('open', () => {
+        _wsPingInterval = setInterval(() => {
+            if (priceWs && priceWs.readyState === WebSocket.OPEN) {
+                priceWs.send('ping');
+            } else {
+                clearInterval(_wsPingInterval);
+            }
+        }, 25000);
+    });
+    priceWs.addEventListener('close', () => clearInterval(_wsPingInterval));
+
     priceWs.onopen = async () => {
         // Fetch current symbol to subscribe
         const response = await fetch(`${API_URL}/config`);
