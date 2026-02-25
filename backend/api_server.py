@@ -99,18 +99,19 @@ def _apply_position_ws_update(pos: dict):
 
             # OKX가 계산한 realizedPnl 우선 사용 (레버리지·수수료 포함 정확한 값)
             realized_pnl = float(pos.get('realizedPnl', 0) or 0)
+            leverage = int(bot_global_state["symbols"][symbol].get("leverage", 1))
+            position_value = prev_entry * prev_contracts * contract_size
+            
             if realized_pnl != 0:
                 pnl_amount = realized_pnl
-                position_value = prev_entry * prev_contracts * contract_size
-                pnl_pct = (realized_pnl / position_value * 100) if position_value > 0 else 0
+                pnl_pct = (realized_pnl / (position_value / leverage) * 100) if position_value > 0 and leverage > 0 else 0
             else:
                 # fallback: 가격 차이로 계산
                 if ws_side == "LONG":
-                    pnl_pct = (exit_price - prev_entry) / prev_entry * 100
                     pnl_amount = (exit_price - prev_entry) * prev_contracts * contract_size
                 else:
-                    pnl_pct = (prev_entry - exit_price) / prev_entry * 100
                     pnl_amount = (prev_entry - exit_price) * prev_contracts * contract_size
+                pnl_pct = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 and leverage > 0 else 0
 
             save_trade(
                 symbol=symbol,
@@ -121,10 +122,14 @@ def _apply_position_ws_update(pos: dict):
                 pnl_percent=round(pnl_pct, 4),
                 amount=prev_contracts,
                 exit_reason="MANUAL_CLOSE",
-                leverage=int(bot_global_state["symbols"][symbol].get("leverage", 1))
+                leverage=leverage
             )
             emoji = "✅" if pnl_pct >= 0 else "🔴"
-            msg = f"{emoji} [수동청산] {symbol} {ws_side} @ {exit_price:.2f} ({pnl_pct:+.2f}%)"
+            if realized_pnl != 0:
+                msg = f"{emoji} [수동청산] {symbol} {ws_side} 청산 | 진입 ${prev_entry:.2f} → 청산 ${exit_price:.2f} | 실현 수익금: {pnl_amount:+.4f} USDT | 최종 수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영 완료)"
+            else:
+                msg = f"{emoji} [수동청산] {symbol} {ws_side} 청산 | 진입 ${prev_entry:.2f} → 청산 ${exit_price:.2f} | 예상 수익금: {pnl_amount:+.4f} USDT | 예상 수익률: {pnl_pct:+.2f}%"
+                
             bot_global_state["logs"].append(msg)
             logger.info(msg)
             send_telegram_sync(msg)
@@ -315,30 +320,39 @@ async def async_trading_loop():
                                 try:
                                     # 진입 시 저장한 실제 계약수 사용 (없으면 1 fallback)
                                     amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
-                                    if position_side == "LONG":
-                                        engine_api.exchange.create_market_sell_order(symbol, amount)
-                                    elif position_side == "SHORT":
-                                        engine_api.exchange.create_market_buy_order(symbol, amount)
-
-                                    # 2. 거래소 API 체결 완벽 성공 시에만 내부 DB 및 상태 업데이트
-                                    pnl_percent = pnl
-                                    # 실제 USDT 손익 = (가격 변동) × 계약수 × 계약당 크기
-                                    try:
-                                        contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
-                                    except Exception:
-                                        contract_size = 0.01
-                                    if position_side == "LONG":
-                                        pnl_amount = (current_price - entry) * amount * contract_size
+                                    
+                                    # 1. 실제 거래소 청산 API 호출 및 오피셜 PnL 확보
+                                    net_pnl, fee, success = engine_api.close_position_and_get_pnl(symbol, position_side, amount)
+                                    
+                                    if success and net_pnl is not None:
+                                        pnl_amount = net_pnl
+                                        # 물리적 원금 = (진입가 * 계약수 * 계약단위) / 레버리지
+                                        # 수익률 = (순수익금 / 원금) * 100
+                                        try:
+                                            contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                        except:
+                                            contract_size = 0.01
+                                        position_value = entry * amount * contract_size
+                                        pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
                                     else:
-                                        pnl_amount = (entry - current_price) * amount * contract_size
+                                        # 타임아웃 등으로 영수증을 못 구했을 때의 Fallback (기존 공식)
+                                        pnl_percent = pnl
+                                        try:
+                                            contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                        except:
+                                            contract_size = 0.01
+                                        if position_side == "LONG":
+                                            pnl_amount = (current_price - entry) * amount * contract_size
+                                        else:
+                                            pnl_amount = (entry - current_price) * amount * contract_size
 
                                     save_trade(
                                         symbol=symbol,
                                         position_type=position_side,
                                         entry_price=entry,
                                         exit_price=current_price,
-                                        pnl=pnl_amount,
-                                        pnl_percent=pnl_percent,
+                                        pnl=round(pnl_amount, 4),
+                                        pnl_percent=round(pnl_percent, 4),
                                         amount=amount,
                                         exit_reason=risk_action,
                                         leverage=leverage
@@ -351,7 +365,11 @@ async def async_trading_loop():
                                     }
                                     reason_ko = _exit_reason_ko.get(risk_action, risk_action)
                                     emoji = "✅" if pnl_percent >= 0 else "🔴"
-                                    msg = f"{emoji} [{symbol}] {position_side} 청산 | 진입 ${entry:.2f} → 청산 ${current_price:.2f} | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
+                                    if success and net_pnl is not None:
+                                        msg = f"{emoji} [{symbol}] {position_side} 청산 | 진입 ${entry:.2f} → 청산 ${current_price:.2f} | 실현 수익금: {pnl_amount:+.4f} USDT | 최종 수익률: {pnl_percent:+.2f}% (수수료/펀딩비 반영 완료) | {reason_ko}"
+                                    else:
+                                        msg = f"{emoji} [{symbol}] {position_side} 청산 | 진입 ${entry:.2f} → 청산 ${current_price:.2f} | 예상 수익금: {pnl_amount:+.4f} USDT | 예상 수익률: {pnl_percent:+.2f}% | {reason_ko}"
+                                        
                                     bot_global_state["logs"].append(msg)
                                     logger.info(msg)
                                     send_telegram_sync(msg)
@@ -647,13 +665,13 @@ async def fetch_current_status():
                         except Exception:
                             contract_size = 0.01
 
-                        # OKX ROE와 동일한 공식 (레버리지 포함)
+                        # 예상 PnL (REST Fallback)
                         if prev_pos == "LONG":
-                            diff = (exit_price - prev_entry) / prev_entry
+                            pnl_amount = (exit_price - prev_entry) * prev_contracts * contract_size
                         else:
-                            diff = (prev_entry - exit_price) / prev_entry
-                        pnl_pct = round(diff * 100 * prev_leverage, 2)
-                        pnl_amount = round(diff * prev_entry * prev_contracts * contract_size, 4)
+                            pnl_amount = (prev_entry - exit_price) * prev_contracts * contract_size
+                        position_value = prev_entry * prev_contracts * contract_size
+                        pnl_pct = (pnl_amount / (position_value / prev_leverage) * 100) if position_value > 0 and prev_leverage > 0 else 0
 
                         # 중복 저장 방지: 즉시 entry_price 초기화
                         bot_global_state["symbols"][sym]["entry_price"] = 0.0
@@ -663,14 +681,14 @@ async def fetch_current_status():
                             position_type=prev_pos,
                             entry_price=prev_entry,
                             exit_price=round(exit_price, 2),
-                            pnl=pnl_amount,
-                            pnl_percent=pnl_pct,
+                            pnl=round(pnl_amount, 4),
+                            pnl_percent=round(pnl_pct, 4),
                             amount=prev_contracts,
                             exit_reason="MANUAL_CLOSE",
                             leverage=prev_leverage
                         )
                         emoji = "✅" if pnl_pct >= 0 else "🔴"
-                        msg = f"{emoji} [수동청산] {sym} {prev_pos} @ {exit_price:.2f} ({pnl_pct:+.2f}%)"
+                        msg = f"{emoji} [수동청산 감지] {sym} {prev_pos} | 진입 ${prev_entry:.2f} → 청산 ${exit_price:.2f} | 예상 수익금: {pnl_amount:+.4f} USDT | 예상 수익률: {pnl_pct:+.2f}%"
                         bot_global_state["logs"].append(msg)
                         logger.info(msg)
                         send_telegram_sync(msg)
