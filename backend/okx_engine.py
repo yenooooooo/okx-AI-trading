@@ -54,12 +54,19 @@ class OKXEngine:
             self.exchange = None
 
     def get_usdt_balance(self):
-        """현재 USDT 잔고 조회"""
+        """현재 USDT 잔고 조회 (Funding + Trading 합산)"""
         if not self.exchange:
             return 0.0
         try:
-            balance = self.exchange.fetch_balance()
-            return float(balance.get('USDT', {}).get('free', 0.0))
+            # Trading 계정 잔고 조회
+            trading_balance = self.exchange.fetch_balance({'type': 'trading'})
+            trading_usdt = float(trading_balance.get('USDT', {}).get('free', 0.0))
+            
+            # Funding 계정 잔고 조회
+            funding_balance = self.exchange.fetch_balance({'type': 'funding'})
+            funding_usdt = float(funding_balance.get('USDT', {}).get('free', 0.0))
+            
+            return trading_usdt + funding_usdt
         except Exception as e:
             print(f"[조회 오류] 잔고 조회 실패: {e}")
             return 0.0
