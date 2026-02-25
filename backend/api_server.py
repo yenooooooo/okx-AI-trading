@@ -49,10 +49,11 @@ ai_brain_state = {
 }
 
 trade_history = []
+_trading_task = None  # 중복 루프 방지용 태스크 추적
 
 async def async_trading_loop():
     """다중 심볼 백그라운드 매매 루프"""
-    global bot_global_state, ai_brain_state
+    global bot_global_state, ai_brain_state, _trading_task
 
     engine_api = OKXEngine()
     strategy_instance = TradingStrategy(initial_seed=75.0)
@@ -162,7 +163,7 @@ async def async_trading_loop():
 
                                     # 2. 거래소 API 체결 완벽 성공 시에만 내부 DB 및 상태 업데이트
                                     pnl_percent = pnl
-                                    pnl_amount = (curr_bal / 100) * pnl_percent if pnl_percent > 0 else 0
+                                    pnl_amount = (curr_bal / 100) * pnl_percent
 
                                     save_trade(
                                         symbol=symbol,
@@ -215,6 +216,15 @@ async def async_trading_loop():
                                 bot_global_state["symbols"][symbol]["entry_price"] = current_price
                                 bot_global_state["symbols"][symbol]["highest_price"] = current_price
                                 bot_global_state["symbols"][symbol]["lowest_price"] = current_price
+                                # TP/SL 가격 계산 (전략 파라미터 기반)
+                                sl_rate = strategy_instance.hard_stop_loss_rate
+                                tp_rate = strategy_instance.trailing_stop_activation
+                                if signal == "LONG":
+                                    bot_global_state["symbols"][symbol]["take_profit_price"] = round(current_price * (1 + tp_rate), 2)
+                                    bot_global_state["symbols"][symbol]["stop_loss_price"] = round(current_price * (1 - sl_rate), 2)
+                                else:
+                                    bot_global_state["symbols"][symbol]["take_profit_price"] = round(current_price * (1 - tp_rate), 2)
+                                    bot_global_state["symbols"][symbol]["stop_loss_price"] = round(current_price * (1 + sl_rate), 2)
 
                                 entry_msg = f"[{symbol}] {signal} 진입 성공! (${current_price})"
                                 bot_global_state["logs"].append(entry_msg)
@@ -366,7 +376,7 @@ async def fetch_trades_history():
 @app_server.post("/api/v1/toggle")
 async def toggle_bot_action():
     """봇 시작/중지"""
-    global bot_global_state
+    global bot_global_state, _trading_task
 
     if bot_global_state["is_running"]:
         bot_global_state["is_running"] = False
@@ -380,7 +390,9 @@ async def toggle_bot_action():
         bot_global_state["logs"].append(msg)
         logger.info(msg)
         send_telegram_sync(msg)
-        asyncio.create_task(async_trading_loop())
+        # 중복 태스크 방지: 이전 태스크가 완료된 경우에만 새 태스크 생성
+        if _trading_task is None or _trading_task.done():
+            _trading_task = asyncio.create_task(async_trading_loop())
 
     return {"is_running": bot_global_state["is_running"]}
 

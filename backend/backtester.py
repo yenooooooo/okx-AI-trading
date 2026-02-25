@@ -100,7 +100,7 @@ class Backtester:
 
                 # 포지션 없을 때 - 진입 신호 체크
                 if not position and idx >= 26:  # 지표 계산에 필요한 최소 캔들 수
-                    signal = self.strategy.check_entry_signal(df.iloc[:idx+1])
+                    signal, _ = self.strategy.check_entry_signal(df.iloc[:idx+1])
 
                     if signal in ["LONG", "SHORT"]:
                         position = signal

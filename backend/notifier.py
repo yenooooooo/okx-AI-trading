@@ -40,8 +40,13 @@ async def send_telegram(message: str):
         logger.error(f"Telegram 메시지 전송 실패: {e}")
 
 def send_telegram_sync(message: str):
-    """동기 래퍼 (asyncio.run 필요)"""
+    """동기 래퍼 - 이미 실행 중인 이벤트 루프 감지 후 안전하게 처리"""
     try:
-        asyncio.run(send_telegram(message))
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # FastAPI/uvicorn 루프가 이미 실행 중이면 fire-and-forget으로 예약
+            asyncio.ensure_future(send_telegram(message))
+        else:
+            loop.run_until_complete(send_telegram(message))
     except Exception as e:
         logger.error(f"Telegram 동기 전송 실패: {e}")

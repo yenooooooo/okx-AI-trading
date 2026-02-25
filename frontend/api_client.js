@@ -269,7 +269,7 @@ async function updateConfigValue(key) {
         } else if (key === 'leverage') {
             value = parseInt(document.getElementById('config-leverage').value);
         }
-        const response = await fetch(`${API_URL}/config?key=${key}&value=${value}`, { method: 'POST' });
+        const response = await fetch(`${API_URL}/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`, { method: 'POST' });
         await response.json();
     } catch (error) {
         alert('Config update failed: ' + error.message);
@@ -329,7 +329,7 @@ async function syncChart() {
     try {
         if (!chart) initChart();
 
-        const response = await fetch(`${API_URL}/ohlcv?symbol=BTC/USDT:USDT&limit=60`);
+        const response = await fetch(`${API_URL}/ohlcv?symbol=${encodeURIComponent('BTC/USDT:USDT')}&limit=60`);
         const ohlcv = await response.json();
 
         const overlay = document.getElementById('chart-overlay');
@@ -415,6 +415,7 @@ async function syncStats() {
         updateNumberText('stats-total-trades', stats.total_trades || 0, val => Math.floor(val));
         updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
         updateNumberText('stats-total-pnl', stats.total_pnl_percent || 0, val => `${val.toFixed(2)}%`);
+        updateNumberText('stats-max-dd', stats.max_drawdown || 0, val => `${val.toFixed(2)}%`);
     } catch (e) { }
 }
 
