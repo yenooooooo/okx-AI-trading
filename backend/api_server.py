@@ -356,4 +356,4 @@ async def fetch_system_logs(limit: int = 100):
 if __name__ == "__main__":
     init_db()
     logger.info("API 서버 시작")
-    uvicorn.run("api_server:app_server", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("api_server:app_server", host="0.0.0.0", port=8000, reload=False)
