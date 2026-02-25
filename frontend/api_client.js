@@ -462,8 +462,10 @@ function initPriceWebSocket() {
                 instId: okxSymbol
             }]
         };
-        priceWs.send(JSON.stringify(subscribeMsg));
-        console.log("WebSocket connected. Subscribed strictly to: " + okxSymbol);
+        if (priceWs.readyState === WebSocket.OPEN) {
+            priceWs.send(JSON.stringify(subscribeMsg));
+            console.log("WebSocket connected. Subscribed strictly to: " + okxSymbol);
+        }
     };
 
     priceWs.onmessage = (event) => {
