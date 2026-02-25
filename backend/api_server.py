@@ -344,8 +344,14 @@ async def async_trading_loop():
                                         leverage=leverage
                                     )
 
-                                    # 3. 브리핑 강화 알림
-                                    msg = f"[청산 완료] 포지션 종료 및 거래소 체결 확인 (수익률: {pnl_percent:+.2f}%) - 사유: {risk_action}"
+                                    # 3. 청산 알림 (사유 한글 변환)
+                                    _exit_reason_ko = {
+                                        "STOP_LOSS": "🛑 손절",
+                                        "TRAILING_STOP_EXIT": "✅ 트레일링 익절",
+                                    }
+                                    reason_ko = _exit_reason_ko.get(risk_action, risk_action)
+                                    emoji = "✅" if pnl_percent >= 0 else "🔴"
+                                    msg = f"{emoji} [{symbol}] {position_side} 청산 | 진입 ${entry:.2f} → 청산 ${current_price:.2f} | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
                                     bot_global_state["logs"].append(msg)
                                     logger.info(msg)
                                     send_telegram_sync(msg)
@@ -368,9 +374,10 @@ async def async_trading_loop():
                         if strategy_instance.is_daily_drawdown_exceeded(curr_bal):
                             now = time.time()
                             if now - _circuit_breaker_last_warn.get(symbol, 0) >= 60:
-                                cb_msg = f"[{symbol}] ⚠️ 일일 손실 한도 초과 - 신규 진입 차단 (현재 잔고: {curr_bal:.2f} USDT)"
+                                cb_msg = f"⚠️ [{symbol}] 일일 손실 한도 초과 - 신규 진입 차단 (잔고: {curr_bal:.2f} USDT)"
                                 bot_global_state["logs"].append(cb_msg)
                                 logger.warning(cb_msg)
+                                send_telegram_sync(cb_msg)
                                 _circuit_breaker_last_warn[symbol] = now
                             continue
 
@@ -422,7 +429,8 @@ async def async_trading_loop():
                                     bot_global_state["symbols"][symbol]["take_profit_price"] = round(current_price * (1 - tp_rate), 2)
                                     bot_global_state["symbols"][symbol]["stop_loss_price"] = round(current_price * (1 + sl_rate), 2)
 
-                                entry_msg = f"[{symbol}] {signal} 진입 성공! (${current_price})"
+                                entry_emoji = "📈" if signal == "LONG" else "📉"
+                                entry_msg = f"{entry_emoji} [{symbol}] {signal} 진입 성공! | 가격: ${current_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
                                 bot_global_state["logs"].append(entry_msg)
                                 logger.info(entry_msg)
                                 send_telegram_sync(entry_msg)
@@ -442,7 +450,18 @@ async def async_trading_loop():
                     price = stat.get('price', 0)
                     rsi = stat.get('rsi', 0)
                     macd = stat.get('macd', 0)
-                    engine_msg = f"[감시] {sym} 현재가: {price} | RSI: {rsi} | MACD: {macd} | 매수 타점 대기 중..."
+                    sym_state = bot_global_state["symbols"].get(sym, {})
+                    position = sym_state.get("position", "NONE")
+
+                    if position != "NONE":
+                        entry_price = sym_state.get("entry_price", 0)
+                        pnl_pct = sym_state.get("unrealized_pnl_percent", 0)
+                        pos_emoji = "📈" if position == "LONG" else "📉"
+                        pnl_sign = "+" if pnl_pct >= 0 else ""
+                        engine_msg = f"{pos_emoji} [{sym}] {position} 포지션 유지 중 | 진입가: ${entry_price:.2f} | 현재가: ${price} | 수익률: {pnl_sign}{pnl_pct:.2f}%"
+                    else:
+                        engine_msg = f"[감시] {sym} 현재가: ${price} | RSI: {rsi:.1f} | MACD: {macd:.2f} | 타점 탐색 중..."
+
                     bot_global_state["logs"].append(engine_msg)
                     logger.info(engine_msg)
                 last_log_time = current_time
