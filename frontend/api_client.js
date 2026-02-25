@@ -96,9 +96,11 @@ async function syncBotStatus() {
         const response = await fetch(`${API_URL}/status`);
         const data = await response.json();
 
-        // 1. Balance
-        updateNumberText('current-balance', data.balance);
-        updateNumberText('balance-krw', data.balance * 1350, val => `≈ ${Math.floor(val).toLocaleString()} KRW`);
+        // 1. Balance (REST API 데이터는 웹소켓이 없을 때만 업데이트하여 UI 충돌 방지)
+        if (!priceWs || priceWs.readyState !== WebSocket.OPEN) {
+            updateNumberText('current-balance', data.balance);
+            updateNumberText('balance-krw', data.balance * 1350, val => `≈ ${Math.floor(val).toLocaleString()} KRW`);
+        }
 
         // 2. Position
         const symbols = data.symbols || {};
@@ -119,26 +121,31 @@ async function syncBotStatus() {
             posActive.classList.remove('hidden');
             posActive.classList.add('flex');
 
+            // 웹소켓(priceWs)이 연결되어 있을 때는 REST API 구형 가격/수익률 데이터 표시는 무시.
+            // (단, 포지션 유무, 진입가, 목표가 등 고정데이터는 계속 연동)
             updateText('pos-type', symbolData.position);
-            const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
-            updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
-
-            const roiEl = document.getElementById('pos-roi');
-            if (pnl > 0) {
-                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
-                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
-            } else if (pnl < 0) {
-                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
-                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
-            } else {
-                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
-                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
-            }
-
             updateNumberText('pos-entry', symbolData.entry_price);
-            updateNumberText('pos-current', symbolData.current_price);
             updateNumberText('pos-tp', symbolData.take_profit_price);
             updateNumberText('pos-sl', symbolData.stop_loss_price);
+
+            // 웹소켓이 아직 연결되지 않았을 때만 Fallback으로 렌더링
+            if (!priceWs || priceWs.readyState !== WebSocket.OPEN) {
+                const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
+                updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
+
+                const roiEl = document.getElementById('pos-roi');
+                if (pnl > 0) {
+                    roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
+                    posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
+                } else if (pnl < 0) {
+                    roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
+                    posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
+                } else {
+                    roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
+                    posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
+                }
+                updateNumberText('pos-current', symbolData.current_price);
+            }
         }
 
         // 3. Status Info
@@ -459,7 +466,45 @@ function initPriceWebSocket() {
             const ticker = data.data[0];
             const price = parseFloat(ticker.last);
             if (!isNaN(price)) {
+                // 1. 메인 패널 현재가 초저지연 업데이트
                 updatePriceWithTickFlash(price);
+
+                // 2. Active Deployment 실시간 라이브 PnL 계산 및 업데이트
+                const posActive = document.getElementById('position-active');
+                if (posActive && !posActive.classList.contains('hidden')) {
+                    const posCard = document.getElementById('active-position-card');
+                    const posType = document.getElementById('pos-type').textContent;
+                    const entryPriceEl = document.getElementById('pos-entry');
+
+                    if (entryPriceEl && entryPriceEl.dataset.val) {
+                        const entryPrice = parseFloat(entryPriceEl.dataset.val);
+                        if (entryPrice > 0) {
+                            let pnl = 0;
+                            if (posType === "LONG") {
+                                pnl = ((price - entryPrice) / entryPrice) * 100;
+                            } else if (posType === "SHORT") {
+                                pnl = ((entryPrice - price) / entryPrice) * 100;
+                            }
+
+                            // 웹소켓으로 수신된 가격과 실시간 수익률 렌더링
+                            updateNumberText('pos-current', price);
+                            updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
+
+                            // 카드 실시간 Glow 이펙트 연동
+                            const roiEl = document.getElementById('pos-roi');
+                            if (pnl > 0) {
+                                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
+                                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
+                            } else if (pnl < 0) {
+                                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
+                                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
+                            } else {
+                                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
+                                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
+                            }
+                        }
+                    }
+                }
             }
         }
     };
