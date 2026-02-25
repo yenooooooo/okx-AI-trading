@@ -37,8 +37,11 @@ trade_history = []
 
 async def async_trading_loop():
     """웹 서버와 동시에 돌아가는 백그라운드 매매 루프 (main.py의 로직을 비동기로 재구성)"""
-    global bot_global_state
+    global bot_global_state, ai_brain_state
     engine_api = OKXEngine()
+    
+    # 전략 인스턴스 생성
+    strategy_instance = TradingStrategy(initial_seed=75.0)
     
     bot_global_state["logs"].append("[봇] OKX 거래소 연결 확인 및 자동매매 대기 중...")
     
@@ -68,19 +71,53 @@ async def async_trading_loop():
                 ai_brain_state["price"] = current_price
                 ai_brain_state["rsi"] = round(latest_rsi, 2) if not pd.isna(latest_rsi) else 50.0
                 
-                if latest_rsi < 30:
-                    ai_brain_state["decision"] = "과매도 감지 - 매수 기회 포착 중"
+                # 수다쟁이 모드 (상세 로직 중계)
+                decision_msg = ""
+                if pd.isna(latest_rsi):
+                    decision_msg = "추세 탐색 중 - 데이터 대기"
+                elif latest_rsi < 30:
+                    decision_msg = f"현재 RSI {latest_rsi:.1f} - 초과매도 상태! 30 위로 반등할 때까지 진입 대기 중..."
                 elif latest_rsi > 70:
-                    ai_brain_state["decision"] = "과매수 감지 - 매도 준비 및 관망"
+                    decision_msg = f"현재 RSI {latest_rsi:.1f} - 시장 관망 중 (상단 터치 대기)"
                 else:
-                    ai_brain_state["decision"] = "추세 탐색 중 - RSI 중립 구간"
+                    decision_msg = f"현재 RSI {latest_rsi:.1f} - 시장 관망 중 (타점 아님)"
+
+                # 포지션이 비어 있을 때만 진입 시그널 판단
+                if bot_global_state["position"] == "NONE":
+                    df = strategy_instance.calculate_indicators(df)
+                    signal = strategy_instance.check_entry_signal(df)
+                    if signal in ["LONG", "SHORT"]:
+                        decision_msg = f"조건 충족! 현재가 ${current_price}에 RSI {latest_rsi:.1f} 반등 확인. 즉시 시장가 매수({signal}) API 호출 시도!"
+                        print(f"[{signal} 진입 시도] {decision_msg}")
+                        bot_global_state["logs"].append(f"[알림] {decision_msg}")
+                        
+                        try:
+                            # 실제 시장가 API 주문 시도 (1계약)
+                            amount = 1
+                            if signal == "LONG":
+                                engine_api.exchange.create_market_buy_order("BTC/USDT:USDT", amount)
+                            elif signal == "SHORT":
+                                engine_api.exchange.create_market_sell_order("BTC/USDT:USDT", amount)
+                                
+                            bot_global_state["position"] = signal
+                            bot_global_state["entry_price"] = current_price
+                            bot_global_state["logs"].append("[진입 성공] 시장가 매매 정상 체결!")
+                        except Exception as api_err:
+                            err_str = f"API 호출 에러: 최소 주문 수량 미달 또는 잔고 부족 ({str(api_err)})"
+                            print(f"\033[91m[ERROR] {err_str}\033[0m")
+                            bot_global_state["logs"].append(f"[ERROR] {err_str}")
+                            decision_msg = f"API 오류로 진입 실패!"
+                            
+                ai_brain_state["decision"] = decision_msg
                     
             except Exception as e:
                 pass # 일시적인 API 에러 무시
             
             await asyncio.sleep(3) # UI 과부하 방지를 위해 3초 단위로 갱신
         except Exception as e:
-            bot_global_state["logs"].append(f"[오류] 통신 장애: {str(e)}")
+            err_msg = f"[오류] 통신 장애: {str(e)}"
+            bot_global_state["logs"].append(f"\033[91m{err_msg}\033[0m")
+            print(f"\033[91m{err_msg}\033[0m")
             await asyncio.sleep(5)
 
 @app_server.get("/api/v1/status")

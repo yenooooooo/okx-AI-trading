@@ -45,6 +45,19 @@ def run_bot():
             current_price = engine.get_current_price(SYMBOL)
             
             print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {SYMBOL} 현재가: {current_price} USDT | 보유 잔고: {current_balance:.2f} USDT")
+            
+            # 수다쟁이 모드 (상세 현황 터미널 중계)
+            latest = df.iloc[-1]
+            rsi_val = latest['rsi']
+            
+            if pd.isna(rsi_val):
+                print(f" -> 추세 탐색 중: 지표 데이터 형성 대기 중...")
+            elif rsi_val < 30:
+                print(f" -> 현재 RSI {rsi_val:.1f} - 초과매도 상태! 30 위로 반등할 때까지 진입 대기 중...")
+            elif rsi_val > 70:
+                print(f" -> 현재 RSI {rsi_val:.1f} - 초과매수 상태! (타점 대기 중)")
+            else:
+                print(f" -> 현재 RSI {rsi_val:.1f} - 시장 관망 중 (타점 아님)")
 
             # 4. 포지션 유지 중일 때: 리스크 관리 (익절/손절 체크)
             if current_position:
@@ -80,20 +93,29 @@ def run_bot():
             if not current_position:
                 signal = strategy.check_entry_signal(df)
                 if signal in ["LONG", "SHORT"]:
-                    print(f"[{'모의' if PAPER_TRADING else '실제'} 신규 진입 포착] 방향: {signal} @ {current_price} USDT")
+                    msg = f"조건 충족! 현재가 ${current_price}에 RSI {rsi_val:.1f} 확인. 즉시 시장가 매수({signal}) API 호출 시도!"
+                    print(f"[{'모의' if PAPER_TRADING else '실제'} 신규 진입 포착] {msg}")
                     
                     if not PAPER_TRADING:
-                        # 실제 ccxt 시장가 진입 로직
-                        amount = 1 # 테스트용 1계약 고정 진입
-                        if signal == "LONG":
-                            engine.exchange.create_market_buy_order(SYMBOL, amount)
-                        elif signal == "SHORT":
-                            engine.exchange.create_market_sell_order(SYMBOL, amount)
+                        try:
+                            # 실제 ccxt 시장가 진입 로직
+                            amount = 1 # 테스트용 1계약 고정 진입
+                            if signal == "LONG":
+                                engine.exchange.create_market_buy_order(SYMBOL, amount)
+                            elif signal == "SHORT":
+                                engine.exchange.create_market_sell_order(SYMBOL, amount)
+                        except Exception as e:
+                            err_msg = f"API 호출 에러: 최소 주문 수량 미달, 잔고 부족 등 ({str(e)})"
+                            print(f"\033[91m[ERROR] {err_msg}\033[0m")
+                            print("-" * 50)
+                            time.sleep(10)
+                            continue # 다음 루프로
                         
                     # 포지션 기록
                     current_position = signal
                     entry_price = current_price
                     highest_price = current_price
+                    print("[진입 성공] 포지션 상태 갱신 완료!")
                     print("-" * 50)
 
             # API 호출 제한 방지 (Rate Limit) 및 다음 분석을 위한 대기
