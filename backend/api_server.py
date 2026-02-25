@@ -75,17 +75,22 @@ def _apply_position_ws_update(pos: dict):
     pos_qty = float(pos.get('pos', 0) or 0)
     if pos_qty == 0:
         # OKX가 포지션 종료를 알림 → DB 저장 + 텔레그램 알림 후 상태 초기화
-        prev_position = bot_global_state["symbols"][symbol].get("position", "NONE")
+        # entry_price는 status 엔드포인트가 초기화하지 않으므로 신뢰 가능
         prev_entry = bot_global_state["symbols"][symbol].get("entry_price", 0.0)
         prev_contracts = bot_global_state["symbols"][symbol].get("contracts", 1)
 
-        if prev_position != "NONE" and prev_entry > 0:
+        # posSide는 WS 데이터에서 직접 읽음 (status 엔드포인트의 NONE 초기화 경쟁조건 우회)
+        ws_side = pos.get('posSide', '').upper()  # 'LONG' or 'SHORT'
+        if not ws_side or ws_side == 'NET':
+            ws_side = bot_global_state["symbols"][symbol].get("position", "NONE")
+
+        if prev_entry > 0 and ws_side not in ("NONE", ""):
             # 수동 청산: exit_price는 OKX가 보낸 last 또는 avgPx fallback
             exit_price = float(pos.get('last', 0) or 0)
             if exit_price == 0:
                 exit_price = float(pos.get('avgPx', prev_entry) or prev_entry)
 
-            if prev_position == "LONG":
+            if ws_side == "LONG":
                 pnl_pct = (exit_price - prev_entry) / prev_entry * 100
             else:
                 pnl_pct = (prev_entry - exit_price) / prev_entry * 100
@@ -94,14 +99,14 @@ def _apply_position_ws_update(pos: dict):
                 contract_size = float(_engine.exchange.market(symbol).get('contractSize', 0.01))
             except Exception:
                 contract_size = 0.01
-            if prev_position == "LONG":
+            if ws_side == "LONG":
                 pnl_amount = (exit_price - prev_entry) * prev_contracts * contract_size
             else:
                 pnl_amount = (prev_entry - exit_price) * prev_contracts * contract_size
 
             save_trade(
                 symbol=symbol,
-                position_type=prev_position,
+                position_type=ws_side,
                 entry_price=prev_entry,
                 exit_price=exit_price,
                 pnl=round(pnl_amount, 4),
@@ -111,7 +116,7 @@ def _apply_position_ws_update(pos: dict):
                 leverage=int(bot_global_state["symbols"][symbol].get("leverage", 1))
             )
             emoji = "✅" if pnl_pct >= 0 else "🔴"
-            msg = f"{emoji} [수동청산] {symbol} {prev_position} @ {exit_price:.2f} ({pnl_pct:+.2f}%)"
+            msg = f"{emoji} [수동청산] {symbol} {ws_side} @ {exit_price:.2f} ({pnl_pct:+.2f}%)"
             bot_global_state["logs"].append(msg)
             logger.info(msg)
             send_telegram_sync(msg)
