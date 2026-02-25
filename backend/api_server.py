@@ -268,7 +268,15 @@ async def async_trading_loop():
 
                                     # 2. 거래소 API 체결 완벽 성공 시에만 내부 DB 및 상태 업데이트
                                     pnl_percent = pnl
-                                    pnl_amount = (curr_bal / 100) * pnl_percent
+                                    # 실제 USDT 손익 = (가격 변동) × 계약수 × 계약당 크기
+                                    try:
+                                        contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                    except Exception:
+                                        contract_size = 0.01
+                                    if position_side == "LONG":
+                                        pnl_amount = (current_price - entry) * amount * contract_size
+                                    else:
+                                        pnl_amount = (entry - current_price) * amount * contract_size
 
                                     save_trade(
                                         symbol=symbol,
@@ -536,8 +544,14 @@ async def fetch_current_status():
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
     except Exception as e:
         logger.warning(f"실시간 잔고/포지션 갱신 실패: {e}")
-        
-    return bot_global_state
+
+    # logs(300개)는 제외하고 반환 - 매초 전송 시 불필요한 대용량 페이로드 방지
+    # 로그는 /api/v1/logs 엔드포인트에서 별도 조회
+    return {
+        "is_running": bot_global_state["is_running"],
+        "balance": bot_global_state["balance"],
+        "symbols": bot_global_state["symbols"],
+    }
 
 @app_server.get("/api/v1/brain")
 async def fetch_brain_status():
@@ -546,8 +560,8 @@ async def fetch_brain_status():
 
 @app_server.get("/api/v1/trades")
 async def fetch_trades_history():
-    """최근 거래 내역 반환"""
-    return trade_history
+    """최근 거래 내역 반환 (DB 기반)"""
+    return get_trades(limit=100)
 
 @app_server.post("/api/v1/toggle")
 async def toggle_bot_action():

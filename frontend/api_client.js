@@ -61,7 +61,6 @@ function updateText(elementId, text, flash = true) {
 
 // Tick Flash (Green/Red) for Websocket Ultra-low latency
 function updatePriceWithTickFlash(price) {
-    const el1 = document.getElementById('current-balance');
     const el2 = document.getElementById('hero-price');
     const oldPrice = parseFloat(el2 ? el2.dataset.val : 0) || price;
 
@@ -169,59 +168,63 @@ async function syncBotStatus() {
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-green hover:bg-neon-green hover:text-navy-900 text-neon-green text-sm font-bold rounded transition-all font-mono tracking-widest';
         }
 
-        // 4. Brain (Indicators)
+    } catch (error) {
+        console.warn("Status Sync Failed:", error);
+    }
+}
+
+// --- Brain Sync (3초 인터벌 - status와 분리) ---
+async function syncBrain() {
+    try {
         const brainRes = await fetch(`${API_URL}/brain`);
         const brainData = await brainRes.json();
 
         const symbolBrains = brainData.symbols || {};
-        const brainState = firstSymbol ? symbolBrains[firstSymbol] : brainData;
+        const brainState = symbolBrains[currentSymbol] || Object.values(symbolBrains)[0];
 
-        if (brainState) {
-            // WebSocket 연결 중엔 REST가 hero-price를 덮어쓰지 않음 (실시간 보호)
-            if (brainState.price && (!priceWs || priceWs.readyState !== WebSocket.OPEN)) {
-                updateNumberText('hero-price', brainState.price);
-            }
-            if (brainState.decision) {
-                updateText('brain-decision', brainState.decision, false);
-            }
-            if (brainState.rsi) {
-                const rsi = parseFloat(brainState.rsi);
-                updateNumberText('brain-rsi', rsi);
-                const rsiEl = document.getElementById('brain-rsi');
-                rsiEl.className = rsi <= 30 ? 'font-mono flash-target font-bold text-neon-green' : (rsi >= 70 ? 'font-mono flash-target font-bold text-neon-red' : 'font-mono flash-target font-bold text-text-main');
+        if (!brainState) return;
 
-                // Update marker
-                const marker = document.getElementById('rsi-marker');
-                if (marker) {
-                    marker.style.left = `${Math.max(0, Math.min(100, rsi))}%`;
-                }
-            }
-            if (brainState.macd !== undefined) {
-                const macd = parseFloat(brainState.macd);
-                updateNumberText('brain-macd', macd);
-                const macdEl = document.getElementById('brain-macd');
-                macdEl.className = macd > 0 ? 'font-mono flash-target font-bold text-neon-green' : 'font-mono flash-target font-bold text-neon-red';
+        // WebSocket 연결 중엔 REST가 hero-price를 덮어쓰지 않음 (실시간 보호)
+        if (brainState.price && (!priceWs || priceWs.readyState !== WebSocket.OPEN)) {
+            updateNumberText('hero-price', brainState.price);
+        }
+        if (brainState.decision) {
+            updateText('brain-decision', brainState.decision, false);
+        }
+        if (brainState.rsi) {
+            const rsi = parseFloat(brainState.rsi);
+            updateNumberText('brain-rsi', rsi);
+            const rsiEl = document.getElementById('brain-rsi');
+            rsiEl.className = rsi <= 30 ? 'font-mono flash-target font-bold text-neon-green' : (rsi >= 70 ? 'font-mono flash-target font-bold text-neon-red' : 'font-mono flash-target font-bold text-text-main');
+            const marker = document.getElementById('rsi-marker');
+            if (marker) marker.style.left = `${Math.max(0, Math.min(100, rsi))}%`;
+        }
+        if (brainState.macd !== undefined) {
+            const macd = parseFloat(brainState.macd);
+            updateNumberText('brain-macd', macd);
+            const macdEl = document.getElementById('brain-macd');
+            // MACD >= 0 green (0 포함 중립), < 0 red
+            macdEl.className = macd >= 0 ? 'font-mono flash-target font-bold text-neon-green' : 'font-mono flash-target font-bold text-neon-red';
 
-                // Update MACD Gauges (동적 스케일: 최근 최대 절대값 기준)
-                const posBar = document.getElementById('macd-bar-pos');
-                const negBar = document.getElementById('macd-bar-neg');
-                if (posBar && negBar) {
-                    const absMaxMacd = Math.max(Math.abs(macd), parseFloat(posBar.dataset.maxMacd || 1));
-                    posBar.dataset.maxMacd = absMaxMacd;
-                    negBar.dataset.maxMacd = absMaxMacd;
-                    const pct = Math.min(100, (Math.abs(macd) / absMaxMacd) * 100);
-                    if (macd > 0) {
-                        negBar.style.width = '0%';
-                        posBar.style.width = `${pct}%`;
-                    } else {
-                        posBar.style.width = '0%';
-                        negBar.style.width = `${pct}%`;
-                    }
+            // MACD 게이지 동적 스케일
+            const posBar = document.getElementById('macd-bar-pos');
+            const negBar = document.getElementById('macd-bar-neg');
+            if (posBar && negBar) {
+                const absMaxMacd = Math.max(Math.abs(macd), parseFloat(posBar.dataset.maxMacd || 1));
+                posBar.dataset.maxMacd = absMaxMacd;
+                negBar.dataset.maxMacd = absMaxMacd;
+                const pct = Math.min(100, (Math.abs(macd) / absMaxMacd) * 100);
+                if (macd >= 0) {
+                    negBar.style.width = '0%';
+                    posBar.style.width = `${pct}%`;
+                } else {
+                    posBar.style.width = '0%';
+                    negBar.style.width = `${pct}%`;
                 }
             }
         }
     } catch (error) {
-        console.warn("Status Sync Failed:", error);
+        console.warn("Brain Sync Failed:", error);
     }
 }
 
@@ -571,6 +574,7 @@ async function initializeApp() {
     await Promise.all([
         syncConfig(),
         syncBotStatus(),
+        syncBrain(),
         syncStats(),
         syncChart(),
         updateLogs()
@@ -578,7 +582,8 @@ async function initializeApp() {
 
     // 초기 렌더링 후 타이머 설정
     setInterval(syncBotStatus, 1000);
-    setInterval(syncChart, 5000);       // Optimized to 5s
+    setInterval(syncBrain, 3000);       // Brain (RSI/MACD/price) - status와 분리
+    setInterval(syncChart, 5000);
     setInterval(syncStats, 5000);
     setInterval(updateLogs, 3000);
     setInterval(syncConfig, 30000);     // 외부 설정 변경 자동 반영

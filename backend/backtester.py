@@ -105,13 +105,32 @@ class Backtester:
                     highest_balance = max(highest_balance, balance)
 
                 # 포지션 없을 때 - 진입 신호 체크
-                if not position and idx >= 26:  # 지표 계산에 필요한 최소 캔들 수
+                if not position and idx >= 50:  # 지표 계산에 필요한 최소 캔들 수 (MACD 26+signal 9+여유)
                     signal, _ = self.strategy.check_entry_signal(df.iloc[:idx+1])
 
                     if signal in ["LONG", "SHORT"]:
                         position = signal
                         entry_price = current_price
                         entry_idx = idx
+
+            # 백테스팅 종료 시점에 남은 오픈 포지션 마지막 가격으로 강제 청산
+            if position:
+                last_price = df.iloc[-1]['close']
+                if position == "LONG":
+                    final_pnl = (last_price - entry_price) / entry_price
+                else:
+                    final_pnl = (entry_price - last_price) / entry_price
+                balance = balance * (1 + final_pnl)
+                trades_log.append({
+                    'entry_idx': entry_idx,
+                    'entry_price': entry_price,
+                    'exit_idx': len(df) - 1,
+                    'exit_price': last_price,
+                    'position': position,
+                    'pnl_percent': final_pnl * 100,
+                    'exit_reason': 'END_OF_DATA',
+                    'balance': balance
+                })
 
             # 통계 계산
             total_trades = len(trades_log)
