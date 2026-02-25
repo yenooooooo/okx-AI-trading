@@ -1,0 +1,40 @@
+# --------------- 환경 변수 및 비밀 키 (가장 중요) ---------------
+.env
+.env.*
+*.pem
+*.key
+secrets.json
+config.json
+credentials.json
+auth.json
+
+# --------------- 파이썬 가상 환경 및 캐시 ---------------
+venv/
+env/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# --------------- 프론트엔드 종속성 ---------------
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# --------------- 데이터베이스 및 로그 파일 ---------------
+*.sqlite3
+*.db
+*.log
+
+# --------------- IDE 및 OS 자동 생성 파일 ---------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --------------- 빌드 결과물 ---------------
+dist/
+build/
+*.egg-info/
