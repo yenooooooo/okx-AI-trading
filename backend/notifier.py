@@ -29,7 +29,6 @@ async def send_telegram(message: str):
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
-            "parse_mode": "HTML"
         }
 
         async with httpx.AsyncClient(timeout=10.0) as client:
