@@ -85,24 +85,32 @@ def _apply_position_ws_update(pos: dict):
             ws_side = bot_global_state["symbols"][symbol].get("position", "NONE")
 
         if prev_entry > 0 and ws_side not in ("NONE", ""):
-            # 수동 청산: exit_price는 OKX가 보낸 last 또는 avgPx fallback
+            # exit_price: last(종가) → markPx → avgPx → 진입가 순으로 fallback
             exit_price = float(pos.get('last', 0) or 0)
             if exit_price == 0:
+                exit_price = float(pos.get('markPx', 0) or 0)
+            if exit_price == 0:
                 exit_price = float(pos.get('avgPx', prev_entry) or prev_entry)
-
-            if ws_side == "LONG":
-                pnl_pct = (exit_price - prev_entry) / prev_entry * 100
-            else:
-                pnl_pct = (prev_entry - exit_price) / prev_entry * 100
 
             try:
                 contract_size = float(_engine.exchange.market(symbol).get('contractSize', 0.01))
             except Exception:
                 contract_size = 0.01
-            if ws_side == "LONG":
-                pnl_amount = (exit_price - prev_entry) * prev_contracts * contract_size
+
+            # OKX가 계산한 realizedPnl 우선 사용 (레버리지·수수료 포함 정확한 값)
+            realized_pnl = float(pos.get('realizedPnl', 0) or 0)
+            if realized_pnl != 0:
+                pnl_amount = realized_pnl
+                position_value = prev_entry * prev_contracts * contract_size
+                pnl_pct = (realized_pnl / position_value * 100) if position_value > 0 else 0
             else:
-                pnl_amount = (prev_entry - exit_price) * prev_contracts * contract_size
+                # fallback: 가격 차이로 계산
+                if ws_side == "LONG":
+                    pnl_pct = (exit_price - prev_entry) / prev_entry * 100
+                    pnl_amount = (exit_price - prev_entry) * prev_contracts * contract_size
+                else:
+                    pnl_pct = (prev_entry - exit_price) / prev_entry * 100
+                    pnl_amount = (prev_entry - exit_price) * prev_contracts * contract_size
 
             save_trade(
                 symbol=symbol,
