@@ -81,3 +81,25 @@ class OKXEngine:
         except Exception as e:
             print(f"[조회 오류] 현재가 조회 실패: {e}")
             return None
+
+    def get_open_positions(self):
+        """현재 열린 포지션 조회 (다중 심볼 대응)"""
+        if not self.exchange:
+            return []
+        try:
+            positions = self.exchange.fetch_positions()
+            open_positions = []
+            for pos in positions:
+                if pos.get('contracts') and float(pos.get('contracts', 0)) != 0:
+                    open_positions.append({
+                        'symbol': pos.get('symbol'),
+                        'contracts': float(pos.get('contracts', 0)),
+                        'contractSize': pos.get('contractSize'),
+                        'side': pos.get('side'),  # 'long' or 'short'
+                        'collateral': float(pos.get('collateral', 0)),
+                        'markPrice': float(pos.get('markPrice', 0))
+                    })
+            return open_positions
+        except Exception as e:
+            print(f"[조회 오류] 포지션 조회 실패: {e}")
+            return []

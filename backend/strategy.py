@@ -97,3 +97,15 @@ class TradingStrategy:
         if loss_rate >= self.max_daily_loss_rate:
             return True
         return False
+
+    def calculate_position_size(self, balance, risk_rate, entry_price, leverage=1):
+        """
+        동적 포지션 사이즈 계산
+        공식: size = (balance × risk_rate × leverage) / entry_price
+        최소값: 0.001 BTC 보장
+        """
+        if balance <= 0 or entry_price <= 0:
+            return 0.001
+
+        size = (balance * risk_rate * leverage) / entry_price
+        return max(size, 0.001)  # 최소 0.001 BTC
