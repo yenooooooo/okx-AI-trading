@@ -1,367 +1,351 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" class="dark">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OKX Auto-Trading Dashboard</title>
+    <title>High-End Trading Intelligence</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        navy: {
+                            900: '#0d1117',
+                            800: '#161b22',
+                            border: '#30363d'
+                        },
+                        neon: {
+                            green: '#00ff88',
+                            red: '#ff4d4d'
+                        },
+                        text: {
+                            main: '#e6edf3'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
     <style>
         body {
-            background-color: #0f172a;
-            color: #f8fafc;
-            font-family: 'Inter', sans-serif;
+            background-color: #0d1117;
+            color: #e6edf3;
         }
 
-        .log-container {
-            scrollbar-width: thin;
-            scrollbar-color: #475569 #1e293b;
+        .glass-panel {
+            background: rgba(22, 27, 34, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid #30363d;
+            border-radius: 0.75rem;
+        }
+
+        .glow-green {
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.15);
+            border-color: rgba(0, 255, 136, 0.4);
+        }
+
+        .glow-red {
+            box-shadow: 0 0 20px rgba(255, 77, 77, 0.15);
+            border-color: rgba(255, 77, 77, 0.4);
+        }
+
+        .flash {
+            animation: flash-anim 0.3s ease-out;
+        }
+
+        @keyframes flash-anim {
+            0% {
+                background-color: rgba(255, 255, 255, 0.1);
+            }
+
+            100% {
+                background-color: transparent;
+            }
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 3px;
         }
     </style>
 </head>
 
-<body class="p-6 h-screen flex flex-col">
-    <header class="flex justify-between items-center mb-8 border-b border-slate-700 pb-4">
+<body class="min-h-screen flex flex-col p-4 gap-4 font-sans">
+    <!-- Header -->
+    <header class="flex justify-between items-center glass-panel p-4 z-20">
         <div>
-            <h1 class="text-3xl font-bold text-blue-400">OKX AI Trading Bot</h1>
-            <p class="text-slate-400 text-sm mt-1">절대 방어 리스크 관리 시스템 가동 중</p>
+            <h1 class="text-2xl font-bold tracking-tight">ANTIGRAVITY <span
+                    class="text-neon-green font-mono text-sm">v2.0</span></h1>
+            <p class="text-xs text-gray-400">High-End Trading Intelligence Dashboard</p>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-6">
             <div class="flex items-center gap-2">
                 <span class="relative flex h-3 w-3">
                     <span id="status-ping"
-                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                    <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-red opacity-75"></span>
+                    <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-neon-red"></span>
                 </span>
-                <span id="bot-status-text" class="text-slate-300 font-semibold">Offline</span>
+                <span id="bot-status-text" class="font-mono text-sm tracking-widest text-gray-400 uppercase">System
+                    Offline</span>
             </div>
             <button id="toggle-bot-btn"
-                class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded shadow transition font-semibold"
+                class="px-6 py-2 bg-navy-800 border border-navy-border hover:border-gray-400 text-sm font-bold rounded transition-all text-text-main"
                 onclick="toggleBot()">
-                Start Bot
+                INITIATE
             </button>
         </div>
     </header>
 
-    <main class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h2 class="text-slate-400 text-sm font-medium mb-2">현재 잔고 (시드: 100,000 원)</h2>
-            <div class="text-3xl font-bold text-white mb-1" id="current-balance">0.00 <span
-                    class="text-lg text-slate-400">USDT</span></div>
-            <div class="text-sm text-green-400" id="balance-krw">≈ 0 원</div>
-        </div>
+    <!-- 3-Column Grid -->
+    <main class="grid grid-cols-12 gap-4 flex-grow z-10">
+        <!-- LEFT: Side Control (3 cols) -->
+        <div class="col-span-12 lg:col-span-3 flex flex-col gap-4">
+            <!-- Asset Status -->
+            <div class="glass-panel p-5 flex flex-col gap-2 relative overflow-hidden">
+                <!-- abstract background blur -->
+                <div class="absolute -top-10 -right-10 w-32 h-32 bg-neon-green/5 blur-[50px] rounded-full"></div>
 
-        <div
-            class="bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl relative overflow-hidden">
-            <h3 class="text-gray-400 text-sm font-medium mb-3">현재 포지션 (실시간 현황)</h3>
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-1 z-10">Total Equity</h3>
+                <div class="flex items-baseline gap-2 z-10">
+                    <div class="text-4xl font-mono font-bold text-text-main flash-target" id="current-balance">0.00
+                    </div>
+                    <span class="text-sm text-gray-500 font-mono">USDT</span>
+                </div>
+                <div class="text-xs font-mono text-neon-green flash-target z-10" id="balance-krw">≈ 0 KRW</div>
+            </div>
 
-            <div id="position-container" class="flex flex-col gap-3">
-                <div id="position-none" class="block">
-                    <p class="text-3xl font-bold text-gray-500">NONE</p>
-                    <p class="text-sm text-gray-400 mt-1">시장 감시 및 진입 대기 중...</p>
+            <!-- Parameters -->
+            <div class="glass-panel p-5 flex-grow">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-6">Control Parameters</h3>
+
+                <div class="mb-6">
+                    <div class="flex justify-between text-xs mb-2">
+                        <span class="text-gray-400">Risk Allocation</span>
+                        <span id="risk-val-display" class="font-mono text-neon-green">1.0%</span>
+                    </div>
+                    <input type="range" id="config-risk-rate" min="0.1" max="10" step="0.1" value="1.0"
+                        class="w-full accent-neon-green"
+                        oninput="document.getElementById('risk-val-display').textContent = this.value + '%'">
+                    <button onclick="updateConfigValue('risk_per_trade')"
+                        class="mt-3 text-xs w-full py-2 border border-navy-border hover:bg-navy-800 transition rounded text-gray-300 font-mono tracking-widest hover:text-white hover:border-gray-500">APPLY
+                        RISK</button>
                 </div>
 
-                <div id="position-active" class="hidden">
-                    <div class="flex justify-between items-end mb-2">
-                        <div>
-                            <span id="pos-type" class="text-3xl font-bold text-red-500">SHORT</span>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-xs text-gray-400 mb-1">실시간 수익률 (ROE)</p>
-                            <span id="pos-roi" class="text-3xl font-black text-green-400">+0.00%</span>
-                        </div>
+                <div class="mb-6">
+                    <div class="flex justify-between text-xs mb-2">
+                        <span class="text-gray-400">Leverage Multiplier</span>
+                        <span id="lev-val-display" class="font-mono text-text-main">1x</span>
                     </div>
+                    <input type="range" id="config-leverage" min="1" max="10" step="1" value="1"
+                        class="w-full accent-text-main"
+                        oninput="document.getElementById('lev-val-display').textContent = this.value + 'x'">
+                    <button onclick="updateConfigValue('leverage')"
+                        class="mt-3 text-xs w-full py-2 border border-navy-border hover:bg-navy-800 transition rounded text-gray-300 font-mono tracking-widest hover:text-white hover:border-gray-500">APPLY
+                        LEVERAGE</button>
+                </div>
 
-                    <div
-                        class="grid grid-cols-2 gap-2 mt-4 text-sm bg-gray-900/50 p-3 rounded-xl border border-gray-700/50">
-                        <div class="flex flex-col gap-1">
-                            <span class="text-gray-500 text-xs">진입 가격</span>
-                            <span id="pos-entry" class="font-mono text-gray-200">$0.00</span>
-                        </div>
-                        <div class="flex flex-col gap-1 text-right">
-                            <span class="text-gray-500 text-xs">현재 시장가</span>
-                            <span id="pos-current" class="font-mono text-white">$0.00</span>
-                        </div>
-                    </div>
-
-                    <div
-                        class="grid grid-cols-2 gap-2 mt-2 text-sm bg-gray-900/50 p-3 rounded-xl border border-gray-700/50">
-                        <div class="flex flex-col gap-1">
-                            <span class="text-green-500/80 text-xs font-bold">🎯 목표가 (Take Profit)</span>
-                            <span id="pos-tp" class="font-mono text-green-400">$0.00</span>
-                        </div>
-                        <div class="flex flex-col gap-1 text-right">
-                            <span class="text-red-500/80 text-xs font-bold">🛡️ 손절가 (Stop Loss)</span>
-                            <span id="pos-sl" class="font-mono text-red-400">$0.00</span>
-                        </div>
-                    </div>
+                <div>
+                    <span class="text-xs text-gray-400 block mb-2 uppercase tracking-wide">Target Symbol</span>
+                    <input type="text" id="config-symbols" value="BTC/USDT:USDT"
+                        class="w-full bg-navy-900 border border-navy-border rounded p-2 text-neon-green text-sm font-mono focus:outline-none focus:border-neon-green text-center tracking-widest" />
+                    <button onclick="updateConfigSymbols()"
+                        class="mt-3 text-xs w-full py-2 border border-navy-border hover:bg-navy-800 transition rounded text-gray-300 font-mono tracking-widest hover:text-white hover:border-gray-500">UPDATE
+                        TARGET</button>
                 </div>
             </div>
         </div>
 
-        <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-            <h2 class="text-slate-400 text-sm font-medium mb-2">방어 시스템 상태</h2>
-            <ul class="text-sm space-y-2 mt-3">
-                <li class="flex justify-between"><span class="text-slate-400">일일 최대 손실 (-5%)</span> <span
-                        class="text-green-400 font-semibold">안전</span></li>
-                <li class="flex justify-between"><span class="text-slate-400">하드 스탑로스 (-2%)</span> <span
-                        class="text-blue-400 font-semibold">대기중</span></li>
-                <li class="flex justify-between"><span class="text-slate-400">트레일링 스탑 (+3%)</span> <span
-                        class="text-blue-400 font-semibold">대기중</span></li>
-            </ul>
+        <!-- CENTER: Main Intelligence (6 cols) -->
+        <div class="col-span-12 lg:col-span-6 flex flex-col gap-4">
+            <!-- Hero Chart -->
+            <div class="glass-panel p-1 relative flex flex-col h-[420px]">
+                <div id="chart-overlay"
+                    class="absolute inset-0 bg-navy-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center rounded-xl transition-opacity duration-300 hidden">
+                    <svg class="animate-spin h-8 w-8 text-neon-green mb-4" xmlns="http://www.w3.org/2000/svg"
+                        fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                        </circle>
+                        <path class="opacity-75" fill="currentColor"
+                            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                        </path>
+                    </svg>
+                    <p class="font-mono text-neon-green animate-pulse text-sm tracking-widest">[ SIGNAL LOST ]
+                        Reconnecting to datastream...</p>
+                </div>
+                <!-- Price Info Overlay -->
+                <div class="absolute top-4 left-4 z-10 pointer-events-none">
+                    <div class="text-3xl font-mono font-bold text-white flash-target" id="hero-price">0.00</div>
+                    <div class="text-xs text-gray-500 font-mono">Current Mark Price</div>
+                </div>
+                <div id="chart-container" class="w-full h-full rounded-lg overflow-hidden"></div>
+            </div>
+
+            <!-- Indicator Gauges -->
+            <div class="grid grid-cols-2 gap-4">
+                <div class="glass-panel p-5 relative overflow-hidden">
+                    <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-3 flex justify-between">
+                        <span>Relative Strength (RSI)</span>
+                        <span id="brain-rsi" class="font-mono text-text-main flash-target font-bold">0.00</span>
+                    </h3>
+                    <div
+                        class="w-full bg-navy-900 h-3 rounded-full overflow-hidden relative border border-navy-border shadow-inner">
+                        <div
+                            class="absolute inset-0 bg-gradient-to-r from-neon-green via-gray-500 to-neon-red opacity-60">
+                        </div>
+                        <div id="rsi-marker"
+                            class="absolute top-0 bottom-0 w-1.5 bg-white shadow-[0_0_8px_white] transition-all duration-500 rounded-full"
+                            style="left: 50%;"></div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+                        <span>Oversold (< 30)</span>
+                                <span>Overbought (> 70)</span>
+                    </div>
+                </div>
+
+                <div class="glass-panel p-5 relative overflow-hidden">
+                    <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-3 flex justify-between">
+                        <span>Trend Momentum (MACD)</span>
+                        <span id="brain-macd" class="font-mono text-text-main flash-target font-bold">0.00</span>
+                    </h3>
+                    <div
+                        class="flex items-center h-3 w-full border border-navy-border rounded-full overflow-hidden bg-navy-900 shadow-inner">
+                        <!-- Negative area (Red) -->
+                        <div class="h-full w-1/2 flex justify-end">
+                            <div id="macd-bar-neg" class="h-full bg-neon-red transition-all duration-500"
+                                style="width: 0%; box-shadow: 0 0 8px rgba(255,77,77,0.5);"></div>
+                        </div>
+                        <!-- Center line -->
+                        <div class="h-full w-[2px] bg-gray-600 z-10"></div>
+                        <!-- Positive area (Green) -->
+                        <div class="h-full w-1/2 flex justify-start">
+                            <div id="macd-bar-pos" class="h-full bg-neon-green transition-all duration-500"
+                                style="width: 0%; box-shadow: 0 0 8px rgba(0,255,136,0.5);"></div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+                        <span>Bearish</span>
+                        <span>Bullish</span>
+                    </div>
+                </div>
+            </div>
+
+            <div
+                class="glass-panel p-4 flex justify-between items-center text-sm font-mono border-l-4 border-l-neon-green">
+                <span class="text-gray-400 uppercase text-xs">AI Consensus</span>
+                <span id="brain-decision" class="text-neon-green tracking-widest font-bold">AWAITING_DATA</span>
+            </div>
+        </div>
+
+        <!-- RIGHT: Live Execution (3 cols) -->
+        <div class="col-span-12 lg:col-span-3 flex flex-col gap-4">
+            <!-- Active Position -->
+            <div id="active-position-card"
+                class="glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden">
+                <h3 class="absolute top-4 left-5 text-xs text-gray-400 uppercase tracking-widest z-10">Active Deployment
+                </h3>
+
+                <div id="position-none" class="block text-center mt-6 z-10">
+                    <p class="font-mono text-gray-500 tracking-widest text-lg animate-pulse">[ STANDBY ]</p>
+                </div>
+
+                <div id="position-active" class="hidden flex-col gap-5 mt-6 z-10">
+                    <div class="flex justify-between items-end">
+                        <span id="pos-type"
+                            class="text-3xl font-black font-mono tracking-tighter leading-none flash-target">NONE</span>
+                        <div class="text-right">
+                            <span class="text-[10px] text-gray-500 uppercase block mb-1">Unrealized PnL</span>
+                            <span id="pos-roi"
+                                class="text-2xl font-mono font-bold leading-none flash-target">0.00%</span>
+                        </div>
+                    </div>
+
+                    <div class="border-t border-navy-border/50 pt-4 grid grid-cols-2 gap-4">
+                        <div>
+                            <span class="text-[10px] text-gray-500 uppercase block mb-1">Entry</span>
+                            <span id="pos-entry" class="font-mono text-sm text-text-main flash-target">0.00</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-[10px] text-gray-500 uppercase block mb-1">Mark</span>
+                            <span id="pos-current" class="font-mono text-sm text-text-main flash-target">0.00</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 bg-navy-900/70 p-3 rounded-lg border border-navy-border/50">
+                        <div>
+                            <span class="text-[10px] text-neon-green uppercase block mb-1 tracking-wider">Take
+                                Profit</span>
+                            <span id="pos-tp" class="font-mono text-xs text-white">0.00</span>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-[10px] text-neon-red uppercase block mb-1 tracking-wider">Stop Loss</span>
+                            <span id="pos-sl" class="font-mono text-xs text-white">0.00</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="glass-panel p-5 grid grid-cols-2 gap-4 text-xs">
+                <h3 class="col-span-2 text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2">
+                    Performance Metrics</h3>
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] text-gray-500 uppercase">Trades</span>
+                    <span id="stats-total-trades" class="font-mono text-sm text-text-main flash-target">0</span>
+                </div>
+                <div class="flex flex-col gap-1 text-right">
+                    <span class="text-[10px] text-gray-500 uppercase">Win Rate</span>
+                    <span id="stats-win-rate" class="font-mono text-sm text-neon-green flash-target">0.00%</span>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <span class="text-[10px] text-gray-500 uppercase">Net PnL</span>
+                    <span id="stats-total-pnl" class="font-mono text-sm text-neon-green flash-target">0.00%</span>
+                </div>
+                <div class="flex flex-col gap-1 text-right">
+                    <span class="text-[10px] text-gray-500 uppercase">Max DD</span>
+                    <span id="stats-max-dd" class="font-mono text-sm text-neon-red flash-target">0.00%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOTTOM: Terminal Module (12 cols) -->
+        <div class="col-span-12 glass-panel flex flex-col h-56 mt-2 mb-4 relative z-0">
+            <div
+                class="flex justify-between items-center px-4 py-2 border-b border-navy-border bg-navy-900/80 rounded-t-xl z-20">
+                <span class="text-[11px] font-mono text-gray-400 flex items-center gap-2">
+                    <div class="w-2 h-2 rounded-full bg-neon-green animate-pulse"></div>
+                    root@antigravity:~# tail -f /var/log/trading.core
+                </span>
+                <button onclick="clearLogs()"
+                    class="text-[10px] font-mono text-gray-500 hover:text-text-main transition uppercase border border-navy-border px-2 py-0.5 rounded hover:bg-navy-800">Clear_Buffer</button>
+            </div>
+            <!-- Terminal Output -->
+            <div id="system-log-terminal"
+                class="p-4 overflow-y-auto font-mono text-[11px] leading-relaxed tracking-wide flex-grow flex flex-col space-y-1.5 custom-scrollbar z-10 pb-4">
+                <div class="text-gray-500">[system@antigravity ~]$ Core initialized. Awaiting intelligence stream...
+                </div>
+            </div>
         </div>
     </main>
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <div class="bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-lg font-bold text-cyan-400 flex items-center gap-2">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                            d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z">
-                        </path>
-                    </svg>
-                    실시간 AI 뇌 구조
-                </h3>
-                <span class="relative flex h-3 w-3">
-                    <span
-                        class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-3 w-3 bg-cyan-500"></span>
-                </span>
-            </div>
-            <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
-                    <p class="text-xs text-gray-400 mb-1">현재가 (BTC)</p>
-                    <p id="brain-price" class="text-xl font-mono text-white">대기 중...</p>
-                </div>
-                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
-                    <p class="text-xs text-gray-400 mb-1">RSI (과열/침체)</p>
-                    <p id="brain-rsi" class="text-xl font-mono text-purple-400">대기 중...</p>
-                </div>
-                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
-                    <p class="text-xs text-gray-400 mb-1">MACD (추세)</p>
-                    <p id="brain-macd" class="text-xl font-mono text-blue-400">대기 중...</p>
-                </div>
-                <div class="bg-gray-900 p-3 rounded-xl border border-gray-700 shadow-inner">
-                    <p class="text-[0.65rem] text-gray-400 mb-1">볼린저 밴드 (상/하단)</p>
-                    <p id="brain-bb" class="text-xs font-mono text-gray-300 mt-1 leading-tight">대기 중...</p>
-                </div>
-            </div>
-            <div class="bg-gray-900/80 p-4 rounded-xl border border-gray-700 relative overflow-hidden">
-                <div class="absolute top-0 left-0 w-1 h-full bg-cyan-500"></div>
-                <p class="text-xs text-gray-400 mb-1">AI 현재 판단 결과</p>
-                <p id="brain-decision" class="text-sm font-medium text-green-300">서버 데이터 수신 대기 중...</p>
-            </div>
-        </div>
-
-        <div class="bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-            <h3 class="text-lg font-bold text-yellow-400 flex items-center gap-2 mb-4">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-                </svg>
-                매매 전광판 & 실시간 ROI
-            </h3>
-            <div class="overflow-y-auto h-[180px] pr-2 custom-scrollbar">
-                <table class="w-full text-left text-sm text-gray-300">
-                    <thead class="text-xs text-gray-500 uppercase bg-gray-900/50 sticky top-0">
-                        <tr>
-                            <th class="px-3 py-2 rounded-tl-lg">시간</th>
-                            <th class="px-3 py-2">포지션</th>
-                            <th class="px-3 py-2 rounded-tr-lg text-right">수익률</th>
-                        </tr>
-                    </thead>
-                    <tbody id="trade-history-list" class="divide-y divide-gray-700">
-                        <tr>
-                            <td colspan="3" class="px-3 py-4 text-center text-gray-500 italic">아직 매매 내역이 없습니다.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-
-    <section class="flex-grow bg-[#000000] rounded-xl border border-slate-700 shadow-lg flex flex-col overflow-hidden">
-        <div
-            class="bg-slate-800 px-4 py-2 border-b border-slate-700 text-sm text-slate-300 font-medium flex justify-between">
-            <span>System Terminal Logs</span>
-            <button onclick="clearLogs()" class="text-xs text-slate-400 hover:text-white">Clear</button>
-        </div>
-        <div id="log-container" class="p-4 overflow-y-auto font-mono text-sm space-y-1 log-container h-full">
-            <div class="text-slate-500">System initialized. Waiting for connection...</div>
-        </div>
-    </section>
-
-    <!-- 신규 패널 1: 성과 분석 패널 -->
-    <section class="mt-6 bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-        <h3 class="text-lg font-bold text-green-400 mb-4 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z">
-                </path>
-            </svg>
-            성과 분석 (Performance)
-        </h3>
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <p class="text-xs text-gray-400 mb-2">총 거래 수</p>
-                <p id="stats-total-trades" class="text-2xl font-bold text-blue-400">0</p>
-            </div>
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <p class="text-xs text-gray-400 mb-2">승률 (%)</p>
-                <p id="stats-win-rate" class="text-2xl font-bold text-green-400">0.00%</p>
-            </div>
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <p class="text-xs text-gray-400 mb-2">총 수익률 (%)</p>
-                <p id="stats-total-pnl" class="text-2xl font-bold text-yellow-400">0.00%</p>
-            </div>
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <p class="text-xs text-gray-400 mb-2">Max Drawdown (%)</p>
-                <p id="stats-max-dd" class="text-2xl font-bold text-red-400">0.00%</p>
-            </div>
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <p class="text-xs text-gray-400 mb-2">Sharpe Ratio</p>
-                <p id="stats-sharpe" class="text-2xl font-bold text-purple-400">0.00</p>
-            </div>
-        </div>
-    </section>
-
-    <!-- 신규 패널 2: 설정 패널 -->
-    <section class="mt-6 bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-        <h3 class="text-lg font-bold text-indigo-400 mb-4 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z">
-                </path>
-            </svg>
-            봇 설정
-        </h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <label class="text-xs text-gray-400 mb-2 block">리스크 비율 (%)</label>
-                <input type="number" id="config-risk-rate" value="1" min="0.1" max="10" step="0.1"
-                    class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm" />
-                <button onclick="updateConfigValue('risk_per_trade')"
-                    class="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1 text-xs">적용</button>
-            </div>
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <label class="text-xs text-gray-400 mb-2 block">레버리지 배수</label>
-                <input type="number" id="config-leverage" value="1" min="1" max="10" step="1"
-                    class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm" />
-                <button onclick="updateConfigValue('leverage')"
-                    class="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1 text-xs">적용</button>
-            </div>
-            <div class="bg-gray-900 p-4 rounded-xl border border-gray-700">
-                <label class="text-xs text-gray-400 mb-2 block">심볼 (쉼표 구분)</label>
-                <input type="text" id="config-symbols" value="BTC/USDT:USDT"
-                    class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white text-sm" />
-                <button onclick="updateConfigSymbols()"
-                    class="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white rounded px-3 py-1 text-xs">적용</button>
-            </div>
-        </div>
-    </section>
-
-    <!-- 신규 패널 3: 실시간 차트 -->
-    <section class="mt-6 bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-        <h3 class="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path>
-            </svg>
-            실시간 차트
-        </h3>
-        <div id="chart-container"
-            style="height: 300px; background: #1e293b; border-radius: 12px; border: 1px solid #334155;"></div>
-    </section>
-
-    <!-- 신규 패널 4: 다중 심볼 -->
-    <section class="mt-6 bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-        <h3 class="text-lg font-bold text-orange-400 mb-4 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z">
-                </path>
-            </svg>
-            다중 심볼 현황
-        </h3>
-        <div id="multi-symbol-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <p class="text-gray-400 text-sm">심볼 데이터 로딩 중...</p>
-        </div>
-    </section>
-
-    <!-- 신규 패널 5: 백테스팅 -->
-    <section class="mt-6 bg-gray-800/50 backdrop-blur border border-gray-700 p-5 rounded-2xl shadow-xl">
-        <h3 class="text-lg font-bold text-red-400 mb-4 flex items-center gap-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            백테스팅
-        </h3>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div>
-                <label class="text-xs text-gray-400 mb-2 block">심볼</label>
-                <input type="text" id="backtest-symbol" value="BTC/USDT:USDT"
-                    class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white text-sm" />
-            </div>
-            <div>
-                <label class="text-xs text-gray-400 mb-2 block">타임프레임</label>
-                <select id="backtest-timeframe"
-                    class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white text-sm">
-                    <option value="1m">1분</option>
-                    <option value="5m">5분</option>
-                    <option value="15m">15분</option>
-                    <option value="1h">1시간</option>
-                </select>
-            </div>
-            <div>
-                <label class="text-xs text-gray-400 mb-2 block">캔들 수</label>
-                <input type="number" id="backtest-limit" value="100" min="10" max="1000"
-                    class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-white text-sm" />
-            </div>
-        </div>
-        <button onclick="runBacktest()"
-            class="w-full bg-red-600 hover:bg-red-500 text-white rounded px-4 py-2 font-semibold">백테스팅 실행</button>
-        <div id="backtest-results" class="mt-4 bg-gray-900 p-4 rounded-xl border border-gray-700 hidden">
-            <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-                <div>
-                    <p class="text-gray-400">총 거래</p>
-                    <p id="backtest-total-trades" class="text-lg font-bold text-blue-400">0</p>
-                </div>
-                <div>
-                    <p class="text-gray-400">승률</p>
-                    <p id="backtest-win-rate" class="text-lg font-bold text-green-400">0.00%</p>
-                </div>
-                <div>
-                    <p class="text-gray-400">수익률</p>
-                    <p id="backtest-pnl" class="text-lg font-bold text-yellow-400">0.00%</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- 신규 패널 6: 실시간 시스템 로그 터미널 -->
-    <section
-        class="mt-6 flex-grow bg-[#000000] rounded-2xl border border-gray-700 shadow-xl flex flex-col overflow-hidden h-64 sticky bottom-0 z-50">
-        <div
-            class="bg-gray-900 px-4 py-2 border-b border-gray-700 text-sm text-gray-400 font-medium flex justify-between items-center z-10">
-            <span class="flex items-center gap-2">
-                <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M8 9l3 3-3 3m5 0h3M4 15a2 2 0 002 2h12a2 2 0 002-2V9a2 2 0 00-2-2H6a2 2 0 00-2 2v6z"></path>
-                </svg>
-                System Terminal Logs
-            </span>
-            <button onclick="clearLogs()"
-                class="text-xs text-gray-500 hover:text-white transition-colors">Clear</button>
-        </div>
-        <div id="system-log-terminal"
-            class="p-4 overflow-y-auto font-mono text-sm space-y-1 h-full custom-scrollbar flex flex-col z-0">
-            <div class="text-gray-500">System initialized. Waiting for connection...</div>
-        </div>
-    </section>
-
-    <!-- Lightweight Charts 라이브러리 -->
     <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="api_client.js"></script>
 </body>

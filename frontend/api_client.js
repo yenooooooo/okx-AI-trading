@@ -1,151 +1,219 @@
 const API_URL = `/api/v1`;
 let chart = null;
 let candleSeries = null;
+let lastLogTimestamp = '';
+
+// --- UI Utilities ---
+
+// CountUp animation utility
+function updateNumberText(elementId, newValue, formatCb) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+
+    const oldVal = parseFloat(el.dataset.val || 0);
+    const newVal = parseFloat(newValue || 0);
+
+    if (oldVal === newVal) {
+        if (!el.textContent) el.textContent = formatCb ? formatCb(newVal) : newVal.toFixed(2);
+        return;
+    }
+
+    // Flash effect
+    const parent = el.closest('.flash-target') || el;
+    parent.classList.remove('flash');
+    void parent.offsetWidth; // trigger reflow
+    parent.classList.add('flash');
+
+    // Count up animation (0.2s)
+    const duration = 200;
+    let startTimestamp = null;
+    const step = (timestamp) => {
+        if (!startTimestamp) startTimestamp = timestamp;
+        const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+        const current = oldVal + progress * (newVal - oldVal);
+        el.textContent = formatCb ? formatCb(current) : current.toFixed(2);
+        if (progress < 1) {
+            window.requestAnimationFrame(step);
+        } else {
+            el.textContent = formatCb ? formatCb(newVal) : newVal.toFixed(2);
+            el.dataset.val = newVal;
+        }
+    };
+    window.requestAnimationFrame(step);
+}
+
+// Simple text update with flash
+function updateText(elementId, text, flash = true) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    if (el.textContent === text) return;
+
+    el.textContent = text;
+    if (flash) {
+        const parent = el.closest('.flash-target') || el;
+        parent.classList.remove('flash');
+        void parent.offsetWidth;
+        parent.classList.add('flash');
+    }
+}
+
+// --- Status Sync ---
 
 async function syncBotStatus() {
     try {
         const response = await fetch(`${API_URL}/status`);
         const data = await response.json();
 
-        // 1. 잔고 업데이트 (강제 애니메이션 효과)
-        const balanceEl = document.getElementById('current-balance');
-        const krwEl = document.getElementById('balance-krw');
+        // 1. Balance
+        updateNumberText('current-balance', data.balance);
+        updateNumberText('balance-krw', data.balance * 1350, val => `≈ ${Math.floor(val).toLocaleString()} KRW`);
 
-        const newBalanceHTML = `${data.balance} <span class="text-lg text-slate-400">USDT</span>`;
-        if (balanceEl.innerHTML !== newBalanceHTML) {
-            balanceEl.innerHTML = newBalanceHTML;
-            // 값 변경 시 애니메이션 클래스 토글 (깜빡임 효과)
-            balanceEl.classList.remove('text-white');
-            balanceEl.classList.add('text-green-300');
-            setTimeout(() => {
-                balanceEl.classList.remove('text-green-300');
-                balanceEl.classList.add('text-white');
-            }, 300);
-
-            krwEl.innerText = `≈ ${(data.balance * 1350).toLocaleString()} 원`;
-        }
-
-        // 2. 포지션 업데이트 (첫 번째 심볼 기준, 다중 심볼은 별도 패널에서 표시)
+        // 2. Position
         const symbols = data.symbols || {};
-        let firstSymbol = Object.keys(symbols)[0];
-        let symbolData = firstSymbol ? symbols[firstSymbol] : null;
+        const firstSymbol = Object.keys(symbols)[0];
+        const symbolData = firstSymbol ? symbols[firstSymbol] : null;
 
-        if (symbolData && symbolData.position && symbolData.position !== "NONE") {
-            document.getElementById('position-none').classList.add('hidden');
-            document.getElementById('position-active').classList.remove('hidden');
+        const posCard = document.getElementById('active-position-card');
+        const posNone = document.getElementById('position-none');
+        const posActive = document.getElementById('position-active');
 
-            const typeEl = document.getElementById('pos-type');
-            typeEl.innerText = symbolData.position;
-            typeEl.className = symbolData.position === 'LONG' ? 'text-3xl font-bold text-green-500' : 'text-3xl font-bold text-red-500';
+        if (!symbolData || symbolData.position === 'NONE') {
+            posNone.classList.remove('hidden');
+            posActive.classList.add('hidden');
+            posActive.classList.remove('flex');
+            posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
+        } else {
+            posNone.classList.add('hidden');
+            posActive.classList.remove('hidden');
+            posActive.classList.add('flex');
 
-            document.getElementById('pos-entry').innerText = `$${parseFloat(symbolData.entry_price).toLocaleString()}`;
-            if (symbolData.current_price) document.getElementById('pos-current').innerText = `$${parseFloat(symbolData.current_price).toLocaleString()}`;
+            updateText('pos-type', symbolData.position);
+            const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
+            updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
 
-            // 실시간 수익률 (색상 동적 변경 및 강제 갱신)
             const roiEl = document.getElementById('pos-roi');
-            const roiValue = parseFloat(symbolData.unrealized_pnl_percent || 0).toFixed(2);
-            const newRoiText = roiValue > 0 ? `+${roiValue}%` : `${roiValue}%`;
-
-            if (roiEl.innerText !== newRoiText) {
-                roiEl.innerText = newRoiText;
-                roiEl.className = roiValue > 0 ? 'text-3xl font-black text-green-400 transition-colors' : (roiValue < 0 ? 'text-3xl font-black text-red-400 transition-colors' : 'text-3xl font-black text-gray-400 transition-colors');
-                // 폰트 크기를 잠깐 키웠다 줄이는 애니메이션 효과
-                roiEl.style.transform = 'scale(1.1)';
-                setTimeout(() => {
-                    roiEl.style.transform = 'scale(1.0)';
-                }, 200);
+            if (pnl > 0) {
+                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
+                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
+            } else if (pnl < 0) {
+                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
+                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
+            } else {
+                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
+                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
             }
 
-            if (symbolData.take_profit_price) document.getElementById('pos-tp').innerText = `$${parseFloat(symbolData.take_profit_price).toLocaleString()}`;
-            if (symbolData.stop_loss_price) document.getElementById('pos-sl').innerText = `$${parseFloat(symbolData.stop_loss_price).toLocaleString()}`;
+            updateNumberText('pos-entry', symbolData.entry_price);
+            updateNumberText('pos-current', symbolData.current_price);
+            updateNumberText('pos-tp', symbolData.take_profit_price);
+            updateNumberText('pos-sl', symbolData.stop_loss_price);
+        }
+
+        // 3. Status Info
+        const statusDot = document.getElementById('status-dot');
+        const statusPing = document.getElementById('status-ping');
+        const statusText = document.getElementById('bot-status-text');
+        const toggleBtn = document.getElementById('toggle-bot-btn');
+
+        if (data.is_running) {
+            statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-neon-green';
+            statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-green opacity-75';
+            statusText.textContent = 'SYSTEM ONLINE';
+            statusText.className = 'font-mono text-sm tracking-widest text-neon-green uppercase';
+            toggleBtn.textContent = 'HALT SYSTEM';
+            toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-red hover:bg-neon-red hover:text-white text-neon-red text-sm font-bold rounded transition-all font-mono tracking-widest';
         } else {
-            document.getElementById('position-none').classList.remove('hidden');
-            document.getElementById('position-active').classList.add('hidden');
+            statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-neon-red';
+            statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-red opacity-75';
+            statusText.textContent = 'SYSTEM OFFLINE';
+            statusText.className = 'font-mono text-sm tracking-widest text-gray-400 uppercase';
+            toggleBtn.textContent = 'INITIATE';
+            toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-green hover:bg-neon-green hover:text-navy-900 text-neon-green text-sm font-bold rounded transition-all font-mono tracking-widest';
         }
 
-        // 3. 로그 업데이트
-        const logContainer = document.getElementById('log-container');
-        if (data.logs.length > logContainer.childElementCount) {
-            logContainer.innerHTML = '';
-            data.logs.slice(-20).forEach(logMsg => {
-                const logDiv = document.createElement('div');
-                logDiv.className = logMsg.includes('[오류]') || logMsg.includes('[긴급]') ? 'text-red-400' :
-                    logMsg.includes('[봇]') ? 'text-green-400' : 'text-slate-300';
-                logDiv.innerText = logMsg;
-                logContainer.appendChild(logDiv);
-            });
-            logContainer.scrollTop = logContainer.scrollHeight;
-        }
+        // 4. Brain (Indicators)
+        const brainRes = await fetch(`${API_URL}/brain`);
+        const brainData = await brainRes.json();
 
+        const symbolBrains = brainData.symbols || {};
+        const brainState = firstSymbol ? symbolBrains[firstSymbol] : brainData;
+
+        if (brainState) {
+            if (brainState.price) {
+                updateNumberText('hero-price', brainState.price);
+            }
+            if (brainState.decision) {
+                updateText('brain-decision', brainState.decision, false);
+            }
+            if (brainState.rsi) {
+                const rsi = parseFloat(brainState.rsi);
+                updateNumberText('brain-rsi', rsi);
+                const rsiEl = document.getElementById('brain-rsi');
+                rsiEl.className = rsi <= 30 ? 'font-mono flash-target font-bold text-neon-green' : (rsi >= 70 ? 'font-mono flash-target font-bold text-neon-red' : 'font-mono flash-target font-bold text-text-main');
+
+                // Update marker
+                const marker = document.getElementById('rsi-marker');
+                if (marker) {
+                    marker.style.left = `${Math.max(0, Math.min(100, rsi))}%`;
+                }
+            }
+            if (brainState.macd !== undefined) {
+                const macd = parseFloat(brainState.macd);
+                updateNumberText('brain-macd', macd);
+                const macdEl = document.getElementById('brain-macd');
+                macdEl.className = macd > 0 ? 'font-mono flash-target font-bold text-neon-green' : 'font-mono flash-target font-bold text-neon-red';
+
+                // Update MACD Gauges
+                const posBar = document.getElementById('macd-bar-pos');
+                const negBar = document.getElementById('macd-bar-neg');
+                if (posBar && negBar) {
+                    if (macd > 0) {
+                        negBar.style.width = '0%';
+                        posBar.style.width = `${Math.min(100, macd * 2)}%`; // scale factor
+                    } else {
+                        posBar.style.width = '0%';
+                        negBar.style.width = `${Math.min(100, Math.abs(macd) * 2)}%`;
+                    }
+                }
+            }
+        }
     } catch (error) {
-        console.log("서버 오프라인 대기 중...");
+        console.warn("Status Sync Failed:", error);
     }
-
-    await updateBrain();
 }
 
 async function toggleBot() {
     try {
         const response = await fetch(`${API_URL}/toggle`, { method: 'POST' });
-        const data = await response.json();
-
-        const btn = document.getElementById('toggle-bot-btn');
-        const statusText = document.getElementById('bot-status-text');
-        const ping = document.getElementById('status-ping');
-        const dot = document.getElementById('status-dot');
-
-        if (data.is_running) {
-            btn.innerText = 'Stop Bot';
-            btn.className = 'px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded shadow transition font-semibold';
-            statusText.innerText = 'Running';
-            statusText.className = 'text-green-400 font-semibold';
-            ping.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75';
-            dot.className = 'relative inline-flex rounded-full h-3 w-3 bg-green-500';
-        } else {
-            btn.innerText = 'Start Bot';
-            btn.className = 'px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded shadow transition font-semibold';
-            statusText.innerText = 'Offline';
-            statusText.className = 'text-slate-300 font-semibold';
-            ping.className = 'hidden';
-            dot.className = 'relative inline-flex rounded-full h-3 w-3 bg-red-500';
-        }
+        const result = await response.json();
+        syncBotStatus();
     } catch (error) {
-        alert("백엔드 서버가 켜져 있는지 확인해주세요.");
+        alert('Toggle target failed: ' + error.message);
     }
 }
 
-// === 신규 함수들 ===
-
-async function syncStats() {
-    try {
-        const response = await fetch(`${API_URL}/stats`);
-        const stats = await response.json();
-
-        document.getElementById('stats-total-trades').innerText = stats.total_trades || 0;
-        document.getElementById('stats-win-rate').innerText = (stats.win_rate || 0).toFixed(2) + '%';
-        document.getElementById('stats-total-pnl').innerText = (stats.total_pnl_percent || 0).toFixed(2) + '%';
-        document.getElementById('stats-max-dd').innerText = (stats.max_drawdown || 0).toFixed(2) + '%';
-        document.getElementById('stats-sharpe').innerText = (stats.sharpe_ratio || 0).toFixed(2);
-    } catch (error) {
-        console.warn("성과 분석 동기화 실패:", error);
-    }
-}
-
+// --- Config Sync ---
 async function syncConfig() {
     try {
         const response = await fetch(`${API_URL}/config`);
-        const config = await response.json();
-
-        // 설정값 UI에 반영
-        const riskRate = config.risk_per_trade || 0.01;
-        document.getElementById('config-risk-rate').value = (parseFloat(riskRate) * 100).toFixed(1);
-        document.getElementById('config-leverage').value = config.leverage || 1;
-
-        const symbols = config.symbols || ['BTC/USDT:USDT'];
-        const symbolsStr = Array.isArray(symbols) ? symbols.join(', ') : symbols;
-        document.getElementById('config-symbols').value = symbolsStr;
+        const configs = await response.json();
+        for (const [key, val] of Object.entries(configs)) {
+            if (key === 'risk_per_trade') {
+                const input = document.getElementById('config-risk-rate');
+                const v = parseFloat(val) * 100;
+                if (input) input.value = v;
+                updateText('risk-val-display', v.toFixed(1) + '%', false);
+            } else if (key === 'leverage') {
+                const input = document.getElementById('config-leverage');
+                if (input) input.value = val;
+                updateText('lev-val-display', val + 'x', false);
+            } else if (key === 'symbols') {
+                const input = document.getElementById('config-symbols');
+                if (input && Array.isArray(val)) input.value = val.join(', ');
+            }
+        }
     } catch (error) {
-        console.warn("설정 로드 실패:", error);
+        console.warn("Config sync failed:", error);
     }
 }
 
@@ -157,14 +225,10 @@ async function updateConfigValue(key) {
         } else if (key === 'leverage') {
             value = parseInt(document.getElementById('config-leverage').value);
         }
-
-        const response = await fetch(`${API_URL}/config?key=${key}&value=${value}`, {
-            method: 'POST'
-        });
-        const result = await response.json();
-        alert(result.message || '설정이 저장되었습니다.');
+        const response = await fetch(`${API_URL}/config?key=${key}&value=${value}`, { method: 'POST' });
+        await response.json();
     } catch (error) {
-        alert('설정 변경 실패: ' + error.message);
+        alert('Config update failed: ' + error.message);
     }
 }
 
@@ -173,60 +237,66 @@ async function updateConfigSymbols() {
         const symbolsText = document.getElementById('config-symbols').value;
         const symbols = symbolsText.split(',').map(s => s.trim()).filter(s => s);
         const symbolsJson = JSON.stringify(symbols);
-
-        const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, {
-            method: 'POST'
-        });
-        const result = await response.json();
-        alert(result.message || '심볼이 저장되었습니다.');
+        const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, { method: 'POST' });
+        await response.json();
     } catch (error) {
-        alert('심볼 변경 실패: ' + error.message);
+        alert('Symbol update failed: ' + error.message);
     }
 }
 
-// Lightweight Charts 초기화
+// --- Chart Sync ---
 function initChart() {
     const container = document.getElementById('chart-container');
     if (!container || chart) return;
 
     chart = LightweightCharts.createChart(container, {
         layout: {
-            backgroundColor: '#1e293b',
-            textColor: '#cbd5e1',
+            background: { type: 'solid', color: 'transparent' },
+            textColor: '#8b949e',
+        },
+        grid: {
+            vertLines: { color: 'rgba(48, 54, 61, 0.5)' },
+            horzLines: { color: 'rgba(48, 54, 61, 0.5)' },
         },
         timeScale: {
             timeVisible: true,
             secondsVisible: false,
+            borderColor: '#30363d'
         },
+        rightPriceScale: {
+            borderColor: '#30363d'
+        }
     });
 
-    candleSeries = chart.addCandlestickSeries();
-    chart.timeScale().fitContent();
+    candleSeries = chart.addCandlestickSeries({
+        upColor: '#00ff88',
+        downColor: '#ff4d4d',
+        borderVisible: false,
+        wickUpColor: '#00ff88',
+        wickDownColor: '#ff4d4d'
+    });
+
+    // Add dummy overlay for moving averages (visuals requested)
+    const smaSeries = chart.addLineSeries({ color: 'rgba(88, 166, 255, 0.5)', lineWidth: 1 });
 }
 
 async function syncChart() {
     try {
         if (!chart) initChart();
 
-        const response = await fetch(`${API_URL}/ohlcv?symbol=BTC/USDT:USDT&limit=50`);
+        const response = await fetch(`${API_URL}/ohlcv?symbol=BTC/USDT:USDT&limit=60`);
         const ohlcv = await response.json();
 
-        // 에러 객체가 반환된 경우 처리
-        if (ohlcv.error) {
-            console.error("차트 데이터 에러(서버):", ohlcv.error);
+        const overlay = document.getElementById('chart-overlay');
+
+        if (ohlcv.error || !Array.isArray(ohlcv) || ohlcv.length === 0) {
+            if (overlay) overlay.classList.remove('hidden');
             return;
         }
 
-        // 배열이 아니거나 비어있는 경우 처리
-        if (!Array.isArray(ohlcv) || ohlcv.length === 0) {
-            console.warn("차트 데이터가 비어 있습니다 (0건 수신)");
-            return;
-        }
+        if (overlay) overlay.classList.add('hidden');
 
-        if (!candleSeries) {
-            console.error("차트 캔들 시리즈가 초기화되지 않았습니다.");
-            return;
-        }
+        if (!candleSeries) return;
 
         const data = ohlcv.map(candle => ({
             time: Math.floor(candle.timestamp / 1000),
@@ -237,201 +307,77 @@ async function syncChart() {
         }));
 
         candleSeries.setData(data);
-        chart.timeScale().fitContent();
-        console.log(`[차트 업데이트] ${data.length}개 캔들 동기화 성공`);
     } catch (error) {
-        console.error("차트 통신(fetch) / 동기화 실패:", error);
+        const overlay = document.getElementById('chart-overlay');
+        if (overlay) overlay.classList.remove('hidden');
+        console.error("Chart Sync Failed:", error);
     }
 }
 
-async function syncMultiSymbols() {
-    try {
-        const response = await fetch(`${API_URL}/status`);
-        const data = await response.json();
-        const container = document.getElementById('multi-symbol-container');
-
-        const symbols = data.symbols || {};
-        if (Object.keys(symbols).length === 0) {
-            container.innerHTML = '<p class="text-gray-400 text-sm">활성 심볼 없음</p>';
-            return;
-        }
-
-        container.innerHTML = '';
-        for (const [symbol, symbolData] of Object.entries(symbols)) {
-            const card = document.createElement('div');
-            card.className = 'bg-gray-900 p-4 rounded-xl border border-gray-700';
-
-            const positionType = symbolData.position === 'NONE' ? '대기' : symbolData.position;
-            const posColor = symbolData.position === 'LONG' ? 'text-green-400' : (symbolData.position === 'SHORT' ? 'text-red-400' : 'text-gray-400');
-
-            card.innerHTML = `
-                <div class="flex justify-between items-start mb-2">
-                    <div>
-                        <p class="text-sm font-bold text-cyan-400">${symbol}</p>
-                        <p class="text-xs text-gray-400">현재: $${(symbolData.current_price || 0).toLocaleString()}</p>
-                    </div>
-                    <p class="text-lg font-bold ${posColor}">${positionType}</p>
-                </div>
-                <div class="text-xs text-gray-400 space-y-1">
-                    ${symbolData.position !== 'NONE' ? `
-                        <p>진입: $${(symbolData.entry_price || 0).toLocaleString()}</p>
-                        <p class="font-bold text-${symbolData.unrealized_pnl_percent > 0 ? 'green' : 'red'}-400">
-                            ${symbolData.unrealized_pnl_percent > 0 ? '+' : ''}${(symbolData.unrealized_pnl_percent || 0).toFixed(2)}%
-                        </p>
-                    ` : '<p>포지션 없음</p>'}
-                </div>
-            `;
-            container.appendChild(card);
-        }
-    } catch (error) {
-        console.warn("다중 심볼 동기화 실패:", error);
-    }
-}
-
-async function runBacktest() {
-    try {
-        const symbol = document.getElementById('backtest-symbol').value;
-        const timeframe = document.getElementById('backtest-timeframe').value;
-        const limit = parseInt(document.getElementById('backtest-limit').value);
-
-        const response = await fetch(`${API_URL}/backtest`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol, timeframe, limit })
-        });
-
-        const result = await response.json();
-
-        if (result.error) {
-            alert('백테스팅 실패: ' + result.error);
-            return;
-        }
-
-        // 결과 표시
-        const resultsDiv = document.getElementById('backtest-results');
-        resultsDiv.classList.remove('hidden');
-
-        document.getElementById('backtest-total-trades').innerText = result.total_trades || 0;
-        document.getElementById('backtest-win-rate').innerText = (result.win_rate || 0).toFixed(2) + '%';
-        document.getElementById('backtest-pnl').innerText = (result.total_pnl_percent || 0).toFixed(2) + '%';
-
-        alert(`백테스팅 완료!\n거래: ${result.total_trades}건\n승률: ${result.win_rate.toFixed(2)}%\n수익: ${result.total_pnl_percent.toFixed(2)}%`);
-    } catch (error) {
-        alert('백테스팅 실행 중 오류: ' + error.message);
-    }
-}
-
-async function updateBrain() {
-    try {
-        const brainRes = await fetch(`/api/v1/brain`);
-        if (brainRes.ok) {
-            const brainData = await brainRes.json();
-
-            // 다중 심볼 뇌 상태 처리
-            const symbolBrains = brainData.symbols || {};
-            const firstSymbol = Object.keys(symbolBrains)[0];
-            const brainState = firstSymbol ? symbolBrains[firstSymbol] : brainData;
-
-            if (brainState.price) document.getElementById('brain-price').innerText = `$${parseFloat(brainState.price).toLocaleString()}`;
-            if (brainState.decision) document.getElementById('brain-decision').innerText = `🤖 ${brainState.decision}`;
-
-            if (brainState.rsi) {
-                const rsiEl = document.getElementById('brain-rsi');
-                const rsiVal = parseFloat(brainState.rsi);
-                rsiEl.innerText = rsiVal.toFixed(2);
-                rsiEl.className = rsiVal <= 40 ? 'text-xl font-mono text-green-400' : (rsiVal >= 60 ? 'text-xl font-mono text-red-400' : 'text-xl font-mono text-purple-400');
-            }
-
-            if (brainState.macd !== undefined) {
-                const macdEl = document.getElementById('brain-macd');
-                const macdVal = parseFloat(brainState.macd).toFixed(1);
-                macdEl.innerText = macdVal;
-                macdEl.className = parseFloat(brainState.macd) > 0 ? 'text-xl font-mono text-green-400' : 'text-xl font-mono text-red-400';
-            }
-
-            if (brainState.bb_upper && brainState.bb_lower) {
-                document.getElementById('brain-bb').innerHTML = `상: $${parseFloat(brainState.bb_upper).toLocaleString()}<br>하: $${parseFloat(brainState.bb_lower).toLocaleString()}`;
-            }
-        }
-    } catch (error) {
-        console.warn("뇌 구조 데이터 동기화 실패:", error);
-    }
-}
-
-let lastLogTimestamp = '';
-
+// --- Terminal Logs ---
 async function updateLogs() {
     try {
         const response = await fetch(`${API_URL}/logs?limit=50`);
         const logs = await response.json();
-
-        let logContainer = document.getElementById('system-log-terminal');
-
-        // 터미널 엘리먼트가 없으면 조용히 종료 (HTML에 복구될 때까지 대기)
-        if (!logContainer) {
-            return;
-        }
+        const logContainer = document.getElementById('system-log-terminal');
+        if (!logContainer) return;
 
         let newLogsAdded = false;
 
         logs.forEach(log => {
-            // 시간순 정렬된 상태에서 최신 타임스탬프보다 이전의 로그는 필터링
             if (!lastLogTimestamp || log.created_at > lastLogTimestamp) {
                 const logDiv = document.createElement('div');
-
-                // 로그 레벨 및 내용에 따른 색상 처리
                 const msg = log.message || '';
+
+                let colorClass = 'text-gray-400';
                 if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
-                    logDiv.className = 'text-red-400';
-                } else if (msg.includes('[봇]') || msg.includes('[진입 성공]') || msg.includes('청산')) {
-                    logDiv.className = 'text-green-400';
-                } else {
-                    logDiv.className = 'text-gray-300';
+                    colorClass = 'text-neon-red drop-shadow-[0_0_5px_rgba(255,77,77,0.8)]';
+                } else if (msg.includes('[봇]') || msg.includes('[진입 성공]') || msg.includes('청산') || msg.includes('[엔진]')) {
+                    colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
                 }
 
-                // 타임스탬프 포맷팅 가시성 향상
-                const timeStr = log.created_at ? `[${log.created_at.replace('T', ' ').substring(0, 19)}]` : '';
-                logDiv.innerText = `${timeStr} ${msg}`;
+                const timeStr = log.created_at ? log.created_at.replace('T', ' ').substring(11, 19) : '';
+                logDiv.className = colorClass + ' break-words';
+                logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${msg}`;
 
                 logContainer.appendChild(logDiv);
-                lastLogTimestamp = log.created_at; // 마지막 타임스탬프 갱신
+                lastLogTimestamp = log.created_at;
                 newLogsAdded = true;
             }
         });
 
-        // 새 로그가 추가되었으면 자동 스크롤
-        if (newLogsAdded && logContainer) {
+        if (newLogsAdded) {
             logContainer.scrollTop = logContainer.scrollHeight;
         }
-
     } catch (error) {
-        console.warn("시스템 로그 동기화 실패:", error);
+        console.warn("Log Sync Failed:", error);
     }
 }
 
 function clearLogs() {
-    document.getElementById('log-container').innerHTML = '';
-    const sysLogContainer = document.getElementById('system-log-terminal');
-    if (sysLogContainer) {
-        sysLogContainer.innerHTML = '<div class="text-gray-500">System Logs Cleared.</div>';
+    const logContainer = document.getElementById('system-log-terminal');
+    if (logContainer) {
+        logContainer.innerHTML = '<div class="text-gray-500">[system@antigravity ~]$ Buffer cleared.</div>';
     }
 }
 
-// === 초기화 및 setInterval 설정 ===
+// --- Stats Tracker ---
+async function syncStats() {
+    try {
+        const response = await fetch(`${API_URL}/stats`);
+        const stats = await response.json();
 
-// 초기 설정 로드
+        updateNumberText('stats-total-trades', stats.total_trades || 0, val => Math.floor(val));
+        updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
+        updateNumberText('stats-total-pnl', stats.total_pnl_percent || 0, val => `${val.toFixed(2)}%`);
+    } catch (e) { }
+}
+
+// --- Init & Intervals ---
 syncConfig();
 initChart();
 
-// 1초마다 봇 상태 동기화
 setInterval(syncBotStatus, 1000);
-
-// 10초마다 차트 동기화
-setInterval(syncChart, 10000);
-
-// 30초마다 성과 분석 및 다중 심볼 업데이트
+setInterval(syncChart, 5000);       // Optimized to 5s
 setInterval(syncStats, 30000);
-setInterval(syncMultiSymbols, 30000);
-
-// 3초마다 시스템 로그 동기화
 setInterval(updateLogs, 3000);
