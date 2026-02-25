@@ -1,5 +1,5 @@
 // 배포 환경에서는 서버의 퍼블릭 IP를 입력해야 합니다. 로컬 테스트 시에는 127.0.0.1 유지.
-const SERVER_IP = "127.0.0.1"; // TODO: AWS EC2 등 실제 배포 시 여기에 서버의 Public IP를 입력하세요.
+const SERVER_IP = "15.135.78.118"; // TODO: AWS EC2 등 실제 배포 시 여기에 서버의 Public IP를 입력하세요.
 const API_URL = `http://${SERVER_IP}:8000/api/v1`;
 
 async function syncBotStatus() {
