@@ -105,12 +105,13 @@
                     <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-neon-red"></span>
                 </span>
                 <span id="bot-status-text" class="font-mono text-sm tracking-widest text-gray-400 uppercase">System
-                    Offline</span>
+                    <span id="bot-status-text" class="font-mono text-sm tracking-widest text-gray-400 uppercase">🛑 시스템
+                        중지</span>
             </div>
             <button id="toggle-bot-btn"
                 class="px-6 py-2 bg-navy-800 border border-navy-border hover:border-gray-400 text-sm font-bold rounded transition-all text-text-main"
                 onclick="toggleBot()">
-                INITIATE
+                시스템 가동
             </button>
         </div>
     </header>
@@ -124,7 +125,7 @@
                 <!-- abstract background blur -->
                 <div class="absolute -top-10 -right-10 w-32 h-32 bg-neon-green/5 blur-[50px] rounded-full"></div>
 
-                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-1 z-10">Total Equity</h3>
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-1 z-10">총 자산 (Equity)</h3>
                 <div class="flex items-baseline gap-2 z-10">
                     <div class="text-4xl font-mono font-bold text-text-main flash-target" id="current-balance">0.00
                     </div>
@@ -135,11 +136,11 @@
 
             <!-- Parameters -->
             <div class="glass-panel p-5 flex-grow">
-                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-6">Control Parameters</h3>
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-6">매매 제어 설정 (Control Parameters)</h3>
 
                 <div class="mb-6">
                     <div class="flex justify-between text-xs mb-2">
-                        <span class="text-gray-400">Risk Allocation</span>
+                        <span class="text-gray-400">리스크 할당 (%)</span>
                         <span id="risk-val-display" class="font-mono text-neon-green">1.0%</span>
                     </div>
                     <input type="range" id="config-risk-rate" min="0.1" max="10" step="0.1" value="1.0"
@@ -152,7 +153,7 @@
 
                 <div class="mb-6">
                     <div class="flex justify-between text-xs mb-2">
-                        <span class="text-gray-400">Leverage Multiplier</span>
+                        <span class="text-gray-400">레버리지 배수</span>
                         <span id="lev-val-display" class="font-mono text-text-main">1x</span>
                     </div>
                     <input type="range" id="config-leverage" min="1" max="10" step="1" value="1"
@@ -164,12 +165,17 @@
                 </div>
 
                 <div>
-                    <span class="text-xs text-gray-400 block mb-2 uppercase tracking-wide">Target Symbol</span>
+                    <span class="text-xs text-gray-400 block mb-2 uppercase tracking-wide">감시 심볼 (Target)</span>
                     <input type="text" id="config-symbols" value="BTC/USDT:USDT"
                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-neon-green text-sm font-mono focus:outline-none focus:border-neon-green text-center tracking-widest" />
                     <button onclick="updateConfigSymbols()"
                         class="mt-3 text-xs w-full py-2 border border-navy-border hover:bg-navy-800 transition rounded text-gray-300 font-mono tracking-widest hover:text-white hover:border-gray-500">UPDATE
                         TARGET</button>
+                    <!-- 강제 테스트 매수 버튼 -->
+                    <button onclick="testOrder()"
+                        class="mt-4 text-xs w-full py-2 bg-neon-green/20 border border-neon-green hover:bg-neon-green hover:text-navy-900 transition rounded text-neon-green font-mono tracking-widest font-bold">
+                        [테스트 진입 (Test Order)]
+                    </button>
                 </div>
             </div>
         </div>
@@ -250,8 +256,8 @@
 
             <div
                 class="glass-panel p-4 flex justify-between items-center text-sm font-mono border-l-4 border-l-neon-green">
-                <span class="text-gray-400 uppercase text-xs">AI Consensus</span>
-                <span id="brain-decision" class="text-neon-green tracking-widest font-bold">AWAITING_DATA</span>
+                <span class="text-gray-400 uppercase text-xs">AI 종합 판단 결과</span>
+                <span id="brain-decision" class="text-neon-green tracking-widest font-bold">데이터 수신 대기 중...</span>
             </div>
         </div>
 
@@ -306,7 +312,7 @@
             <!-- Stats -->
             <div class="glass-panel p-5 grid grid-cols-2 gap-4 text-xs">
                 <h3 class="col-span-2 text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2">
-                    Performance Metrics</h3>
+                    누적 성과 지표 (Performance Metrics)</h3>
                 <div class="flex flex-col gap-1">
                     <span class="text-[10px] text-gray-500 uppercase">Trades</span>
                     <span id="stats-total-trades" class="font-mono text-sm text-text-main flash-target">0</span>

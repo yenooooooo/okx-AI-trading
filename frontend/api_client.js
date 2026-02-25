@@ -118,16 +118,16 @@ async function syncBotStatus() {
         if (data.is_running) {
             statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-neon-green';
             statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-green opacity-75';
-            statusText.textContent = 'SYSTEM ONLINE';
+            statusText.textContent = '🟢 시스템 가동 중';
             statusText.className = 'font-mono text-sm tracking-widest text-neon-green uppercase';
-            toggleBtn.textContent = 'HALT SYSTEM';
+            toggleBtn.textContent = '🛑 시스템 중지';
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-red hover:bg-neon-red hover:text-white text-neon-red text-sm font-bold rounded transition-all font-mono tracking-widest';
         } else {
             statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-neon-red';
             statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-red opacity-75';
-            statusText.textContent = 'SYSTEM OFFLINE';
+            statusText.textContent = '🛑 시스템 중지';
             statusText.className = 'font-mono text-sm tracking-widest text-gray-400 uppercase';
-            toggleBtn.textContent = 'INITIATE';
+            toggleBtn.textContent = '🟢 시스템 가동';
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-green hover:bg-neon-green hover:text-navy-900 text-neon-green text-sm font-bold rounded transition-all font-mono tracking-widest';
         }
 
@@ -373,11 +373,38 @@ async function syncStats() {
     } catch (e) { }
 }
 
-// --- Init & Intervals ---
-syncConfig();
-initChart();
+// --- Test Order Function ---
+async function testOrder() {
+    try {
+        const response = await fetch(`${API_URL}/test_order`, { method: 'POST' });
+        const result = await response.json();
+        if (result.error) throw new Error(result.error);
+        alert('테스트 매수 주문이 브레인으로 전송되었습니다. 터미널 로그를 확인하십시오.');
+        updateLogs(); // fetch logs immediately
+        syncBotStatus(); // fetch pos immediately
+    } catch (error) {
+        alert('테스트 진입 실패: ' + error.message);
+    }
+}
 
-setInterval(syncBotStatus, 1000);
-setInterval(syncChart, 5000);       // Optimized to 5s
-setInterval(syncStats, 30000);
-setInterval(updateLogs, 3000);
+// --- Init & Intervals (Parallel Optimization) ---
+async function initializeApp() {
+    // 순차적 페칭 대신 Promise.all을 활용해 병렬 스레드로 대기 시간 단축
+    initChart();
+    await Promise.all([
+        syncConfig(),
+        syncBotStatus(),
+        syncStats(),
+        syncChart(),
+        updateLogs()
+    ]);
+
+    // 초기 렌더링 후 타이머 설정
+    setInterval(syncBotStatus, 1000);
+    setInterval(syncChart, 5000);       // Optimized to 5s
+    setInterval(syncStats, 30000);
+    setInterval(updateLogs, 3000);
+}
+
+// Start
+initializeApp();

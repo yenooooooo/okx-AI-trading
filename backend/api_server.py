@@ -198,14 +198,16 @@ async def async_trading_loop():
                 except Exception as e:
                     pass  # 일시적 API 에러 무시
 
-            # 30초마다 엔진 생존 여부 (분석 상태) 로그 출력
+            # 5초마다 엔진 맥박(Pulse) 로그 출력
             current_time = time.time()
-            if current_time - last_log_time >= 30:
-                engine_msg = f"[엔진] 분석 사이클 가동 중 - "
+            if current_time - last_log_time >= 5:
                 for sym, stat in ai_brain_state["symbols"].items():
-                    engine_msg += f"[{sym}] RSI: {stat.get('rsi', 0)} / MACD: {stat.get('macd', 0)} "
-                bot_global_state["logs"].append(engine_msg)
-                logger.info(engine_msg)
+                    price = stat.get('price', 0)
+                    rsi = stat.get('rsi', 0)
+                    macd = stat.get('macd', 0)
+                    engine_msg = f"[감시] {sym} 현재가: {price} | RSI: {rsi} | MACD: {macd} | 매수 타점 대기 중..."
+                    bot_global_state["logs"].append(engine_msg)
+                    logger.info(engine_msg)
                 last_log_time = current_time
 
             await asyncio.sleep(3)
@@ -217,6 +219,55 @@ async def async_trading_loop():
             await asyncio.sleep(5)
 
 # ===== 기존 엔드포인트 (하위 호환) =====
+
+@app_server.post("/api/v1/test_order")
+async def execute_test_order():
+    """강제 테스트 매수 (Market Buy) 실행 엔드포인트"""
+    try:
+        if not bot_global_state["is_running"]:
+            return {"error": "시스템이 중지되어 있습니다. 먼저 가동해 주세요."}
+            
+        symbol = list(bot_global_state["symbols"].keys())[0] if bot_global_state["symbols"] else "BTC/USDT:USDT"
+        
+        # 포지션이 이미 있을 경우 방어
+        if bot_global_state["symbols"][symbol]["position"] != "NONE":
+            err_msg = "[오류] 이미 포지션을 보유 중이어서 테스트 매수를 진행할 수 없습니다."
+            bot_global_state["logs"].append(err_msg)
+            return {"error": "이미 포지션이 존재합니다."}
+
+        engine_api = OKXEngine()
+        if not engine_api.exchange:
+            return {"error": "OKX 거래소 인스턴스가 연결되지 않았습니다."}
+            
+        amount = 1 # 테스트 수량
+        try:
+            # 시장가 매수
+            engine_api.exchange.create_market_buy_order(symbol, amount)
+            
+            # 테스트 진입 로그 기록
+            test_msg = f"[{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {amount})"
+            bot_global_state["logs"].append(test_msg)
+            logger.info(test_msg)
+            send_telegram_sync(test_msg)
+            
+            # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
+            ticker = engine_api.exchange.fetch_ticker(symbol)
+            current_price = ticker['last']
+            bot_global_state["symbols"][symbol]["position"] = "LONG"
+            bot_global_state["symbols"][symbol]["entry_price"] = current_price
+            bot_global_state["symbols"][symbol]["highest_price"] = current_price
+            bot_global_state["symbols"][symbol]["lowest_price"] = current_price
+            
+            return {"status": "success", "message": test_msg}
+
+        except Exception as e:
+            error_msg = f"[{symbol}] 테스트 매수 주문 자체 실패: {str(e)}"
+            bot_global_state["logs"].append(error_msg)
+            logger.error(error_msg)
+            return {"error": str(e)}
+
+    except Exception as e:
+         return {"error": f"서버 오류: {str(e)}"}
 
 @app_server.get("/api/v1/status")
 async def fetch_current_status():
