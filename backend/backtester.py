@@ -62,12 +62,18 @@ class Backtester:
             # 캔들별 시뮬레이션
             for idx in range(1, len(df)):
                 current_price = df.iloc[idx]['close']
-                highest_price = df.iloc[:idx+1]['high'].max() if position == "LONG" else entry_price
+                # LONG: 고점(high) 추적 / SHORT: 저점(low) 추적 → trailing stop 정확도 보장
+                if position == "LONG":
+                    extreme_price = df.iloc[:idx+1]['high'].max()
+                elif position == "SHORT":
+                    extreme_price = df.iloc[:idx+1]['low'].min()
+                else:
+                    extreme_price = entry_price
 
                 # 포지션 유지 중 - 리스크 관리
                 if position:
                     risk_action = self.strategy.evaluate_risk_management(
-                        entry_price, current_price, highest_price, position
+                        entry_price, current_price, extreme_price, position
                     )
 
                     if risk_action != "KEEP":
@@ -128,8 +134,8 @@ class Backtester:
                 returns = [(balances[i] - balances[i-1]) / balances[i-1] for i in range(1, len(balances))]
                 if returns:
                     import statistics
-                    mean_return = statistics.mean(returns) * 252  # 연평균화
-                    std_dev = statistics.stdev(returns) if len(returns) > 1 else 0
+                    mean_return = statistics.mean(returns) * 252        # 연평균화
+                    std_dev = (statistics.stdev(returns) * (252 ** 0.5)) if len(returns) > 1 else 0  # std도 연평균화
                     if std_dev > 0:
                         sharpe_ratio = mean_return / std_dev
                     else:

@@ -3,6 +3,7 @@ let chart = null;
 let candleSeries = null;
 let lastLogTimestamp = '';
 let lastCandleData = null; // WebSocket 실시간 캔들 업데이트용
+let currentSymbol = 'BTC/USDT:USDT'; // 현재 감시 심볼 캐시 (syncConfig에서 갱신)
 
 // --- UI Utilities ---
 
@@ -248,6 +249,7 @@ async function syncConfig() {
             } else if (key === 'symbols') {
                 const input = document.getElementById('config-symbols');
                 if (input && Array.isArray(val)) input.value = val.join(', ');
+                if (Array.isArray(val) && val.length > 0) currentSymbol = val[0]; // 차트용 심볼 갱신
             } else if (key === 'manual_override_enabled') {
                 const toggle = document.getElementById('manual-override-toggle');
                 const panel = document.getElementById('manual-override-panel');
@@ -295,8 +297,11 @@ async function updateConfigSymbols() {
         const symbolsJson = JSON.stringify(symbols);
         const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, { method: 'POST' });
         await response.json();
+        // 심볼 캐시 즉시 갱신 (차트/WS 모두 새 심볼로 전환)
+        if (symbols.length > 0) currentSymbol = symbols[0];
         // 심볼 변경 즉시 WebSocket 재구독 (5초 딜레이 없이 바로 새 심볼로 전환)
         initPriceWebSocket();
+        syncChart();
     } catch (error) {
         alert('Symbol update failed: ' + error.message);
     }
@@ -343,7 +348,7 @@ async function syncChart() {
     try {
         if (!chart) initChart();
 
-        const response = await fetch(`${API_URL}/ohlcv?symbol=${encodeURIComponent('BTC/USDT:USDT')}&limit=60`);
+        const response = await fetch(`${API_URL}/ohlcv?symbol=${encodeURIComponent(currentSymbol)}&limit=60`);
         const ohlcv = await response.json();
 
         const overlay = document.getElementById('chart-overlay');

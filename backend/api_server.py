@@ -105,8 +105,8 @@ async def private_ws_loop():
                 }))
                 login_resp = await asyncio.wait_for(ws.recv(), timeout=10)
                 login_data = json.loads(login_resp)
-                if login_data.get('event') != 'login':
-                    logger.error(f"Private WS 로그인 실패: {login_resp}")
+                if login_data.get('event') != 'login' or login_data.get('code') != '0':
+                    logger.error(f"Private WS 로그인 실패 (code: {login_data.get('code')}): {login_resp}")
                     await asyncio.sleep(5)
                     continue
                 logger.info("Private WebSocket 로그인 성공 - positions 채널 구독")
@@ -241,15 +241,20 @@ async def async_trading_loop():
                             bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = round(pnl, 2)
 
                             # 리스크 관리 체크
-                            highest = bot_global_state["symbols"][symbol].get("highest_price", entry)
+                            # LONG: highest_price(고점) 추적 / SHORT: lowest_price(저점) 추적
+                            if position_side == "SHORT":
+                                extreme_price = bot_global_state["symbols"][symbol].get("lowest_price", entry)
+                            else:
+                                extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
                             risk_action = strategy_instance.evaluate_risk_management(
-                                entry, current_price, highest, position_side
+                                entry, current_price, extreme_price, position_side
                             )
 
                             if risk_action != "KEEP":
                                 # 1. 실제 거래소 청산 API 호출 (트랜잭션 무결성 방어)
                                 try:
-                                    amount = 1  # 임시 수량
+                                    # 진입 시 저장한 실제 계약수 사용 (없으면 1 fallback)
+                                    amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                     if position_side == "LONG":
                                         engine_api.exchange.create_market_sell_order(symbol, amount)
                                     elif position_side == "SHORT":
@@ -291,6 +296,13 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
+                        # 서킷 브레이커: 일일 손실 한도 초과 시 신규 진입 차단
+                        if strategy_instance.is_daily_drawdown_exceeded(curr_bal):
+                            cb_msg = f"[{symbol}] ⚠️ 일일 손실 한도 초과 - 신규 진입 차단 (현재 잔고: {curr_bal:.2f} USDT)"
+                            bot_global_state["logs"].append(cb_msg)
+                            logger.warning(cb_msg)
+                            continue
+
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
                             msg = f"[{symbol}] {signal} 진입 신호 - 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
@@ -328,6 +340,7 @@ async def async_trading_loop():
                                 bot_global_state["symbols"][symbol]["highest_price"] = current_price
                                 bot_global_state["symbols"][symbol]["lowest_price"] = current_price
                                 bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                                bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
                                 # TP/SL 가격 계산 (전략 파라미터 기반)
                                 sl_rate = strategy_instance.hard_stop_loss_rate
                                 tp_rate = strategy_instance.trailing_stop_activation
@@ -469,7 +482,7 @@ async def fetch_current_status():
             # 2. OKX 포지션 Hydration - CCXT ROE(percentage) 직접 바이패스
             try:
                 positions = engine.exchange.fetch_positions()
-                # 먼저 모든 심볼을 NONE으로 리셋
+                # fetch_positions() 성공한 경우에만 NONE 리셋 (실패 시 기존 포지션 유지)
                 for sym in bot_global_state["symbols"]:
                     bot_global_state["symbols"][sym]["position"] = "NONE"
                     bot_global_state["symbols"][sym]["unrealized_pnl_percent"] = 0.0
