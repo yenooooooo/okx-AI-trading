@@ -515,12 +515,39 @@ async function syncStats() {
 }
 
 // --- Manual Override ---
+let isManualPanelOpen = false;
+
+function toggleManualPanel() {
+    isManualPanelOpen = !isManualPanelOpen;
+    const panel = document.getElementById('manual-override-panel');
+    const chevron = document.getElementById('manual-panel-chevron');
+
+    if (panel && chevron) {
+        if (isManualPanelOpen) {
+            panel.classList.remove('hidden');
+            chevron.classList.remove('-rotate-90');
+        } else {
+            panel.classList.add('hidden');
+            chevron.classList.add('-rotate-90');
+        }
+    }
+}
+
 async function toggleManualOverride() {
     const enabled = document.getElementById('manual-override-toggle').checked;
-    const panel = document.getElementById('manual-override-panel');
     const status = document.getElementById('override-status');
-    if (panel) panel.classList.toggle('hidden', !enabled);
-    if (status) status.textContent = enabled ? '활성 — 아래 설정값으로 자동매매' : '해제 — 잔고 비율 자동 계산';
+
+    if (status) {
+        status.textContent = enabled ? '활성 — 아래 설정값으로 자동매매' : '해제 — 잔고 비율 자동 계산';
+        if (enabled) {
+            status.classList.add('text-neon-green');
+            status.classList.remove('text-gray-500');
+        } else {
+            status.classList.add('text-gray-500');
+            status.classList.remove('text-neon-green');
+        }
+    }
+
     await fetch(`${API_URL}/config?key=manual_override_enabled&value=${enabled}`, { method: 'POST' });
 }
 

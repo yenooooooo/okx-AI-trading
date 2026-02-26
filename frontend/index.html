@@ -210,10 +210,23 @@
                 </div>
 
                 <!-- Manual Override -->
-                <div class="mt-5 border-t border-navy-border pt-5">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-xs text-gray-400 uppercase tracking-wide">수동 주문 오버라이드</span>
-                        <label class="relative inline-flex items-center cursor-pointer">
+                <div class="mt-5 border-t border-navy-border pt-4">
+                    <div class="flex justify-between items-center cursor-pointer group px-1 mb-1 transition-all"
+                        onclick="toggleManualPanel()">
+                        <div class="flex items-center gap-1.5">
+                            <span
+                                class="text-xs text-gray-400 uppercase tracking-wide group-hover:text-gray-200 transition-colors">수동
+                                주문 오버라이드</span>
+                            <svg id="manual-panel-chevron"
+                                class="w-4 h-4 text-gray-600 transform transition-transform duration-300 -rotate-90 group-hover:text-gray-400"
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer"
+                            onclick="event.stopPropagation()">
                             <input type="checkbox" id="manual-override-toggle" class="sr-only peer"
                                 onchange="toggleManualOverride()">
                             <div
@@ -221,9 +234,11 @@
                             </div>
                         </label>
                     </div>
-                    <p id="override-status" class="text-[10px] font-mono text-gray-500 mb-3">해제 — 잔고 비율 자동 계산</p>
+                    <p id="override-status" class="text-[10px] font-mono text-gray-500 mb-2 px-1 transition-colors">해제 —
+                        잔고 비율 자동 계산</p>
 
-                    <div id="manual-override-panel" class="hidden space-y-4">
+                    <div id="manual-override-panel"
+                        class="hidden mt-3 p-4 bg-navy-900/40 rounded-lg border border-navy-border/50 space-y-4">
                         <div>
                             <div class="flex justify-between text-xs mb-2">
                                 <span class="text-gray-400">계약수 (Contracts)</span>
@@ -342,7 +357,8 @@
                 class="glass-panel p-5 transition-all duration-500 border-navy-border flex-grow flex flex-col relative overflow-hidden">
                 <div class="flex justify-between items-center border-b border-navy-border pb-2 mb-4 z-10">
                     <h3 class="text-xs text-gray-400 uppercase tracking-widest">활성 포지션 (Active Deployment)</h3>
-                    <span id="pos-symbol" class="hidden font-mono text-xs font-bold text-neon-blue tracking-widest"></span>
+                    <span id="pos-symbol"
+                        class="hidden font-mono text-xs font-bold text-neon-blue tracking-widest"></span>
                 </div>
 
                 <div id="position-none" class="flex-grow flex items-center justify-center z-10">
