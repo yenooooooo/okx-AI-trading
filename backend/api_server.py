@@ -1032,21 +1032,25 @@ async def fetch_symbols():
     return {"symbols": ["BTC/USDT:USDT"]}
 
 @app_server.get("/api/v1/logs")
-async def fetch_system_logs(limit: int = 50):
-    """DB 저장 로그 조회 (최신 50개)"""
-    # get_logs가 역순(최신순)으로 반환한다고 가정 시 프론트에서 랜더링하기 편하게 다시 정방향(오래된것 -> 최신) 정렬
-    logs = get_logs(limit=limit)
+async def fetch_system_logs(limit: int = 50, after_id: int = 0):
+    """DB 저장 로그 조회. after_id 지정 시 해당 id 이후 신규 로그만 반환 (오름차순)."""
+    logs = get_logs(limit=limit, after_id=after_id)
     if not logs:
         return []
-        
-    formatted_logs = []
-    for log in reversed(logs): # 역순 정렬을 되돌림
-        formatted_logs.append({
+
+    # after_id 없는 초기 로드: DESC로 가져온 것을 오름차순으로 되돌림
+    if after_id == 0:
+        logs = list(reversed(logs))
+
+    return [
+        {
+            "id": log.get("id"),
             "level": log.get("level", "INFO"),
             "message": log.get("message", ""),
             "created_at": log.get("created_at", "")
-        })
-    return formatted_logs
+        }
+        for log in logs
+    ]
 
 if __name__ == "__main__":
     uvicorn.run("api_server:app_server", host="0.0.0.0", port=8000, reload=False)

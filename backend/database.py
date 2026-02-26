@@ -172,12 +172,19 @@ def save_log(level: str, message: str):
     conn.commit()
     conn.close()
 
-def get_logs(limit: int = 100) -> List[Dict]:
-    """로그 조회"""
+def get_logs(limit: int = 100, after_id: int = 0) -> List[Dict]:
+    """로그 조회. after_id > 0 이면 해당 id 이후 신규 로그만 오름차순 반환."""
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT * FROM system_logs ORDER BY created_at DESC LIMIT ?', (limit,))
+    if after_id > 0:
+        cursor.execute(
+            'SELECT * FROM system_logs WHERE id > ? ORDER BY id ASC LIMIT ?',
+            (after_id, limit)
+        )
+    else:
+        cursor.execute('SELECT * FROM system_logs ORDER BY created_at DESC LIMIT ?', (limit,))
+
     rows = cursor.fetchall()
     conn.close()
 

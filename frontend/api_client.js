@@ -1,7 +1,7 @@
 const API_URL = `/api/v1`;
 let chart = null;
 let candleSeries = null;
-let lastLogTimestamp = '';
+let lastLogId = 0;
 let lastCandleData = null; // WebSocket 실시간 캔들 업데이트용
 let currentSymbol = 'BTC/USDT:USDT'; // 현재 감시 심볼 캐시 (syncConfig에서 갱신)
 
@@ -419,47 +419,44 @@ async function syncChart() {
 // --- Terminal Logs ---
 async function updateLogs() {
     try {
-        const response = await fetch(`${API_URL}/logs?limit=50`);
+        const url = lastLogId > 0
+            ? `${API_URL}/logs?limit=100&after_id=${lastLogId}`
+            : `${API_URL}/logs?limit=50`;
+
+        const response = await fetch(url);
         const logs = await response.json();
         const logContainer = document.getElementById('system-log-terminal');
-        if (!logContainer) return;
+        if (!logContainer || !logs.length) return;
 
-        let newLogsAdded = false;
+        const fragment = document.createDocumentFragment();
 
         logs.forEach(log => {
-            if (!lastLogTimestamp || log.created_at > lastLogTimestamp) {
-                const logDiv = document.createElement('div');
-                const msg = log.message || '';
+            const msg = log.message || '';
 
-                let colorClass = 'text-gray-400';
-                if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
-                    colorClass = 'text-neon-red drop-shadow-[0_0_5px_rgba(255,77,77,0.8)]';
-                } else if (msg.includes('[봇]') || msg.includes('진입 성공') || msg.includes('청산') || msg.includes('[엔진]') || msg.includes('[스캐너 가동]')) {
-                    colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
-                }
-
-                // Backend returns SQLite CURRENT_TIMESTAMP which is UTC. Convert to KST (+9h)
-                let timeStr = '';
-                if (log.created_at) {
-                    // SQLite format: "YYYY-MM-DD HH:MM:SS" -> convert to valid ISO string "YYYY-MM-DDTHH:MM:SSZ"
-                    const utcDateStr = log.created_at.replace(' ', 'T') + 'Z';
-                    const dateObj = new Date(utcDateStr);
-                    // format to KST HH:MM:SS
-                    timeStr = dateObj.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' });
-                }
-
-                logDiv.className = colorClass + ' break-words';
-                logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${msg}`;
-
-                logContainer.appendChild(logDiv);
-                lastLogTimestamp = log.created_at;
-                newLogsAdded = true;
+            let colorClass = 'text-gray-400';
+            if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
+                colorClass = 'text-neon-red drop-shadow-[0_0_5px_rgba(255,77,77,0.8)]';
+            } else if (msg.includes('[봇]') || msg.includes('진입 성공') || msg.includes('청산') || msg.includes('[엔진]') || msg.includes('[스캐너 가동]')) {
+                colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
             }
+
+            let timeStr = '';
+            if (log.created_at) {
+                const utcDateStr = log.created_at.replace(' ', 'T') + 'Z';
+                const dateObj = new Date(utcDateStr);
+                timeStr = dateObj.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' });
+            }
+
+            const logDiv = document.createElement('div');
+            logDiv.className = colorClass + ' break-words';
+            logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${msg}`;
+            fragment.appendChild(logDiv);
+
+            if (log.id && log.id > lastLogId) lastLogId = log.id;
         });
 
-        if (newLogsAdded) {
-            logContainer.scrollTop = logContainer.scrollHeight;
-        }
+        logContainer.appendChild(fragment);
+        logContainer.scrollTop = logContainer.scrollHeight;
     } catch (error) {
         console.warn("Log Sync Failed:", error);
     }
@@ -469,7 +466,7 @@ function clearLogs() {
     const logContainer = document.getElementById('system-log-terminal');
     if (logContainer) {
         logContainer.innerHTML = '<div class="text-gray-500">[system@antigravity ~]$ Buffer cleared.</div>';
-        lastLogTimestamp = ''; // 초기화하여 이후 새 로그가 다시 표시되도록 함
+        // lastLogId는 유지 — 화면만 지우고 이미 본 로그는 재표시하지 않음
     }
 }
 
