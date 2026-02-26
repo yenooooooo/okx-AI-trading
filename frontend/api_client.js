@@ -312,7 +312,28 @@ async function syncConfig() {
     }
 }
 
+// --- 버튼 피드백 공통 헬퍼 ---
+function flashBtn(btn, success) {
+    if (!btn) return;
+    const orig = btn.textContent;
+    const origClass = btn.className;
+    if (success) {
+        btn.textContent = '✓ APPLIED';
+        btn.className = origClass.replace(/border-navy-border|hover:border-gray-400|text-gray-300|hover:text-white|hover:border-gray-500/g, '').trim()
+            + ' border-neon-green text-neon-green';
+    } else {
+        btn.textContent = '✗ FAILED';
+        btn.className = origClass.replace(/border-navy-border|hover:border-gray-400|text-gray-300|hover:text-white|hover:border-gray-500/g, '').trim()
+            + ' border-neon-red text-neon-red';
+    }
+    setTimeout(() => {
+        btn.textContent = orig;
+        btn.className = origClass;
+    }, 2000);
+}
+
 async function updateConfigValue(key) {
+    const btn = document.querySelector(`[onclick="updateConfigValue('${key}')"]`);
     try {
         let value;
         if (key === 'risk_per_trade') {
@@ -322,25 +343,26 @@ async function updateConfigValue(key) {
         }
         const response = await fetch(`${API_URL}/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`, { method: 'POST' });
         await response.json();
+        flashBtn(btn, true);
     } catch (error) {
-        alert('Config update failed: ' + error.message);
+        flashBtn(btn, false);
     }
 }
 
 async function updateConfigSymbols() {
+    const btn = document.querySelector('[onclick="updateConfigSymbols()"]');
     try {
         const symbolsText = document.getElementById('config-symbols').value;
         const symbols = symbolsText.split(/[,|]/).map(s => s.trim()).filter(s => s);
         const symbolsJson = JSON.stringify(symbols);
         const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, { method: 'POST' });
         await response.json();
-        // 심볼 캐시 즉시 갱신 (차트/WS 모두 새 심볼로 전환)
         if (symbols.length > 0) currentSymbol = symbols[0];
-        // 심볼 변경 즉시 WebSocket 재구독 (5초 딜레이 없이 바로 새 심볼로 전환)
         initPriceWebSocket();
         syncChart();
+        flashBtn(btn, true);
     } catch (error) {
-        alert('Symbol update failed: ' + error.message);
+        flashBtn(btn, false);
     }
 }
 
@@ -496,17 +518,17 @@ async function toggleManualOverride() {
 }
 
 async function saveManualOverride() {
-    const amount = document.getElementById('manual-amount').value;
-    const leverage = document.getElementById('manual-leverage').value;
-    await Promise.all([
-        fetch(`${API_URL}/config?key=manual_amount&value=${encodeURIComponent(amount)}`, { method: 'POST' }),
-        fetch(`${API_URL}/config?key=manual_leverage&value=${encodeURIComponent(leverage)}`, { method: 'POST' })
-    ]);
     const btn = document.querySelector('[onclick="saveManualOverride()"]');
-    if (btn) {
-        const orig = btn.textContent;
-        btn.textContent = '✓ SAVED!';
-        setTimeout(() => btn.textContent = orig, 1500);
+    try {
+        const amount = document.getElementById('manual-amount').value;
+        const leverage = document.getElementById('manual-leverage').value;
+        await Promise.all([
+            fetch(`${API_URL}/config?key=manual_amount&value=${encodeURIComponent(amount)}`, { method: 'POST' }),
+            fetch(`${API_URL}/config?key=manual_leverage&value=${encodeURIComponent(leverage)}`, { method: 'POST' })
+        ]);
+        flashBtn(btn, true);
+    } catch (error) {
+        flashBtn(btn, false);
     }
 }
 
