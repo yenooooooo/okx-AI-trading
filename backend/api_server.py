@@ -74,58 +74,9 @@ def _apply_position_ws_update(pos: dict):
         return
     pos_qty = float(pos.get('pos', 0) or 0)
     if pos_qty == 0:
-        # OKX가 포지션 종료를 알림 → DB 저장 + 텔레그램 알림 후 상태 초기화
-        # entry_price는 status 엔드포인트가 초기화하지 않으므로 신뢰 가능
-        prev_entry = bot_global_state["symbols"][symbol].get("entry_price", 0.0)
-        prev_contracts = bot_global_state["symbols"][symbol].get("contracts", 1)
-
-        # posSide는 WS 데이터에서 직접 읽음 (status 엔드포인트의 NONE 초기화 경쟁조건 우회)
-        ws_side = pos.get('posSide', '').upper()  # 'LONG' or 'SHORT'
-        if not ws_side or ws_side == 'NET':
-            ws_side = bot_global_state["symbols"][symbol].get("position", "NONE")
-
-        if prev_entry > 0 and ws_side not in ("NONE", ""):
-            # exit_price: last(종가) → markPx → avgPx → 진입가 순으로 fallback
-            exit_price = float(pos.get('last', 0) or 0)
-            if exit_price == 0:
-                exit_price = float(pos.get('markPx', 0) or 0)
-            if exit_price == 0:
-                exit_price = float(pos.get('avgPx', prev_entry) or prev_entry)
-
-            try:
-                contract_size = float(_engine.exchange.market(symbol).get('contractSize', 0.01))
-            except Exception:
-                contract_size = 0.01
-
-            # OKX가 계산한 realizedPnl (레버리지·수수료 포함 정확한 값)
-            realized_pnl = float(pos.get('realizedPnl', 0) or 0)
-            leverage = int(bot_global_state["symbols"][symbol].get("leverage", 1))
-            position_value = prev_entry * prev_contracts * contract_size
-            
-            pnl_amount = realized_pnl
-            pnl_pct = (realized_pnl / (position_value / leverage) * 100) if position_value > 0 and leverage > 0 else 0
-
-            save_trade(
-                symbol=symbol,
-                position_type=ws_side,
-                entry_price=prev_entry,
-                exit_price=exit_price,
-                pnl=round(pnl_amount, 4),
-                pnl_percent=round(pnl_pct, 4),
-                amount=prev_contracts,
-                exit_reason="MANUAL_CLOSE",
-                leverage=leverage
-            )
-            emoji = "✅" if pnl_pct >= 0 else "🔴"
-            msg = f"{emoji} [수동청산 감지] {symbol} {ws_side} 청산 | 확정 체결가: ${exit_price:.2f} | 실현 수익금(PnL): {pnl_amount:+.4f} USDT | 수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영 완료)"
-                
-            bot_global_state["logs"].append(msg)
-            logger.info(msg)
-            send_telegram_sync(msg)
-
-        bot_global_state["symbols"][symbol]["position"] = "NONE"
-        bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = 0.0
-        bot_global_state["symbols"][symbol]["entry_price"] = 0.0
+        # OKX가 포지션 종료를 알림 → 통합된 수동청산 감지 로직 호출
+        if bot_global_state["symbols"][symbol].get("entry_price", 0.0) > 0:
+            _detect_and_handle_manual_close(_engine, symbol, bot_global_state["symbols"][symbol])
     else:
         upl_ratio = float(pos.get('uplRatio', 0) or 0)
         upl = float(pos.get('upl', 0) or 0)
@@ -197,13 +148,14 @@ async def startup_event():
 def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
     """
     외부 수동 청산 감지 후 처리:
-      - OKX 체결 영수증에서 실현 PnL 추출
+      - OKX 포지션 히스토리에서 공식 실현 PnL 추출
       - DB에 MANUAL_CLOSE 기록
-      - 터미널 로그 + 텔레그램 알림 발송
+      - 터미널 로그 + 텔레그램 알림 발송 (요청된 포맷)
       - 봇 내부 상태를 NONE으로 초기화
     sym_state 는 bot_global_state["symbols"][symbol] 의 참조(reference).
     """
-    import time as _t
+    import asyncio
+    import time
 
     prev_pos      = sym_state.get("position", "NONE")
     prev_entry    = sym_state.get("entry_price", 0.0)
@@ -223,45 +175,57 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
 
     pnl_amount     = 0.0
     avg_fill_price = prev_entry  # fallback
+    pnl_pct        = 0.0
 
-    # ── OKX 체결 영수증 조회 (최대 2회 시도) ──────────────────────────────
-    try:
-        _t.sleep(1.0)
-        trades = engine_api.exchange.fetch_my_trades(symbol, limit=20)
-        closing_side = 'sell' if prev_pos == 'LONG' else 'buy'
-        recent_closes = [t for t in trades if t.get('side') == closing_side]
+    # ── OKX 공식 포지션 히스토리 조회 (최대 3회 시도) ─────────────────────────
+    # 매칭 엔진 반영 시간을 고려하여 약간 대기 후 조회
+    okx_inst_id = symbol.replace("/", "-").replace(":", "-") # BTC/USDT:USDT -> BTC-USDT-USDT -> BTC-USDT-SWAP
+    if okx_inst_id.endswith("-USDT"):
+        okx_inst_id = okx_inst_id[:-5] + "-SWAP"
 
-        if not recent_closes:
-            _t.sleep(1.5)
-            trades = engine_api.exchange.fetch_my_trades(symbol, limit=20)
-            recent_closes = [t for t in trades if t.get('side') == closing_side]
+    history_found = False
+    for attempt in range(3):
+        time.sleep(1.0 + attempt * 0.5)
+        try:
+            res = engine_api.exchange.privateGetAccountPositionsHistory({'instType': 'SWAP', 'instId': okx_inst_id, 'limit': 5})
+            if res and res.get('data'):
+                for pos in res['data']:
+                    # pos['direction'] doesn't usually exist in OKX positions-history, but 'posSide' might.
+                    # Or we just take the most recent closed position for this instId.
+                    # Usually, the first one is the most recently closed position.
+                    
+                    realized_pnl = float(pos.get('realizedPnl', 0) or 0)
+                    close_avg_px = float(pos.get('closeAvgPx', 0) or 0)
+                    if close_avg_px == 0:
+                        close_avg_px = float(pos.get('cTime', 0)) # fallback if needed, but closeAvgPx should exist
+                    
+                    # OKX might provide an official uPlRatio or we calculate it
+                    
+                    pnl_amount = realized_pnl
+                    avg_fill_price = close_avg_px if close_avg_px > 0 else avg_fill_price
+                    history_found = True
+                    break # 가장 최근 내역 사용
+            
+            if history_found:
+                break
+        except Exception as e:
+            logger.error(f"[수동청산 감지] {symbol} 포지션 히스토리 조회 오류(시도 {attempt+1}): {e}")
 
-        if recent_closes:
-            order_id       = recent_closes[-1].get('order')
-            matching       = [t for t in recent_closes if t.get('order') == order_id]
-            total_gross    = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching)
-            total_fee      = sum(float(t.get('info', {}).get('fee',     0) or 0) for t in matching)
-            total_cost     = sum(t.get('cost',   0) for t in matching)
-            total_amt      = sum(t.get('amount', 0) for t in matching)
-            pnl_amount     = total_gross + total_fee
-            if total_amt > 0:
-                avg_fill_price = total_cost / total_amt
-            elif matching:
-                avg_fill_price = float(matching[0].get('price', prev_entry))
-        else:
-            logger.warning(f"[수동청산 감지] {symbol} 체결 영수증 없음 - PnL 0 으로 기록")
-    except Exception as e:
-        logger.error(f"[수동청산 감지] {symbol} PnL 영수증 조회 오류: {e}")
+    if not history_found:
+        logger.warning(f"[수동청산 감지] {symbol} 포지션 히스토리 없음 - PnL 0 으로 기록")
 
     if avg_fill_price == 0:
         avg_fill_price = engine_api.get_current_price(symbol) or prev_entry
 
-    # ── PnL% 계산 ──────────────────────────────────────────────────────────
+    # ── PnL% 계산 (공식 수익금 기반 역산) ──────────────────────────────────────────────────────────
     try:
         contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
     except Exception:
         contract_size = 0.01
+    
     position_value = prev_entry * prev_contracts * contract_size
+    
+    # 공식 수익금이 0이 아니라면 공식 수익률을 계산
     pnl_pct = (
         (pnl_amount / (position_value / prev_leverage) * 100)
         if position_value > 0 and prev_leverage > 0 else 0.0
@@ -283,14 +247,10 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
     except Exception as e:
         logger.error(f"[수동청산 감지] {symbol} DB 저장 오류: {e}")
 
-    # ── 터미널 로그 + 텔레그램 알림 ────────────────────────────────────────
+    # ── 터미널 로그 + 텔레그램 알림 (요청된 정확한 포맷) ────────────────────────────────────────
     emoji = "✅" if pnl_pct >= 0 else "🔴"
-    msg = (
-        f"{emoji} [외부 수동 청산 감지] 사용자가 직접 포지션을 종료했습니다. "
-        f"(실현 수익금: {pnl_amount:+.4f} USDT)\n"
-        f"심볼: {symbol} | 방향: {prev_pos} | 체결가: ${avg_fill_price:.2f} | "
-        f"수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영)"
-    )
+    msg = f"{emoji} [수동청산 감지] {symbol} {prev_pos} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 실현 수익금(PnL): {pnl_amount:+.4f} USDT | 수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영 완료)"
+    
     bot_global_state["logs"].append(msg)
     logger.info(msg)
     send_telegram_sync(msg)
@@ -753,69 +713,9 @@ async def fetch_current_status():
                         prev_contracts = prev["contracts"]
                         prev_leverage = prev["leverage"]
 
-                        # 1~2초 대기 후 OKX 영수증 조회 (수동청산)
-                        try:
-                            import time
-                            time.sleep(1.0)
-                            
-                            trades = engine.exchange.fetch_my_trades(sym, limit=20)
-                            # 최근 거래 중 해당 side의 반대 매매(청산) 찾기
-                            closing_side = 'sell' if prev_pos == 'LONG' else 'buy'
-                            recent_closes = [t for t in trades if t.get('side') == closing_side]
-                            
-                            if not recent_closes:
-                                time.sleep(1.5)
-                                trades = engine.exchange.fetch_my_trades(sym, limit=20)
-                                recent_closes = [t for t in trades if t.get('side') == closing_side]
-                                
-                            if recent_closes:
-                                order_id = recent_closes[-1].get('order')
-                                matching_trades = [t for t in recent_closes if t.get('order') == order_id]
-                                
-                                total_gross = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
-                                total_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
-                                total_cost = sum(t.get('cost', 0) for t in matching_trades)
-                                total_amt = sum(t.get('amount', 0) for t in matching_trades)
-                                
-                                pnl_amount = total_gross + total_fee
-                                avg_fill_price = total_cost / total_amt if total_amt > 0 else float(matching_trades[0].get('price', 0))
-                                if avg_fill_price == 0:
-                                    avg_fill_price = engine.get_current_price(sym) or prev_entry
-
-                                try:
-                                    contract_size = float(engine.exchange.market(sym).get('contractSize', 0.01))
-                                except Exception:
-                                    contract_size = 0.01
-
-                                position_value = prev_entry * prev_contracts * contract_size
-                                pnl_pct = (pnl_amount / (position_value / prev_leverage) * 100) if position_value > 0 and prev_leverage > 0 else 0
-                                
-                                # 중복 저장 방지: 즉시 entry_price 초기화
-                                bot_global_state["symbols"][sym]["entry_price"] = 0.0
-
-                                save_trade(
-                                    symbol=sym,
-                                    position_type=prev_pos,
-                                    entry_price=prev_entry,
-                                    exit_price=round(avg_fill_price, 2),
-                                    pnl=round(pnl_amount, 4),
-                                    pnl_percent=round(pnl_pct, 4),
-                                    amount=prev_contracts,
-                                    exit_reason="MANUAL_CLOSE",
-                                    leverage=prev_leverage
-                                )
-                                emoji = "✅" if pnl_pct >= 0 else "🔴"
-                                msg = f"{emoji} [수동청산 감지] {sym} {prev_pos} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 실현 수익금(PnL): {pnl_amount:+.4f} USDT | 수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영 완료)"
-                                bot_global_state["logs"].append(msg)
-                                logger.info(msg)
-                                send_telegram_sync(msg)
-                            else:
-                                logger.warning(f"[수동청산 감지] 실체결 영수증 확보 실패로 로깅 스킵 (심볼: {sym})")
-                                # 중복 방지를 위해 초기화는 진행
-                                bot_global_state["symbols"][sym]["entry_price"] = 0.0
-                        except Exception as e:
-                            logger.error(f"[수동청산 감지] 실체결 데이터 확보 중 오류: {e}")
-                            bot_global_state["symbols"][sym]["entry_price"] = 0.0
+                        # 봇 자체 청산이 아닌 외부 수동 청산 감지
+                        if bot_global_state["symbols"][sym].get("entry_price", 0.0) > 0:
+                            _detect_and_handle_manual_close(engine, sym, bot_global_state["symbols"][sym])
 
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
