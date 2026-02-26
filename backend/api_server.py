@@ -45,7 +45,7 @@ bot_global_state = {
     "is_running": False,
     "balance": 0.0,
     "symbols": {},  # symbol별 상태
-    "logs": LogList(["[시스템] API 통신 브릿지가 준비되었습니다."]),
+    "logs": LogList(["[봇] 시스템 코어 초기화 완료 - API 브릿지 대기 중"]),
 }
 
 ai_brain_state = {
@@ -135,6 +135,7 @@ async def startup_event():
     """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
     global _engine
     init_db()
+    bot_global_state["logs"].append("[봇] 서버 시스템 가동 시작 - 인프라 점검 중...")
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
     loop = asyncio.get_event_loop()
     _engine = await loop.run_in_executor(None, OKXEngine)
@@ -148,6 +149,7 @@ async def startup_event():
     # 텔레그램 양방향 컨트롤 타워 구동
     from notifier import init_telegram_bot
     await init_telegram_bot()
+    bot_global_state["logs"].append("[봇] 텔레그램 양방향 컨트롤 타워 비동기 가동 완료")
     logger.info("텔레그램 양방향 컨트롤 타워 비동기 시작 완료")
 
 @app_server.on_event("shutdown")
@@ -294,7 +296,7 @@ async def async_trading_loop():
             # ── 1시간 주기 다이내믹 볼륨 스캐너 가동 ──
             if current_time - last_scan_time >= 3600:
                 try:
-                    bot_global_state["logs"].append("[시스템] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
+                    bot_global_state["logs"].append("[엔진] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
                     top_symbols = await engine_api.scan_top_volume_coins(limit=3)
                     if top_symbols:
                         # 설정에 바로 업데이트하여 영속화 및 프론트 반영
@@ -819,13 +821,13 @@ async def toggle_bot_action():
 
     if bot_global_state["is_running"]:
         bot_global_state["is_running"] = False
-        msg = "[명령] 봇이 정지되었습니다."
+        msg = "[봇] 명령 수신: 시스템 가동 중지 (STOP)"
         bot_global_state["logs"].append(msg)
         logger.info(msg)
         send_telegram_sync(msg)
     else:
         bot_global_state["is_running"] = True
-        msg = "[명령] 봇 가동 시작!"
+        msg = "[봇] 명령 수신: 시스템 가동 시작 (START)!"
         bot_global_state["logs"].append(msg)
         logger.info(msg)
         send_telegram_sync(msg)

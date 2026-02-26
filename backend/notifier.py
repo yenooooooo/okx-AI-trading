@@ -81,7 +81,7 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     bot_global_state["is_running"] = False
-    bot_global_state["logs"].append("[시스템] 텔레그램 명령으로 매매 루프가 중지되었습니다.")
+    bot_global_state["logs"].append("[봇] 텔레그램 명령으로 매매 루프가 일시중지되었습니다.")
     await update.effective_message.reply_text("🛑 *매매 루프 일시정지 완료*\n(주의: 백그라운드 스캐너는 계속 동작합니다)", parse_mode="Markdown")
 
 @auth_required
@@ -95,7 +95,7 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     bot_global_state["is_running"] = True
-    bot_global_state["logs"].append("[시스템] 텔레그램 명령으로 매매 루프 재가동")
+    bot_global_state["logs"].append("[봇] 텔레그램 명령으로 매매 루프 재가동")
     
     if getattr(api_server, '_trading_task', None) is None or api_server._trading_task.done():
         api_server._trading_task = asyncio.create_task(api_server.async_trading_loop())
@@ -107,7 +107,7 @@ async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from api_server import bot_global_state, _engine
     
     bot_global_state["is_running"] = False
-    bot_global_state["logs"].append("🚨 [PANIC] 텔레그램 긴급 킬스위치 발동!")
+    bot_global_state["logs"].append("🚨 [긴급] [PANIC] 텔레그램 긴급 킬스위치 발동!")
     
     msg = "🚨 *[긴급 킬스위치 가동]*\n매매 루프를 즉시 중지하고, 모든 활성 포지션을 시장가로 청산합니다.\n\n"
     
