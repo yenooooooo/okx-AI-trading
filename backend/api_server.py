@@ -72,12 +72,15 @@ class LogList(list):
         super().append(msg)
         if len(self) > 300:
             self.pop(0)
-        try:
-            # 에러 키워드 감지
-            lvl = "ERROR" if "[오류]" in msg or "실패" in msg else "INFO"
-            save_log(level=lvl, message=msg)
-        except Exception as e:
-            logger.error(f"DB 저장 오류: {e}")
+        lvl = "ERROR" if "[오류]" in msg or "실패" in msg else "INFO"
+        # DB 저장 실패 시 1회 재시도 — 묵살 방지
+        for _attempt in range(2):
+            try:
+                save_log(level=lvl, message=msg)
+                break
+            except Exception as e:
+                if _attempt == 1:
+                    logger.error(f"DB 저장 최종 실패 (로그 유실): {e} | msg={msg[:80]}")
 
 # 전역 상태 (다중 심볼 지원)
 bot_global_state = {
@@ -365,12 +368,7 @@ async def async_trading_loop():
             else:
                 symbols = ['BTC/USDT:USDT']
 
-            # 현재 보유 중인 포지션이 하나라도 있는지 확인 (단일 포지션 집중)
-            any_position_open = False
-            for sym, state in bot_global_state["symbols"].items():
-                if state.get("position", "NONE") != "NONE":
-                    any_position_open = True
-                    break
+            # any_position_open은 루프 내에서 심볼별로 재계산 (동적 플래그 제거)
 
             # ── 매 사이클: 거래소 실제 포지션 조회 (수동 청산 감지용) ────────
             try:
@@ -563,8 +561,13 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
-                        # 이미 다른 코인의 포지션이 오픈되어 있다면 신규 진입 즉시 차단
-                        if any_position_open:
+                        # 현재 사이클 최신 상태 기준 — 다른 심볼에 포지션이 있으면 진입 차단
+                        any_other_position_open = any(
+                            s.get("position", "NONE") != "NONE"
+                            for k, s in bot_global_state["symbols"].items()
+                            if k != symbol
+                        )
+                        if any_other_position_open:
                             continue
                             
                         # 서킷 브레이커: 일일 손실 한도 초과 시 신규 진입 차단 (60초에 1회만 로그)
@@ -580,7 +583,7 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
-                            msg = f"[{symbol}] {signal} 진입 신호 - 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
+                            msg = f"[{symbol}] {signal} 진입 신호 — 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
                             bot_global_state["logs"].append(msg)
                             logger.info(msg)
 
