@@ -760,7 +760,6 @@ async def async_trading_loop():
                                     except Exception as api_err:
                                         last_error = api_err
                                         if "50013" in str(api_err):
-                                            import asyncio
                                             logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
                                             await asyncio.sleep(0.5)
                                         else:
@@ -888,7 +887,6 @@ async def execute_test_order():
                 except Exception as api_err:
                     last_error = api_err
                     if "50013" in str(api_err):
-                        import asyncio
                         logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
                         await asyncio.sleep(0.5)
                     else:
