@@ -746,10 +746,28 @@ async def async_trading_loop():
                                     engine_api.exchange.set_leverage(trade_leverage, symbol)
                                 except Exception as lev_err:
                                     logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
-                                if signal == "LONG":
-                                    engine_api.exchange.create_market_buy_order(symbol, trade_amount)
-                                else:
-                                    engine_api.exchange.create_market_sell_order(symbol, trade_amount)
+                                # 시장가 진입 (OKX Sandbox 50013 에러 방어를 위한 3회 재시도 로직)
+                                order_success = False
+                                last_error = None
+                                for attempt in range(3):
+                                    try:
+                                        if signal == "LONG":
+                                            engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                                        else:
+                                            engine_api.exchange.create_market_sell_order(symbol, trade_amount)
+                                        order_success = True
+                                        break
+                                    except Exception as api_err:
+                                        last_error = api_err
+                                        if "50013" in str(api_err):
+                                            import asyncio
+                                            logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
+                                            await asyncio.sleep(0.5)
+                                        else:
+                                            raise api_err
+                                
+                                if not order_success:
+                                    raise last_error
 
                                 # 포지션 상태 업데이트
                                 bot_global_state["symbols"][symbol]["position"] = signal
@@ -859,8 +877,25 @@ async def execute_test_order():
             logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
 
         try:
-            # 시장가 매수
-            engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+            # 시장가 매수 (OKX Sandbox 50013 에러 방어를 위한 3회 재시도 로직)
+            order_success = False
+            last_error = None
+            for attempt in range(3):
+                try:
+                    engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                    order_success = True
+                    break
+                except Exception as api_err:
+                    last_error = api_err
+                    if "50013" in str(api_err):
+                        import asyncio
+                        logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
+                        await asyncio.sleep(0.5)
+                    else:
+                        raise api_err
+            
+            if not order_success:
+                raise last_error
             
             # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
             ticker = engine_api.exchange.fetch_ticker(symbol)
