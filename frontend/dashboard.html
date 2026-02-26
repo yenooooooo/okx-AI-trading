@@ -261,13 +261,15 @@
 
             if (data.symbols) {
                 for (const [sym, state] of Object.entries(data.symbols)) {
+                    if (!state || state.position === 'NONE') continue;
+
                     const card = document.createElement('div');
                     card.className = 'card symbol-card';
 
-                    const pnl = state.unrealized_pnl_percent || 0;
+                    const pnl_pct = state.unrealized_pnl_percent || 0;
                     const pnl_usdt = state.unrealized_pnl || 0;
-                    const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
-                    const pnlSign = pnl >= 0 ? '+' : '';
+                    const pnlClass = pnl_pct >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const pnlSign = pnl_pct >= 0 ? '+' : '';
 
                     const entry = state.entry_price || 0;
                     const lev = state.leverage || 1;
@@ -287,22 +289,22 @@
                         }
                     }
 
-                    const posColor = state.position === 'LONG' ? 'var(--neon-green)' : (state.position === 'SHORT' ? 'var(--neon-red)' : '#888');
+                    const posColor = state.position === 'LONG' ? 'var(--neon-green)' : 'var(--neon-red)';
 
                     card.innerHTML = `
-                        <h3 style="margin-bottom:10px;">${sym}</h3>
+                        <h3 style="margin-bottom:12px;">${sym}</h3>
                         <div style="font-size: 14px; line-height: 1.6;">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
                                 <span>포지션: <span style="font-weight:bold; color:${posColor}">${state.position || 'NONE'}</span></span>
                                 <span style="font-size:11px; color:#999;">(${lev}x Leverage)</span>
                             </div>
-                            <div style="display:flex; justify-content:space-between;"><span>현재가:</span> <span>$${(state.current_price || 0).toFixed(4)}</span></div>
-                            <div style="display:flex; justify-content:space-between;"><span>진입가:</span> <span>$${(state.entry_price || 0).toFixed(4)}</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>현재가:</span> <span>$${(state.current_price || 0).toFixed(2)}</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>진입가:</span> <span>$${entry.toFixed(2)}</span></div>
                             
-                            <div style="margin-top:15px; text-align:center; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px;">
+                            <div style="margin-top:15px; text-align:center; padding:12px; background:rgba(255,255,255,0.03); border:1px solid #333; border-radius:6px;">
                                 <div style="font-size:10px; color:#aaa; margin-bottom:3px;">UNREALIZED PNL</div>
-                                <div style="font-size:1.6em; font-weight:bold;" class="${pnlClass}">${pnlSign}${pnl.toFixed(2)}%</div>
-                                <div style="font-size:0.9em; font-weight:bold;" class="${pnlClass}">${pnlSign}${pnl_usdt.toFixed(2)} USDT</div>
+                                <div style="font-size:1.6em; font-weight:bold;" class="${pnlClass}">${pnlSign}${pnl_pct.toFixed(2)}%</div>
+                                <div style="font-size:0.95em; font-weight:bold;" class="${pnlClass}">${pnlSign}${pnl_usdt.toFixed(2)} USDT</div>
                             </div>
 
                             <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; text-align:center;">
