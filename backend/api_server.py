@@ -385,10 +385,39 @@ async def async_trading_loop():
                                     # 진입 시 저장한 실제 계약수 사용 (없으면 1 fallback)
                                     amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                     
-                                    # 1. 실제 거래소 청산 API 호출 및 오피셜 PnL 확보 (실패 시 Exception 발생으로 Fallback 원천 차단)
-                                    net_pnl, avg_fill_price = engine_api.close_position_and_get_pnl(symbol, position_side, amount)
+                                    # 1. 실제 거래소 청산 API 호출 (엔진 분리)
+                                    order_id = engine_api.close_position(symbol, position_side, amount)
                                     
-                                    # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 시에만 내부 DB 업데이트
+                                    # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 대기
+                                    import time as _t
+                                    net_pnl = 0.0
+                                    avg_fill_price = current_price
+                                    receipt_found = False
+                                    
+                                    for _attempt in range(5):
+                                        _t.sleep(1.0)
+                                        try:
+                                            trades = engine_api.get_recent_trade_receipts(symbol, limit=20)
+                                            matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
+                                            if matching_trades:
+                                                total_gross_pnl = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
+                                                total_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
+                                                total_cost = sum(t.get('cost', 0) for t in matching_trades)
+                                                total_amount = sum(t.get('amount', 0) for t in matching_trades)
+                                                
+                                                net_pnl = total_gross_pnl + total_fee
+                                                if total_amount > 0:
+                                                    avg_fill_price = total_cost / total_amount
+                                                else:
+                                                    avg_fill_price = float(matching_trades[0].get('price', current_price))
+                                                receipt_found = True
+                                                break
+                                        except Exception as receipt_err:
+                                            logger.warning(f"[{symbol}] 청산 체결 영수증 파싱 오류 시도 {_attempt+1}: {receipt_err}")
+                                            
+                                    if not receipt_found:
+                                        raise Exception("청산 주문은 들어갔으나 영수증(실현PnL) 파싱에 실패했습니다.")
+                                        
                                     pnl_amount = net_pnl
                                     
                                     # 물리적 원금 = (진입가 * 계약수 * 계약단위) / 레버리지

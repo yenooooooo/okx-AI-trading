@@ -53,7 +53,7 @@ def run_bot():
             if pd.isna(rsi_val):
                 print(f" -> 추세 탐색 중: 지표 데이터 형성 대기 중...")
             elif rsi_val < 30:
-                print(f" -> 현재 RSI {rsi_val:.1f} - 초과매도 상태! 30 위로 반등할 때까지 진입 대기 중...")
+                print(f" -> 현재 RSI {rsi_val:.1f} - 초과매도 상태! 30 위로 반등할 때까지 진입 대기 대기 중...")
             elif rsi_val > 70:
                 print(f" -> 현재 RSI {rsi_val:.1f} - 초과매수 상태! (타점 대기 중)")
             else:
@@ -74,13 +74,25 @@ def run_bot():
                     print(f" - 진입가: {entry_price} -> 청산가: {current_price}")
                     
                     if not PAPER_TRADING:
-                        # 실제 ccxt 시장가 청산 로직
+                        # 실제 ccxt 시장가 청산 로직 (리팩토링된 분리 방식)
                         amount = 1 # 테스트용 1계약 고정 청산
-                        if current_position == "LONG":
-                            engine.exchange.create_market_sell_order(SYMBOL, amount)
-                        elif current_position == "SHORT":
-                            engine.exchange.create_market_buy_order(SYMBOL, amount)
+                        order_id = engine.close_position(SYMBOL, current_position, amount)
                         
+                        # 수익 요약 조회를 위해 엔진의 영수증 내역을 직접 파싱
+                        time.sleep(1.0) # 네트워크 딜레이 확보
+                        try:
+                            trades = engine.get_recent_trade_receipts(SYMBOL, limit=20)
+                            matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
+                            if matching_trades:
+                                total_gross_pnl = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
+                                total_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
+                                net_pnl = total_gross_pnl + total_fee
+                                print(f" -> [영수증 확인] 체결 성공, 확정 실현수익(Net PnL): {net_pnl:+.4f} USDT")
+                            else:
+                                print(" -> [영수증 확인] 지연 중 - 체결 완료 확인 불가")
+                        except Exception as e:
+                            print(f" -> 영수증 파싱 예외 발생: {e}")
+                            
                     # 포지션 초기화
                     current_position = None
                     entry_price = 0.0
