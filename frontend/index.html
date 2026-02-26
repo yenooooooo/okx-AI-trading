@@ -348,6 +348,47 @@
                 <span class="text-gray-400 uppercase text-xs">AI 종합 판단 결과</span>
                 <span id="brain-decision" class="text-neon-green tracking-widest font-bold">데이터 수신 대기 중...</span>
             </div>
+
+            <!-- Extended Intelligence Panel (Market Radar & Recent Executions) -->
+            <div class="glass-panel p-4 flex gap-6">
+                <!-- Market Radar (Left 50%) -->
+                <div class="flex-1 flex flex-col">
+                    <h3
+                        class="text-[10px] text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between">
+                        <span>Dynamic Market Radar</span>
+                        <span class="text-neon-green animate-pulse">● LIVE</span>
+                    </h3>
+                    <div class="flex flex-col gap-2" id="market-radar-list">
+                        <div class="flex justify-between items-center text-xs bg-navy-900/40 p-1.5 rounded">
+                            <span class="font-mono text-gray-300">SOL/USDT</span>
+                            <span class="font-mono text-neon-green">+0.00%</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs bg-navy-900/40 p-1.5 rounded">
+                            <span class="font-mono text-gray-300">ETH/USDT</span>
+                            <span class="font-mono text-neon-green">+0.00%</span>
+                        </div>
+                        <div class="flex justify-between items-center text-xs bg-navy-900/40 p-1.5 rounded">
+                            <span class="font-mono text-gray-300">DOGE/USDT</span>
+                            <span class="font-mono text-neon-green">+0.00%</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Divider -->
+                <div class="w-px bg-navy-border/50 hidden lg:block"></div>
+                <!-- Recent Executions (Right 50%) -->
+                <div class="flex-1 flex flex-col">
+                    <h3
+                        class="text-[10px] text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3">
+                        Recent Executions
+                    </h3>
+                    <div class="flex flex-col gap-2" id="recent-executions-list">
+                        <div
+                            class="flex items-center justify-center text-[10px] bg-navy-900/40 p-2 rounded text-gray-500 font-mono italic">
+                            Awaiting initial execution...
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- RIGHT: Live Execution (3 cols) -->
@@ -460,6 +501,37 @@
                         <span id="stats-max-dd"
                             class="font-mono text-lg font-bold text-neon-red flash-target">0.00%</span>
                         <span class="text-[10px] text-gray-600">최고점 대비 최대 낙폭</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Confidence Matrix -->
+            <div class="glass-panel p-5 relative overflow-hidden">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-4">
+                    AI Confidence Matrix
+                </h3>
+                <div class="flex flex-col gap-4">
+                    <!-- Long Pressure -->
+                    <div>
+                        <div class="flex justify-between text-[10px] text-gray-400 mb-1.5 font-mono">
+                            <span>LONG PRESSURE</span>
+                            <span id="ai-long-prob" class="text-neon-green font-bold">0%</span>
+                        </div>
+                        <div class="w-full bg-navy-900 h-2 rounded-full overflow-hidden border border-navy-border">
+                            <div id="ai-long-bar" class="h-full bg-neon-green transition-all duration-700"
+                                style="width: 0%; box-shadow: 0 0 5px rgba(0,255,136,0.5);"></div>
+                        </div>
+                    </div>
+                    <!-- Short Pressure -->
+                    <div>
+                        <div class="flex justify-between text-[10px] text-gray-400 mb-1.5 font-mono">
+                            <span>SHORT PRESSURE</span>
+                            <span id="ai-short-prob" class="text-neon-red font-bold">0%</span>
+                        </div>
+                        <div class="w-full bg-navy-900 h-2 rounded-full overflow-hidden border border-navy-border">
+                            <div id="ai-short-bar" class="h-full bg-neon-red transition-all duration-700"
+                                style="width: 0%; box-shadow: 0 0 5px rgba(255,77,77,0.5);"></div>
+                        </div>
                     </div>
                 </div>
             </div>
