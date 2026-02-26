@@ -18,7 +18,7 @@ sudo npm install pm2@latest -g
 # 5. FastAPI 서버를 백그라운드 무한 루프로 실행 (서버 다운 시 자동 재시작)
 # backend 폴더로 이동하여 실행해야 내부 모듈(okx_engine 등) import 오류가 발생하지 않음
 cd backend
-pm2 start "uvicorn api_server:app_server --host 0.0.0.0 --port 8000" --name "okx-trading-bot"
+pm2 start "../venv/bin/python" --name "okx-trading-bot" -- -m uvicorn api_server:app_server --host 0.0.0.0 --port 8000
 
 # 6. 서버 재부팅 시에도 PM2가 봇을 자동으로 살려내도록 설정
 pm2 save
