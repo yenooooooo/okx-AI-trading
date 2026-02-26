@@ -125,10 +125,14 @@ class OKXEngine:
         """
         total_gross = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
         exit_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
-        total_cost = sum(t.get('cost', 0) for t in matching_trades)
         total_amount = sum(t.get('amount', 0) for t in matching_trades)
         
-        avg_fill_price = total_cost / total_amount if total_amount > 0 else 0.0
+        # CCXT's cost for OKX derivatives includes contract_size multiplier. 
+        # Using cost/amount returns 1/100th of the actual price for BTC.
+        # We must calculate the weighted average price directly using price and amount.
+        sum_price_amount = sum(float(t.get('price', 0)) * float(t.get('amount', 0)) for t in matching_trades)
+        avg_fill_price = sum_price_amount / total_amount if total_amount > 0 else 0.0
+        
         if avg_fill_price == 0.0 and matching_trades:
             avg_fill_price = float(matching_trades[0].get('price', entry_price))
             
