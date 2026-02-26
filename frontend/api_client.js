@@ -164,15 +164,15 @@ async function syncBotStatus() {
             if (pnl > 0) {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
                 if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-green';
-                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow flex flex-col relative overflow-hidden glow-green";
+                posCard.className = "glass-panel p-5 transition-all duration-500 flex flex-col relative overflow-hidden glow-green";
             } else if (pnl < 0) {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
                 if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-red';
-                posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow flex flex-col relative overflow-hidden glow-red";
+                posCard.className = "glass-panel p-5 transition-all duration-500 flex flex-col relative overflow-hidden glow-red";
             } else {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
                 if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-gray-400';
-                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow flex flex-col relative overflow-hidden";
+                posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex flex-col relative overflow-hidden";
             }
         }
 
