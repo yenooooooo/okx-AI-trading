@@ -145,6 +145,18 @@ async def startup_event():
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
+    # 텔레그램 양방향 컨트롤 타워 구동
+    from notifier import init_telegram_bot
+    await init_telegram_bot()
+    logger.info("텔레그램 양방향 컨트롤 타워 비동기 시작 완료")
+
+@app_server.on_event("shutdown")
+async def shutdown_event():
+    """서버 종료 시 텔레그램 등 비동기 자원 회수 (Graceful Shutdown)"""
+    from notifier import stop_telegram_bot
+    await stop_telegram_bot()
+    logger.info("API 서버 종료 - 텔레그램 자원 릴리즈 완료")
+
 def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, manual_prev_state: dict = None):
     """
     외부 수동 청산 감지 후 처리:
