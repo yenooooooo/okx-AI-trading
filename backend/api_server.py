@@ -845,15 +845,16 @@ async def execute_test_order():
             # 시장가 매수
             engine_api.exchange.create_market_buy_order(symbol, trade_amount)
             
+            # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
+            ticker = engine_api.exchange.fetch_ticker(symbol)
+            current_price = ticker['last']
+            
             # 테스트 진입 로그 기록
             test_msg = f"📈 [{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
             bot_global_state["logs"].append(test_msg)
             logger.info(test_msg)
             send_telegram_sync(_tg_entry(symbol, "LONG", current_price, trade_amount, trade_leverage, is_test=True))
             
-            # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
-            ticker = engine_api.exchange.fetch_ticker(symbol)
-            current_price = ticker['last']
             bot_global_state["symbols"][symbol]["position"] = "LONG"
             bot_global_state["symbols"][symbol]["entry_price"] = current_price
             bot_global_state["symbols"][symbol]["highest_price"] = current_price
