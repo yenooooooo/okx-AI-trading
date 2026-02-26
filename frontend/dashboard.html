@@ -96,24 +96,158 @@
 
         .symbol-card {
             border: 1px solid #444;
-            position: relative;
-            overflow: hidden;
         }
 
-        .symbol-card h3 {
-            margin-top: 0;
-            color: var(--neon-blue);
+        .symbol-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
             border-bottom: 1px solid #333;
-            padding-bottom: 5px;
         }
 
-        .pnl-pos {
+        .symbol-card-header h3 {
+            margin: 0;
+            color: var(--neon-blue);
+            font-size: 15px;
+            letter-spacing: 1px;
+        }
+
+        .symbol-badges {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .pos-badge {
+            padding: 2px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+
+        .pos-badge.long {
+            background: rgba(57, 255, 20, 0.1);
+            border: 1px solid var(--neon-green);
             color: var(--neon-green);
         }
 
-        .pnl-neg {
+        .pos-badge.short {
+            background: rgba(255, 49, 49, 0.1);
+            border: 1px solid var(--neon-red);
             color: var(--neon-red);
         }
+
+        .lev-badge {
+            font-size: 11px;
+            color: #888;
+            border: 1px solid #444;
+            padding: 2px 7px;
+            border-radius: 4px;
+        }
+
+        .pnl-block {
+            text-align: center;
+            padding: 10px 0;
+            margin-bottom: 12px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 6px;
+        }
+
+        .pnl-label {
+            font-size: 10px;
+            color: #555;
+            letter-spacing: 2px;
+            margin-bottom: 4px;
+        }
+
+        .pnl-pct {
+            font-size: 2em;
+            font-weight: bold;
+            line-height: 1.1;
+        }
+
+        .pnl-usdt {
+            font-size: 13px;
+            font-weight: bold;
+            margin-top: 3px;
+        }
+
+        .pnl-pos { color: var(--neon-green); }
+        .pnl-neg { color: var(--neon-red); }
+
+        .price-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .price-row .price-cell {
+            background: rgba(255,255,255,0.03);
+            border-radius: 4px;
+            padding: 6px 8px;
+        }
+
+        .price-row .price-cell .price-label {
+            font-size: 10px;
+            color: #555;
+            margin-bottom: 3px;
+            letter-spacing: 1px;
+        }
+
+        .price-row .price-cell .price-val {
+            color: #eee;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .tpsl-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            border-top: 1px solid #2a2a2a;
+            padding-top: 10px;
+            font-size: 12px;
+        }
+
+        .tp-cell, .sl-cell {
+            background: rgba(255,255,255,0.03);
+            border-radius: 4px;
+            padding: 6px 8px;
+        }
+
+        .tp-cell { border-left: 2px solid var(--neon-green); }
+        .sl-cell { border-left: 2px solid var(--neon-red); }
+
+        .tpsl-label {
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            margin-bottom: 3px;
+        }
+
+        .tp-cell .tpsl-label { color: var(--neon-green); }
+        .sl-cell .tpsl-label { color: var(--neon-red); }
+
+        .tpsl-price {
+            color: #eee;
+            font-size: 13px;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .tpsl-est {
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .tp-cell .tpsl-est { color: var(--neon-green); }
+        .sl-cell .tpsl-est { color: var(--neon-red); }
 
         .log-container {
             grid-column: span 2;
@@ -291,42 +425,44 @@
 
                     const posColor = state.position === 'LONG' ? 'var(--neon-green)' : 'var(--neon-red)';
 
+                    const posBadgeClass = state.position === 'LONG' ? 'long' : 'short';
+
                     card.innerHTML = `
-                        <h3 style="margin-bottom:12px; border-bottom:1px solid #333; padding-bottom:5px;">${sym}</h3>
-                        <div style="font-size: 14px; line-height: 1.6;">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                                <span style="font-weight:bold; color:#fff; font-size:1.1em;">${state.position}</span>
-                                <span style="font-size:11px; color:#888;">(${lev}x Leverage)</span>
+                        <div class="symbol-card-header">
+                            <h3>${sym}</h3>
+                            <div class="symbol-badges">
+                                <span class="pos-badge ${posBadgeClass}">${state.position}</span>
+                                <span class="lev-badge">${lev}x</span>
                             </div>
+                        </div>
 
-                            <!-- PnL 표시: 하이엔드 우측 정렬 -->
-                            <div style="margin-top:15px; text-align:right;">
-                                <div style="font-size:10px; color:#666; letter-spacing:1px; margin-bottom:2px;">UNREALIZED PNL</div>
-                                <div style="font-size:1.8em; font-weight:bold; line-height:1;" class="${pnlClass}">${pnlSign}${pnl_pct.toFixed(2)}%</div>
-                                <div style="font-size:0.95em; font-weight:bold; margin-top:4px;" class="${pnlClass}">${pnlSign}${pnl_usdt.toFixed(2)} USDT</div>
+                        <div class="pnl-block">
+                            <div class="pnl-label">UNREALIZED PNL</div>
+                            <div class="pnl-pct ${pnlClass}">${pnlSign}${pnl_pct.toFixed(2)}%</div>
+                            <div class="pnl-usdt ${pnlClass}">${pnlSign}${pnl_usdt.toFixed(2)} USDT</div>
+                        </div>
+
+                        <div class="price-row">
+                            <div class="price-cell">
+                                <div class="price-label">ENTRY</div>
+                                <div class="price-val">$${entry.toFixed(2)}</div>
                             </div>
-
-                            <div style="margin-top:20px; border-top:1px solid #333; padding-top:10px; display:flex; justify-content:space-between; font-size:12px; color:#aaa;">
-                                <span>ENTRY: <span style="color:#eee;">$${entry.toFixed(2)}</span></span>
-                                <span>MARK: <span style="color:#eee;">$${(state.current_price || 0).toFixed(2)}</span></span>
+                            <div class="price-cell">
+                                <div class="price-label">MARK</div>
+                                <div class="price-val">$${(state.current_price || 0).toFixed(2)}</div>
                             </div>
+                        </div>
 
-                            <!-- TP/SL 예상 그리드 -->
-                            <div style="margin-top:15px; display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                                <div style="text-align:left;">
-                                    <div style="font-size:10px; color:var(--neon-green); font-weight:bold; margin-bottom:4px;">TAKE PROFIT</div>
-                                    <div style="font-size:1.1em; font-weight:bold; color:#fff;">${tp > 0 ? tp.toFixed(2) : '-'}</div>
-                                    <div style="font-size:10px; color:var(--neon-green); font-weight:bold; margin-top:2px;">
-                                        ${tp > 0 ? '[예상: ' + (estTpPct >= 0 ? '+' : '') + estTpPct.toFixed(2) + '%]' : ''}
-                                    </div>
-                                </div>
-                                <div style="text-align:right;">
-                                    <div style="font-size:10px; color:var(--neon-red); font-weight:bold; margin-bottom:4px;">STOP LOSS</div>
-                                    <div style="font-size:1.1em; font-weight:bold; color:#fff;">${sl > 0 ? sl.toFixed(2) : '-'}</div>
-                                    <div style="font-size:10px; color:var(--neon-red); font-weight:bold; margin-top:2px;">
-                                        ${sl > 0 ? '[예상: ' + (estSlPct >= 0 ? '+' : '') + estSlPct.toFixed(2) + '%]' : ''}
-                                    </div>
-                                </div>
+                        <div class="tpsl-row">
+                            <div class="tp-cell">
+                                <div class="tpsl-label">TAKE PROFIT</div>
+                                <div class="tpsl-price">${tp > 0 ? '$' + tp.toFixed(2) : '-'}</div>
+                                <div class="tpsl-est">${tp > 0 ? (estTpPct >= 0 ? '+' : '') + estTpPct.toFixed(2) + '%' : ''}</div>
+                            </div>
+                            <div class="sl-cell">
+                                <div class="tpsl-label">STOP LOSS</div>
+                                <div class="tpsl-price">${sl > 0 ? '$' + sl.toFixed(2) : '-'}</div>
+                                <div class="tpsl-est">${sl > 0 ? (estSlPct >= 0 ? '+' : '') + estSlPct.toFixed(2) + '%' : ''}</div>
                             </div>
                         </div>
                     `;
