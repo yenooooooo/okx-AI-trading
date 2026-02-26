@@ -265,19 +265,62 @@
                     card.className = 'card symbol-card';
 
                     const pnl = state.unrealized_pnl_percent || 0;
+                    const pnl_usdt = state.unrealized_pnl || 0;
                     const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
                     const pnlSign = pnl >= 0 ? '+' : '';
+
+                    const entry = state.entry_price || 0;
+                    const lev = state.leverage || 1;
+                    const tp = state.take_profit_price || 0;
+                    const sl = state.stop_loss_price || 0;
+
+                    let estTpPct = 0;
+                    let estSlPct = 0;
+
+                    if (entry > 0) {
+                        if (state.position === 'LONG') {
+                            estTpPct = ((tp - entry) / entry) * lev * 100;
+                            estSlPct = ((sl - entry) / entry) * lev * 100;
+                        } else if (state.position === 'SHORT') {
+                            estTpPct = ((entry - tp) / entry) * lev * 100;
+                            estSlPct = ((entry - sl) / entry) * lev * 100;
+                        }
+                    }
 
                     const posColor = state.position === 'LONG' ? 'var(--neon-green)' : (state.position === 'SHORT' ? 'var(--neon-red)' : '#888');
 
                     card.innerHTML = `
-                        <h3>${sym}</h3>
+                        <h3 style="margin-bottom:10px;">${sym}</h3>
                         <div style="font-size: 14px; line-height: 1.6;">
-                            <div>포지션: <span style="font-weight:bold; color:${posColor}">${state.position || 'NONE'}</span></div>
-                            <div>현재가: $${(state.current_price || 0).toFixed(4)}</div>
-                            <div>진입가: $${(state.entry_price || 0).toFixed(4)}</div>
-                            <div style="margin-top:10px; font-size:1.2em; font-weight:bold;">PnL: <span class="${pnlClass}">${pnlSign}${pnl.toFixed(2)}%</span></div>
-                            <div style="font-size:12px; color:#666; margin-top:5px;">실현 PnL: ${(state.unrealized_pnl || 0).toFixed(4)} USDT</div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                                <span>포지션: <span style="font-weight:bold; color:${posColor}">${state.position || 'NONE'}</span></span>
+                                <span style="font-size:11px; color:#999;">(${lev}x Leverage)</span>
+                            </div>
+                            <div style="display:flex; justify-content:space-between;"><span>현재가:</span> <span>$${(state.current_price || 0).toFixed(4)}</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>진입가:</span> <span>$${(state.entry_price || 0).toFixed(4)}</span></div>
+                            
+                            <div style="margin-top:15px; text-align:center; padding:10px; background:rgba(255,255,255,0.03); border-radius:6px;">
+                                <div style="font-size:10px; color:#aaa; margin-bottom:3px;">UNREALIZED PNL</div>
+                                <div style="font-size:1.6em; font-weight:bold;" class="${pnlClass}">${pnlSign}${pnl.toFixed(2)}%</div>
+                                <div style="font-size:0.9em; font-weight:bold;" class="${pnlClass}">${pnlSign}${pnl_usdt.toFixed(2)} USDT</div>
+                            </div>
+
+                            <div style="margin-top:12px; display:grid; grid-template-columns: 1fr 1fr; gap:10px; text-align:center;">
+                                <div style="border:1px solid #333; padding:8px 4px; border-radius:4px; background:rgba(57, 255, 20, 0.05);">
+                                    <div style="font-size:10px; color:#aaa; margin-bottom:4px;">TAKE PROFIT</div>
+                                    <div style="color:var(--neon-green); font-weight:bold; font-size:1.1em;">${tp > 0 ? tp.toFixed(2) : '-'}</div>
+                                    <div style="font-size:10px; color:var(--neon-green); font-weight:bold; margin-top:2px;">
+                                        ${tp > 0 ? '[예상: ' + (estTpPct >= 0 ? '+' : '') + estTpPct.toFixed(2) + '%]' : ''}
+                                    </div>
+                                </div>
+                                <div style="border:1px solid #333; padding:8px 4px; border-radius:4px; background:rgba(255, 49, 49, 0.05);">
+                                    <div style="font-size:10px; color:#aaa; margin-bottom:4px;">STOP LOSS</div>
+                                    <div style="color:var(--neon-red); font-weight:bold; font-size:1.1em;">${sl > 0 ? sl.toFixed(2) : '-'}</div>
+                                    <div style="font-size:10px; color:var(--neon-red); font-weight:bold; margin-top:2px;">
+                                        ${sl > 0 ? '[예상: ' + (estSlPct >= 0 ? '+' : '') + estSlPct.toFixed(2) + '%]' : ''}
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     `;
                     listContainer.appendChild(card);
