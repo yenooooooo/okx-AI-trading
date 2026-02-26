@@ -122,9 +122,9 @@ class TradingStrategy:
         if long_macd and long_rsi:
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
-            if macro_ema_200 is not None and current_price is not None:
-                if current_price <= macro_ema_200:
-                    return "HOLD", f"LONG 역추세 차단 (현재가 <= 1h EMA 200: {macro_ema_200:.2f})", None
+            # if macro_ema_200 is not None and current_price is not None:
+            #     if current_price <= macro_ema_200:
+            #         return "HOLD", f"LONG 역추세 차단 (현재가 <= 1h EMA 200: {macro_ema_200:.2f})", None
             return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파, 거래량 충족)", payload
 
         # short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
@@ -136,9 +136,9 @@ class TradingStrategy:
         if short_macd and short_rsi:
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
-            if macro_ema_200 is not None and current_price is not None:
-                if current_price >= macro_ema_200:
-                    return "HOLD", f"SHORT 역추세 차단 (현재가 >= 1h EMA 200: {macro_ema_200:.2f})", None
+            # if macro_ema_200 is not None and current_price is not None:
+            #     if current_price >= macro_ema_200:
+            #         return "HOLD", f"SHORT 역추세 차단 (현재가 >= 1h EMA 200: {macro_ema_200:.2f})", None
             return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파, 거래량 충족)", payload
             
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중", None
