@@ -145,7 +145,7 @@ async def startup_event():
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
-def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
+def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, manual_prev_state: dict = None):
     """
     외부 수동 청산 감지 후 처리:
       - OKX 체결 영수증에서 실현 PnL 추출
@@ -156,10 +156,16 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
     """
     import time as _t
 
-    prev_pos      = sym_state.get("position", "NONE")
-    prev_entry    = sym_state.get("entry_price", 0.0)
-    prev_contracts = int(sym_state.get("contracts", 1))
-    prev_leverage  = int(sym_state.get("leverage", 1))
+    if manual_prev_state:
+        prev_pos       = manual_prev_state.get("position", "NONE")
+        prev_entry     = manual_prev_state.get("entry_price", 0.0)
+        prev_contracts = int(manual_prev_state.get("contracts", 1))
+        prev_leverage  = int(manual_prev_state.get("leverage", 1))
+    else:
+        prev_pos       = sym_state.get("position", "NONE")
+        prev_entry     = sym_state.get("entry_price", 0.0)
+        prev_contracts = int(sym_state.get("contracts", 1))
+        prev_leverage  = int(sym_state.get("leverage", 1))
 
     if prev_pos == "NONE" or prev_entry <= 0:
         return  # 처리할 포지션 없음
@@ -732,14 +738,8 @@ async def fetch_current_status():
                     curr_entry = bot_global_state["symbols"][sym].get("entry_price", 0.0)
                     # curr_entry > 0: 봇 자체 청산(entry_price=0으로 초기화)이 아님을 확인
                     if curr_pos == "NONE" and curr_entry > 0:
-                        prev_pos = prev["position"]
-                        prev_entry = prev["entry_price"]
-                        prev_contracts = prev["contracts"]
-                        prev_leverage = prev["leverage"]
-
                         # 봇 자체 청산이 아닌 외부 수동 청산 감지
-                        if bot_global_state["symbols"][sym].get("entry_price", 0.0) > 0:
-                            _detect_and_handle_manual_close(engine, sym, bot_global_state["symbols"][sym])
+                        _detect_and_handle_manual_close(engine, sym, bot_global_state["symbols"][sym], manual_prev_state=prev)
 
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
