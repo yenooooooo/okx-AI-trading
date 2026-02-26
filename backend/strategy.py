@@ -11,7 +11,8 @@ class TradingStrategy:
         self.hard_stop_loss_rate = 0.005      # [테스트] 원본: 0.02 (2%) → 0.5% 빠른 손절
         self.trailing_stop_activation = 0.003 # [테스트] 원본: 0.03 (3%) → 0.3% 수익 시 트레일링 활성화
         self.trailing_stop_rate = 0.002       # [테스트] 원본: 0.01 (1%) → 0.2% 하락 시 익절
-        self.volume_surge_multiplier = 1.5    # [Phase 2] 거래량 폭발 기준 배수
+        # self.volume_surge_multiplier = 1.5    # [Phase 2] 거래량 폭발 기준 배수
+        self.volume_surge_multiplier = 0.5    # [Phase 2] 거래량 폭발 기준 배수
         self.macro_cache = {}                 # 1시간봉 거시적 추세 데이터 캐싱
 
     async def get_macro_ema_200(self, engine_api, symbol):
@@ -113,8 +114,10 @@ class TradingStrategy:
         # [테스트 모드] 진입 조건 완화: BB 제거, RSI 범위 확대, MACD 크로스만 유지
         # 원본 LONG:  BB하단 AND MACD골든크로스 AND RSI<=40
         # 원본 SHORT: BB상단 AND MACD데드크로스 AND RSI>=60
-        long_macd = (latest['macd'] > latest['macd_signal']) and (previous['macd'] <= previous['macd_signal'])
-        long_rsi = latest['rsi'] <= 55   # [테스트] 원본: 40
+        # long_macd = (latest['macd'] > latest['macd_signal']) and (previous['macd'] <= previous['macd_signal'])
+        long_macd = (latest['macd'] > latest['macd_signal'])
+        # long_rsi = latest['rsi'] <= 55   # [테스트] 원본: 40
+        long_rsi = latest['rsi'] <= 70
 
         if long_macd and long_rsi:
             if not volume_verified:
@@ -124,8 +127,11 @@ class TradingStrategy:
                     return "HOLD", f"LONG 역추세 차단 (현재가 <= 1h EMA 200: {macro_ema_200:.2f})", None
             return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파, 거래량 충족)", payload
 
-        short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
-        short_rsi = latest['rsi'] >= 45  # [테스트] 원본: 60
+        # short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
+        short_macd = (latest['macd'] < latest['macd_signal'])
+        # short_rsi = latest['rsi'] >= 45  # [테스트] 원본: 60
+        short_rsi = latest['rsi'] >= 30
+        
 
         if short_macd and short_rsi:
             if not volume_verified:
