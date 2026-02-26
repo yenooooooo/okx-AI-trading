@@ -404,7 +404,7 @@ async function updateLogs() {
                 let colorClass = 'text-gray-400';
                 if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
                     colorClass = 'text-neon-red drop-shadow-[0_0_5px_rgba(255,77,77,0.8)]';
-                } else if (msg.includes('[봇]') || msg.includes('[진입 성공]') || msg.includes('청산') || msg.includes('[엔진]')) {
+                } else if (msg.includes('[봇]') || msg.includes('진입 성공') || msg.includes('청산') || msg.includes('[엔진]')) {
                     colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
                 }
 

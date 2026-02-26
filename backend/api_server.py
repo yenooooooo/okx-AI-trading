@@ -637,7 +637,7 @@ async def execute_test_order():
             engine_api.exchange.create_market_buy_order(symbol, trade_amount)
             
             # 테스트 진입 로그 기록
-            test_msg = f"[{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
+            test_msg = f"📈 [{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
             bot_global_state["logs"].append(test_msg)
             logger.info(test_msg)
             send_telegram_sync(test_msg)
