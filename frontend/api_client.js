@@ -408,7 +408,16 @@ async function updateLogs() {
                     colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
                 }
 
-                const timeStr = log.created_at ? log.created_at.replace('T', ' ').substring(11, 19) : '';
+                // Backend returns SQLite CURRENT_TIMESTAMP which is UTC. Convert to KST (+9h)
+                let timeStr = '';
+                if (log.created_at) {
+                    // SQLite format: "YYYY-MM-DD HH:MM:SS" -> convert to valid ISO string "YYYY-MM-DDTHH:MM:SSZ"
+                    const utcDateStr = log.created_at.replace(' ', 'T') + 'Z';
+                    const dateObj = new Date(utcDateStr);
+                    // format to KST HH:MM:SS
+                    timeStr = dateObj.toLocaleTimeString('ko-KR', { hour12: false, timeZone: 'Asia/Seoul' });
+                }
+
                 logDiv.className = colorClass + ' break-words';
                 logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${msg}`;
 
