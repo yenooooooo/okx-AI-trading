@@ -194,6 +194,108 @@ async def startup_event():
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
+def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
+    """
+    외부 수동 청산 감지 후 처리:
+      - OKX 체결 영수증에서 실현 PnL 추출
+      - DB에 MANUAL_CLOSE 기록
+      - 터미널 로그 + 텔레그램 알림 발송
+      - 봇 내부 상태를 NONE으로 초기화
+    sym_state 는 bot_global_state["symbols"][symbol] 의 참조(reference).
+    """
+    import time as _t
+
+    prev_pos      = sym_state.get("position", "NONE")
+    prev_entry    = sym_state.get("entry_price", 0.0)
+    prev_contracts = int(sym_state.get("contracts", 1))
+    prev_leverage  = int(sym_state.get("leverage", 1))
+
+    if prev_pos == "NONE" or prev_entry <= 0:
+        return  # 처리할 포지션 없음
+
+    # ── 즉시 상태 초기화 (같은 사이클 중복 감지 방지) ──────────────────────
+    sym_state["position"]              = "NONE"
+    sym_state["entry_price"]           = 0.0
+    sym_state["unrealized_pnl_percent"] = 0.0
+    sym_state["unrealized_pnl"]        = 0.0
+    sym_state["take_profit_price"]     = 0.0
+    sym_state["stop_loss_price"]       = 0.0
+
+    pnl_amount     = 0.0
+    avg_fill_price = prev_entry  # fallback
+
+    # ── OKX 체결 영수증 조회 (최대 2회 시도) ──────────────────────────────
+    try:
+        _t.sleep(1.0)
+        trades = engine_api.exchange.fetch_my_trades(symbol, limit=20)
+        closing_side = 'sell' if prev_pos == 'LONG' else 'buy'
+        recent_closes = [t for t in trades if t.get('side') == closing_side]
+
+        if not recent_closes:
+            _t.sleep(1.5)
+            trades = engine_api.exchange.fetch_my_trades(symbol, limit=20)
+            recent_closes = [t for t in trades if t.get('side') == closing_side]
+
+        if recent_closes:
+            order_id       = recent_closes[-1].get('order')
+            matching       = [t for t in recent_closes if t.get('order') == order_id]
+            total_gross    = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching)
+            total_fee      = sum(float(t.get('info', {}).get('fee',     0) or 0) for t in matching)
+            total_cost     = sum(t.get('cost',   0) for t in matching)
+            total_amt      = sum(t.get('amount', 0) for t in matching)
+            pnl_amount     = total_gross + total_fee
+            if total_amt > 0:
+                avg_fill_price = total_cost / total_amt
+            elif matching:
+                avg_fill_price = float(matching[0].get('price', prev_entry))
+        else:
+            logger.warning(f"[수동청산 감지] {symbol} 체결 영수증 없음 - PnL 0 으로 기록")
+    except Exception as e:
+        logger.error(f"[수동청산 감지] {symbol} PnL 영수증 조회 오류: {e}")
+
+    if avg_fill_price == 0:
+        avg_fill_price = engine_api.get_current_price(symbol) or prev_entry
+
+    # ── PnL% 계산 ──────────────────────────────────────────────────────────
+    try:
+        contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+    except Exception:
+        contract_size = 0.01
+    position_value = prev_entry * prev_contracts * contract_size
+    pnl_pct = (
+        (pnl_amount / (position_value / prev_leverage) * 100)
+        if position_value > 0 and prev_leverage > 0 else 0.0
+    )
+
+    # ── DB 저장 ───────────────────────────────────────────────────────────
+    try:
+        save_trade(
+            symbol        = symbol,
+            position_type = prev_pos,
+            entry_price   = prev_entry,
+            exit_price    = round(avg_fill_price, 2),
+            pnl           = round(pnl_amount, 4),
+            pnl_percent   = round(pnl_pct, 4),
+            amount        = prev_contracts,
+            exit_reason   = "MANUAL_CLOSE",
+            leverage      = prev_leverage,
+        )
+    except Exception as e:
+        logger.error(f"[수동청산 감지] {symbol} DB 저장 오류: {e}")
+
+    # ── 터미널 로그 + 텔레그램 알림 ────────────────────────────────────────
+    emoji = "✅" if pnl_pct >= 0 else "🔴"
+    msg = (
+        f"{emoji} [외부 수동 청산 감지] 사용자가 직접 포지션을 종료했습니다. "
+        f"(실현 수익금: {pnl_amount:+.4f} USDT)\n"
+        f"심볼: {symbol} | 방향: {prev_pos} | 체결가: ${avg_fill_price:.2f} | "
+        f"수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영)"
+    )
+    bot_global_state["logs"].append(msg)
+    logger.info(msg)
+    send_telegram_sync(msg)
+
+
 async def async_trading_loop():
     """다중 심볼 백그라운드 매매 루프"""
     global bot_global_state, ai_brain_state, _trading_task
@@ -224,6 +326,14 @@ async def async_trading_loop():
             else:
                 symbols = ['BTC/USDT:USDT']
 
+            # ── 매 사이클: 거래소 실제 포지션 조회 (수동 청산 감지용) ────────
+            try:
+                _exch_pos       = engine_api.get_open_positions()
+                exchange_open_symbols = {p['symbol'] for p in _exch_pos}
+            except Exception as _pos_err:
+                logger.warning(f"거래소 포지션 조회 실패 (수동청산 감지 스킵): {_pos_err}")
+                exchange_open_symbols = None
+
             # 각 심볼에 대해 거래 루프 실행
             for symbol in symbols:
                 try:
@@ -246,6 +356,16 @@ async def async_trading_loop():
                     current_price = engine_api.get_current_price(symbol)
 
                     bot_global_state["symbols"][symbol]["current_price"] = current_price
+
+                    # ── 수동 청산 감지: 내부엔 포지션이 있는데 거래소엔 없으면 외부 청산 ──
+                    if (exchange_open_symbols is not None
+                            and bot_global_state["symbols"][symbol]["position"] != "NONE"
+                            and bot_global_state["symbols"][symbol]["entry_price"] > 0
+                            and symbol not in exchange_open_symbols):
+                        _detect_and_handle_manual_close(
+                            engine_api, symbol, bot_global_state["symbols"][symbol]
+                        )
+                        continue  # 이번 사이클은 신규 진입 시도 없이 다음 심볼로
 
                     # 지표 계산
                     df = strategy_instance.calculate_indicators(df)
@@ -463,10 +583,12 @@ async def async_trading_loop():
             await asyncio.sleep(3)
 
         except Exception as e:
-            err_msg = f"[오류] 매매 루프: {str(e)}"
+            # 어떤 예외가 발생해도 루프를 절대 종료하지 않음 (Crash 방어)
+            err_msg = f"[오류] 매매 루프 예외 발생 - 3초 후 재시작: {str(e)}"
             bot_global_state["logs"].append(err_msg)
             logger.error(err_msg)
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
+            continue
 
 # ===== 기존 엔드포인트 (하위 호환) =====
 
@@ -659,7 +781,12 @@ async def fetch_current_status():
                                 avg_fill_price = total_cost / total_amt if total_amt > 0 else float(matching_trades[0].get('price', 0))
                                 if avg_fill_price == 0:
                                     avg_fill_price = engine.get_current_price(sym) or prev_entry
-                                
+
+                                try:
+                                    contract_size = float(engine.exchange.market(sym).get('contractSize', 0.01))
+                                except Exception:
+                                    contract_size = 0.01
+
                                 position_value = prev_entry * prev_contracts * contract_size
                                 pnl_pct = (pnl_amount / (position_value / prev_leverage) * 100) if position_value > 0 and prev_leverage > 0 else 0
                                 
