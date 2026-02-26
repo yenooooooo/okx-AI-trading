@@ -347,51 +347,63 @@
                     <p class="font-mono text-gray-500 tracking-widest text-lg animate-pulse">[ STANDBY ]</p>
                 </div>
 
-                <div id="position-active" class="hidden flex-col gap-2 z-10">
+                <div id="position-active" class="hidden flex-col mt-4 z-10">
 
                     <!-- 포지션 방향 + 미실현 손익 -->
-                    <div class="flex justify-between items-center bg-navy-900/60 rounded-lg px-3 py-2 border border-navy-border">
+                    <div class="flex justify-between items-start mb-6">
                         <div>
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Position · 포지션 방향</div>
-                            <span id="pos-type" class="text-xl font-black font-mono tracking-tighter flash-target">NONE</span>
+                            <div class="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Position ·
+                                포지션 방향</div>
+                            <span id="pos-type"
+                                class="text-3xl font-black font-mono tracking-tighter flash-target text-white">NONE</span>
                         </div>
                         <div class="text-right">
-                            <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Unrealized PnL · 미실현 손익</div>
-                            <span id="pos-roi" class="text-xl font-mono font-bold leading-none flash-target">0.00%</span>
-                            <span id="pos-pnl-usdt" class="text-[11px] font-mono block mt-0.5 flash-target text-gray-400">0.00 USDT</span>
+                            <div class="text-[10px] text-gray-500 uppercase tracking-widest mb-1 font-bold">Unrealized
+                                PnL · 미실현 손익</div>
+                            <span id="pos-roi"
+                                class="text-2xl font-mono font-bold leading-none flash-target">0.00%</span>
+                            <span id="pos-pnl-usdt" class="text-xs font-mono font-bold block mt-1 flash-target">0.00
+                                USDT</span>
                         </div>
                     </div>
 
                     <!-- 진입가 / 현재가 -->
-                    <div class="bg-navy-900/60 rounded-lg px-3 py-2 border border-navy-border flex flex-col gap-1.5">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[10px] text-gray-500">Entry · <span class="text-gray-600">진입가</span></span>
-                            <span id="pos-entry" class="font-mono text-sm font-bold text-text-main flash-target">0.00</span>
+                    <div class="border-t border-navy-border/50 pt-4 pb-4 flex flex-col gap-2">
+                        <div class="flex justify-between items-center text-xs">
+                            <span class="text-gray-500">Entry · <span class="text-gray-600">진입가</span></span>
+                            <span id="pos-entry"
+                                class="font-mono font-bold text-text-main flash-target text-sm">0.00</span>
                         </div>
-                        <div class="flex justify-between items-center">
-                            <span class="text-[10px] text-gray-500">Mark · <span class="text-gray-600">현재가</span></span>
-                            <span id="pos-current" class="font-mono text-sm font-bold text-text-main flash-target">0.00</span>
+                        <div class="flex justify-between items-center text-xs">
+                            <span class="text-gray-500">Mark · <span class="text-gray-600">현재가</span></span>
+                            <span id="pos-current"
+                                class="font-mono font-bold text-text-main flash-target text-sm">0.00</span>
                         </div>
                     </div>
 
-                    <!-- 목표가 -->
-                    <div class="bg-navy-900/60 rounded-lg px-3 py-2 border border-l-2 border-navy-border border-l-neon-green">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[10px] text-neon-green">Take Profit · <span class="text-gray-600">목표가</span></span>
+                    <!-- 목표가 / 손절가 -->
+                    <div class="border-t border-navy-border/50 pt-4 flex flex-col gap-4">
+                        <div class="flex justify-between items-start">
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-neon-green font-bold mb-1">Take Profit · <span
+                                        class="text-gray-600 font-normal">목표가</span></span>
+                            </div>
                             <div class="text-right">
                                 <span id="pos-tp" class="font-mono text-sm font-bold text-white">0.00</span>
-                                <span id="pos-tp-expect" class="text-[10px] font-bold block text-neon-green/80"></span>
+                                <span id="pos-tp-expect"
+                                    class="text-[10px] font-bold block text-neon-green/80 mt-1"></span>
                             </div>
                         </div>
-                    </div>
 
-                    <!-- 손절가 -->
-                    <div class="bg-navy-900/60 rounded-lg px-3 py-2 border border-l-2 border-navy-border border-l-neon-red">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[10px] text-neon-red">Stop Loss · <span class="text-gray-600">손절가</span></span>
+                        <div class="flex justify-between items-start">
+                            <div class="flex flex-col">
+                                <span class="text-[10px] text-neon-red font-bold mb-1">Stop Loss · <span
+                                        class="text-gray-600 font-normal">손절가</span></span>
+                            </div>
                             <div class="text-right">
                                 <span id="pos-sl" class="font-mono text-sm font-bold text-white">0.00</span>
-                                <span id="pos-sl-expect" class="text-[10px] font-bold block text-neon-red/80"></span>
+                                <span id="pos-sl-expect"
+                                    class="text-[10px] font-bold block text-neon-red/80 mt-1"></span>
                             </div>
                         </div>
                     </div>
@@ -407,28 +419,32 @@
                     <!-- Trades -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Trades</span>
-                        <span id="stats-total-trades" class="font-mono text-lg font-bold text-text-main flash-target">0</span>
+                        <span id="stats-total-trades"
+                            class="font-mono text-lg font-bold text-text-main flash-target">0</span>
                         <span class="text-[10px] text-gray-600">완료된 총 거래 횟수</span>
                     </div>
 
                     <!-- Win Rate -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
-                        <span id="stats-win-rate" class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
+                        <span id="stats-win-rate"
+                            class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
                         <span class="text-[10px] text-gray-600">수익 거래 승률</span>
                     </div>
 
                     <!-- Net PnL -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Net PnL</span>
-                        <span id="stats-total-pnl" class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
+                        <span id="stats-total-pnl"
+                            class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
                         <span class="text-[10px] text-gray-600">누적 순손익률 합계</span>
                     </div>
 
                     <!-- Max Drawdown -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Max DD</span>
-                        <span id="stats-max-dd" class="font-mono text-lg font-bold text-neon-red flash-target">0.00%</span>
+                        <span id="stats-max-dd"
+                            class="font-mono text-lg font-bold text-neon-red flash-target">0.00%</span>
                         <span class="text-[10px] text-gray-600">최고점 대비 최대 낙폭</span>
                     </div>
                 </div>
