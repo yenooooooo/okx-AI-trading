@@ -105,32 +105,83 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @auth_required
 async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from api_server import bot_global_state, _engine
+    import time as _t
     
     bot_global_state["is_running"] = False
     bot_global_state["logs"].append("🚨 [긴급] [PANIC] 텔레그램 긴급 킬스위치 발동!")
     
-    msg = "🚨 *[긴급 킬스위치 가동]*\n매매 루프를 즉시 중지하고, 모든 활성 포지션을 시장가로 청산합니다.\n\n"
+    # 먼저 매매 중단 알림 발송
+    await update.effective_message.reply_text("🚨 *[긴급 킬스위치 가동]*\n매매 루프를 즉시 중지하고, 모든 활성 포지션을 시장가로 청산합니다...", parse_mode="Markdown")
     
+    report_msg = "🏁 *[전체 포지션 청산 및 정산 결과]*\n\n"
     closed_count = 0
+    
     if _engine:
         for sym, state in bot_global_state.get("symbols", {}).items():
             pos = state.get("position", "NONE")
             if pos != "NONE":
                 try:
                     amount = int(state.get("contracts", 1))
-                    _engine.close_position(sym, pos, amount)
+                    entry = state.get("entry_price", 0.0)
+                    leverage = state.get("leverage", 1)
+                    
+                    # 1. 시장가 청산 주문 실행
+                    order_id = _engine.close_position(sym, pos, amount)
                     closed_count += 1
-                    msg += f"✅ `{sym}` {pos} 청산 주문 확정 완료\n"
+                    
+                    # 2. 거래소 API 체결 및 영수증 확보 대기 (최대 5초)
+                    net_pnl = 0.0
+                    avg_fill_price = 0.0
+                    receipt_found = False
+                    
+                    for _attempt in range(5):
+                        await asyncio.sleep(1.0)
+                        try:
+                            trades = _engine.get_recent_trade_receipts(sym, limit=10)
+                            matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
+                            if matching_trades:
+                                total_gross_pnl = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
+                                total_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
+                                total_cost = sum(t.get('cost', 0) for t in matching_trades)
+                                total_amount = sum(t.get('amount', 0) for t in matching_trades)
+                                
+                                net_pnl = total_gross_pnl + total_fee
+                                avg_fill_price = total_cost / total_amount if total_amount > 0 else 0.0
+                                receipt_found = True
+                                break
+                        except Exception:
+                            continue
+                            
+                    # 3. 수익률 계산 및 보고 메시지 작성
+                    if receipt_found:
+                        # 물리적 원금 계산 (api_server.py 로직과 동일하게 유지)
+                        try:
+                            contract_size = float(_engine.exchange.market(sym).get('contractSize', 0.01))
+                        except:
+                            contract_size = 0.01
+                        position_value = entry * amount * contract_size
+                        pnl_percent = (net_pnl / (position_value / leverage) * 100) if position_value > 0 else 0.0
+                        
+                        report_msg += f"✅ `{sym}` ({pos})\n"
+                        report_msg += f"  ▫️ 결과: {net_pnl:+.4f} USDT ({pnl_percent:+.2f}%)\n"
+                        report_msg += f"  ▫️ 청산가: ${avg_fill_price:.4f}\n\n"
+                    else:
+                        report_msg += f"⚠️ `{sym}`: 주문 전송 완료 (정산 데이터 대기 시간 초과)\n\n"
+                    
+                    # 봇 내부 상태 초기화
                     state["position"] = "NONE"
                     state["entry_price"] = 0.0
+                    
                 except Exception as e:
                     logger.error(f"Panic close failed for {sym}: {e}")
-                    msg += f"❌ `{sym}` 청산 실패!: {e}\n"
+                    report_msg += f"❌ `{sym}` 청산 실패: {e}\n\n"
     
     if closed_count == 0:
-        msg += "▫️ 정리할 활성 포지션이 없어 정지 조치만 수행되었습니다.\n"
+        report_msg += "▫️ 정리할 활성 포지션이 없어 시스템 정지만 수행되었습니다.\n"
+    else:
+        report_msg += f"🎯 총 {closed_count}개의 포지션이 정리되었습니다."
         
-    await update.effective_message.reply_text(msg, parse_mode="Markdown")
+    await update.effective_message.reply_text(report_msg, parse_mode="Markdown")
 
 @auth_required
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
