@@ -433,10 +433,11 @@ async def async_trading_loop():
         try:
             current_time = time.time()
             
-            # ── 1시간 주기 다이내믹 볼륨 스캐너 가동 ──
-            if current_time - last_scan_time >= 3600:
+            # ── 15분 주기 다이내믹 볼륨 스캐너 가동 ──
+            if current_time - last_scan_time >= 900:
                 try:
                     bot_global_state["logs"].append("[엔진] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
+                    await asyncio.sleep(0.5)  # [Phase 4] API Rate Limit 보호용 미세 비동기 지연
                     top_symbols = await engine_api.scan_top_volume_coins(limit=3)
                     if top_symbols:
                         # 설정에 바로 업데이트하여 영속화 및 프론트 반영
@@ -519,8 +520,11 @@ async def async_trading_loop():
                     latest_upper = df['upper_band'].iloc[-1]
                     latest_lower = df['lower_band'].iloc[-1]
 
-                    # 매매 시그널 및 AI 판단 상태 평가 (포지션 유무와 관계없이 항상 화면 표시를 위해 계산)
-                    signal, analysis_msg = strategy_instance.check_entry_signal(df)
+                    # ── [Phase 1] 거시적 추세(1h EMA200) 데이터 수집 (비동기, 캐시 적용) ──
+                    macro_ema_200 = await strategy_instance.get_macro_ema_200(engine_api, symbol)
+
+                    # 매매 시그널 및 AI 판단 상태 평가 (거시적 필터 적용)
+                    signal, analysis_msg = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
 
                     # 뇌 상태 업데이트
                     if symbol not in ai_brain_state["symbols"]:
@@ -566,29 +570,33 @@ async def async_trading_loop():
                             else:
                                 extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
 
+                            current_atr = df['atr'].iloc[-1] if 'atr' in df.columns else (entry * 0.01)
+                            if pd.isna(current_atr) or current_atr <= 0:
+                                current_atr = entry * 0.01
+                                
                             # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
-                            _sl_rate = strategy_instance.hard_stop_loss_rate
-                            if not symbol.startswith("BTC"):
-                                _sl_rate = max(0.05, _sl_rate * 3)
+                            # [Phase 3] ATR 기반 탄력적 쉴드 계산
                             if position_side == "LONG":
-                                _return_rate = (current_price - entry) / entry
-                                _real_sl = entry * (1 - _sl_rate)
+                                profit_usdt = current_price - entry
+                                _real_sl = entry - (current_atr * 2.0)
                             else:
-                                _return_rate = (entry - current_price) / entry
-                                _real_sl = entry * (1 + _sl_rate)
-                            _trailing_active = _return_rate >= strategy_instance.trailing_stop_activation
+                                profit_usdt = entry - current_price
+                                _real_sl = entry + (current_atr * 2.0)
+                                
+                            _trailing_active = profit_usdt >= (current_atr * 1.0)
                             _trailing_target = 0.0
+                            
                             if _trailing_active:
                                 if position_side == "LONG":
-                                    _trailing_target = extreme_price * (1 - strategy_instance.trailing_stop_rate)
+                                    _trailing_target = extreme_price - (current_atr * 0.5)
                                 else:
-                                    _trailing_target = extreme_price * (1 + strategy_instance.trailing_stop_rate)
+                                    _trailing_target = extreme_price + (current_atr * 0.5)
                             bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                             bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                             bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
 
                             risk_action = strategy_instance.evaluate_risk_management(
-                                entry, current_price, extreme_price, position_side
+                                entry, current_price, extreme_price, position_side, current_atr, symbol
                             )
 
                             if risk_action != "KEEP":

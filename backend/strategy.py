@@ -11,6 +11,40 @@ class TradingStrategy:
         self.hard_stop_loss_rate = 0.005      # [테스트] 원본: 0.02 (2%) → 0.5% 빠른 손절
         self.trailing_stop_activation = 0.003 # [테스트] 원본: 0.03 (3%) → 0.3% 수익 시 트레일링 활성화
         self.trailing_stop_rate = 0.002       # [테스트] 원본: 0.01 (1%) → 0.2% 하락 시 익절
+        self.volume_surge_multiplier = 1.5    # [Phase 2] 거래량 폭발 기준 배수
+        self.macro_cache = {}                 # 1시간봉 거시적 추세 데이터 캐싱
+
+    async def get_macro_ema_200(self, engine_api, symbol):
+        """
+        [Phase 1] 거시적 추세 파악용 1시간봉 200 EMA 조회 및 캐싱 (15분 유지)
+        API Rate Limit 우회를 위해 asyncio.to_thread 비동기 실행 및 자체 캐시 사용 
+        """
+        import time
+        import asyncio
+        import pandas as pd
+        
+        now = time.time()
+        # 15분(900초) 단위 캐싱
+        if symbol in self.macro_cache and (now - self.macro_cache[symbol]['timestamp'] < 900):
+            return self.macro_cache[symbol]['ema_200']
+            
+        try:
+            # 백엔드 엔진의 ccxt ohlcv 조회를 비동기로 우회 실행
+            ohlcv_1h = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, "1h", limit=200)
+            if not ohlcv_1h or len(ohlcv_1h) < 200:
+                return None
+                
+            df_1h = pd.DataFrame(ohlcv_1h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df_1h['ema_200'] = df_1h['close'].ewm(span=200, adjust=False).mean()
+            ema_200 = df_1h['ema_200'].iloc[-1]
+            
+            self.macro_cache[symbol] = {'timestamp': now, 'ema_200': ema_200}
+            return ema_200
+        except Exception as e:
+            from logger import get_logger
+            logger = get_logger(__name__)
+            logger.warning(f"[{symbol}] 거시적 추세(1h EMA200) 조회 실패 (캐시 재사용): {e}")
+            return self.macro_cache.get(symbol, {}).get('ema_200', None)
 
     def calculate_indicators(self, df):
         """
@@ -36,12 +70,23 @@ class TradingStrategy:
         df['macd'] = df['ema_12'] - df['ema_26']
         df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
 
+        # 4. [Phase 2] 거래량 SMA 계산 (20주기)
+        df['vol_sma_20'] = df['volume'].rolling(window=20).mean()
+
+        # 5. [Phase 3] ATR 계산 (14주기)
+        high_low = df['high'] - df['low']
+        high_close = (df['high'] - df['close'].shift()).abs()
+        low_close = (df['low'] - df['close'].shift()).abs()
+        ranges = pd.concat([high_low, high_close, low_close], axis=1)
+        true_range = ranges.max(axis=1)
+        df['atr'] = true_range.rolling(window=14).mean()
+
         return df
 
-    def check_entry_signal(self, df):
+    def check_entry_signal(self, df, current_price=None, macro_ema_200=None):
         """
         가장 최근 캔들을 분석하여 매수/매도 진입 시그널 판단
-        공격적 다중 지표 (Multi-Indicators) 적용
+        공격적 다중 지표 (Multi-Indicators) 및 [Phase 1] 1h EMA 거시적 추세 필터 적용
         반환값: (진입신호, 상태메세지) 형태의 튜플
         """
         if len(df) < 2:
@@ -52,6 +97,11 @@ class TradingStrategy:
         
         rsi_val = latest['rsi']
         macd_val = latest['macd']
+        vol_val = latest['volume']
+        vol_sma_20 = latest['vol_sma_20']
+        
+        # [Phase 2] 거래량 폭발 필터링
+        volume_verified = vol_val > (vol_sma_20 * self.volume_surge_multiplier) if not pd.isna(vol_sma_20) else True
         
         # [테스트 모드] 진입 조건 완화: BB 제거, RSI 범위 확대, MACD 크로스만 유지
         # 원본 LONG:  BB하단 AND MACD골든크로스 AND RSI<=40
@@ -60,43 +110,56 @@ class TradingStrategy:
         long_rsi = latest['rsi'] <= 55   # [테스트] 원본: 40
 
         if long_macd and long_rsi:
-            return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파)"
+            if not volume_verified:
+                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})"
+            if macro_ema_200 is not None and current_price is not None:
+                if current_price <= macro_ema_200:
+                    return "HOLD", f"LONG 역추세 차단 (현재가 <= 1h EMA 200: {macro_ema_200:.2f})"
+            return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파, 거래량 충족)"
 
         short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
         short_rsi = latest['rsi'] >= 45  # [테스트] 원본: 60
 
         if short_macd and short_rsi:
-            return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파)"
+            if not volume_verified:
+                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})"
+            if macro_ema_200 is not None and current_price is not None:
+                if current_price >= macro_ema_200:
+                    return "HOLD", f"SHORT 역추세 차단 (현재가 >= 1h EMA 200: {macro_ema_200:.2f})"
+            return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파, 거래량 충족)"
             
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중"
 
-    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, symbol="BTC/USDT:USDT"):
+    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT"):
         """
         파산 방지 핵심 모듈: 현재 진행 중인 포지션의 강제 청산(손절/익절) 여부 반환
-        비트코인과 알트코인의 변동성을 다르게 고려하여 하드 스탑로스를 차등 적용합니다.
+        [Phase 3] 하드 스탑로스와 트레일링 스탑을 고정 %가 아닌 변동성(ATR) 기반으로 설정
         """
+        if current_atr <= 0 or pd.isna(current_atr):
+            current_atr = entry_price * 0.01  # ATR 계산 불가시 진입가의 1%로 임시대체
+            
         if position_side == "LONG":
-            return_rate = (current_price - entry_price) / entry_price
-            drawdown_from_high = (highest_price - current_price) / highest_price
+            profit_usdt = current_price - entry_price
+            drawdown_usdt = highest_price - current_price
+            hard_sl_price = entry_price - (current_atr * 2.0)
         elif position_side == "SHORT":
-            return_rate = (entry_price - current_price) / entry_price
-            drawdown_from_high = (current_price - highest_price) / highest_price
+            profit_usdt = entry_price - current_price
+            drawdown_usdt = current_price - highest_price
+            hard_sl_price = entry_price + (current_atr * 2.0)
         else:
             return "KEEP"
 
-        # 1. 하드 스탑로스 (Hard Stop-loss)
-        # 알트코인은 변동성이 극심하므로(Whipsaw) 스탑로스를 5~7% 수준으로 더 넓혀서 방어합니다.
-        dynamic_sl_rate = self.hard_stop_loss_rate
-        if not symbol.startswith("BTC"):
-            dynamic_sl_rate = max(0.05, dynamic_sl_rate * 3) # 알트코인은 최소 5% 보장, 혹은 기존 설정의 3배 확장
-
-        if return_rate <= -dynamic_sl_rate:
+        # 1. 하드 스탑로스 (Hard Stop-loss) - ATR * 2.0 기준
+        if position_side == "LONG" and current_price <= hard_sl_price:
+            return "STOP_LOSS"
+        if position_side == "SHORT" and current_price >= hard_sl_price:
             return "STOP_LOSS"
 
         # 2. 트레일링 스탑 (Trailing Stop)
-        # 익절 활성화 라인이나 추적 폭도 알트코인 특성에 맞춰 변형할 수 있으나, 현재는 수익 확보를 위해 동일 적용
-        if return_rate >= self.trailing_stop_activation:
-            if drawdown_from_high >= self.trailing_stop_rate:
+        # 발동 기준: 수익금이 (ATR * 1.0) 사이즈를 돌파했을 때
+        if profit_usdt >= (current_atr * 1.0):
+            # 추적 간격: 최고점/최저점 대비 "ATR * 0.5" 하락 시 청산
+            if drawdown_usdt >= (current_atr * 0.5):
                 return "TRAILING_STOP_EXIT"
 
         return "KEEP"
