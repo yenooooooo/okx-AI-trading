@@ -4,10 +4,10 @@ import hmac
 import hashlib
 import base64
 import time as _time
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import pandas as pd
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
 from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs
@@ -27,6 +27,45 @@ app_server.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- WebSocket 관리자 ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast_json(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+manager = ConnectionManager()
+
+async def broadcast_dashboard_state():
+    """1초마다 전역 상태를 연결된 모든 웹소켓 클라이언트에게 브로드캐스트"""
+    while True:
+        try:
+            if manager.active_connections:
+                # 데이터 최적화: 로그는 최신 10개만 슬라이싱
+                state_to_send = {
+                    "is_running": bot_global_state["is_running"],
+                    "balance": bot_global_state["balance"],
+                    "symbols": bot_global_state["symbols"],
+                    "logs": list(bot_global_state["logs"][-10:])
+                }
+                await manager.broadcast_json(state_to_send)
+        except Exception as e:
+            logger.error(f"WebSocket Broadcast 오류: {e}")
+        await asyncio.sleep(1)
 
 class LogList(list):
     def append(self, msg):
@@ -151,6 +190,10 @@ async def startup_event():
     await init_telegram_bot()
     bot_global_state["logs"].append("[봇] 텔레그램 양방향 컨트롤 타워 비동기 가동 완료")
     logger.info("텔레그램 양방향 컨트롤 타워 비동기 시작 완료")
+
+    # 실시간 웹 대시보드 브로드캐스트 시작
+    asyncio.create_task(broadcast_dashboard_state())
+    logger.info("실시간 웹소켓 브로드캐스트 태스크 시작 완료")
 
 @app_server.on_event("shutdown")
 async def shutdown_event():
@@ -836,6 +879,17 @@ async def toggle_bot_action():
             _trading_task = asyncio.create_task(async_trading_loop())
 
     return {"is_running": bot_global_state["is_running"]}
+
+# --- 신규 WebSocket 엔드포인트 ---
+@app_server.websocket("/ws/dashboard")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # 클라이언트로부터의 메시지 수신 대기 (연결 유지용)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 # ===== 신규 엔드포인트 =====
 

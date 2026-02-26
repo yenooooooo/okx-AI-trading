@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANTIGRAVITY 실시간 대시보드</title>
+    <style>
+        :root {
+            --bg-color: #0d0d0d;
+            --container-bg: #1a1a1a;
+            --neon-green: #39ff14;
+            --neon-red: #ff3131;
+            --neon-blue: #00e5ff;
+            --text-color: #e0e0e0;
+            --border-color: #333;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'JetBrains Mono', 'Courier New', Courier, monospace;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .dashboard-container {
+            width: 100%;
+            max-width: 1000px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .header {
+            grid-column: span 2;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid var(--neon-green);
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+        }
+
+        .title {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+        }
+
+        .status-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: bold;
+            border: 1px solid var(--border-color);
+        }
+
+        .status-on {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+
+        .status-off {
+            border-color: var(--neon-red);
+            color: var(--neon-red);
+        }
+
+        .card {
+            background-color: var(--container-bg);
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .balance-card {
+            grid-column: span 2;
+            text-align: center;
+        }
+
+        .balance-val {
+            font-size: 32px;
+            color: var(--neon-blue);
+        }
+
+        .symbol-grid {
+            grid-column: span 2;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .symbol-card {
+            border: 1px solid #444;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .symbol-card h3 {
+            margin-top: 0;
+            color: var(--neon-blue);
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+
+        .pnl-pos {
+            color: var(--neon-green);
+        }
+
+        .pnl-neg {
+            color: var(--neon-red);
+        }
+
+        .log-container {
+            grid-column: span 2;
+            height: 250px;
+            overflow-y: auto;
+            background: #000;
+            padding: 10px;
+            font-size: 13px;
+            border: 1px dashed var(--neon-green);
+            line-height: 1.5;
+        }
+
+        .log-entry {
+            margin-bottom: 3px;
+            border-left: 3px solid #444;
+            padding-left: 8px;
+        }
+
+        .log-bot {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+        }
+
+        .log-epic {
+            border-color: var(--neon-red);
+            color: var(--neon-red);
+        }
+
+        /* Animation */
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .live-indicator {
+            width: 10px;
+            height: 10px;
+            background: var(--neon-green);
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 5px;
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="dashboard-container">
+        <div class="header">
+            <div class="title">ANTIGRAVITY CORE v2.0</div>
+            <div id="ws-status" class="status-badge status-off">연결 대기 중...</div>
+        </div>
+
+        <div class="card balance-card">
+            <div>TOTAL ASSETS (FUTURES)</div>
+            <div class="balance-val"><span id="total-balance">0.00</span> USDT</div>
+            <div id="bot-running-status" style="margin-top: 10px;"></div>
+        </div>
+
+        <div class="symbol-grid" id="symbol-list">
+            <!-- 실시간 심볼 카드 삽입 -->
+        </div>
+
+        <div class="card" style="grid-column: span 2;">
+            <div style="margin-bottom: 8px; color: var(--neon-green); font-weight:bold;">[SYSTEM REAL-TIME LOGS]</div>
+            <div class="log-container" id="log-list"></div>
+        </div>
+    </div>
+
+    <script>
+        // 현재 호스트 IP 자동 감지 (백엔드와 동일 포트/주소 가정)
+        const wsUrl = "ws://" + window.location.hostname + ":8000/ws/dashboard";
+        let socket;
+
+        function connect() {
+            console.log("Connecting to WebSocket:", wsUrl);
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = () => {
+                const badge = document.getElementById('ws-status');
+                badge.innerText = "ONLINE";
+                badge.className = "status-badge status-on";
+                console.log("WebSocket Connected");
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    updateUI(data);
+                } catch (e) {
+                    console.error("JSON 파싱 오류:", e);
+                }
+            };
+
+            socket.onclose = () => {
+                const badge = document.getElementById('ws-status');
+                badge.innerText = "OFFLINE (재연결 중...)";
+                badge.className = "status-badge status-off";
+                console.log("WebSocket Disconnected. Reconnecting in 3s...");
+                setTimeout(connect, 3000);
+            };
+
+            socket.onerror = (err) => {
+                console.error("WebSocket Error:", err);
+                socket.close();
+            };
+        }
+
+        function updateUI(data) {
+            // 1. 잔고 및 상태 반영
+            document.getElementById('total-balance').innerText = (data.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 });
+            const runStatus = document.getElementById('bot-running-status');
+            if (data.is_running) {
+                runStatus.innerHTML = '<span class="live-indicator"></span><span style="color:var(--neon-green)">AUTO-TRADING ACTIVE</span>';
+            } else {
+                runStatus.innerHTML = '<span style="color:var(--neon-red)">SYSTEM PAUSED</span>';
+            }
+
+            // 2. 심볼 리스트 (포지션 정보) 렌더링
+            const listContainer = document.getElementById('symbol-list');
+            listContainer.innerHTML = '';
+
+            if (data.symbols) {
+                for (const [sym, state] of Object.entries(data.symbols)) {
+                    const card = document.createElement('div');
+                    card.className = 'card symbol-card';
+
+                    const pnl = state.unrealized_pnl_percent || 0;
+                    const pnlClass = pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                    const pnlSign = pnl >= 0 ? '+' : '';
+
+                    const posColor = state.position === 'LONG' ? 'var(--neon-green)' : (state.position === 'SHORT' ? 'var(--neon-red)' : '#888');
+
+                    card.innerHTML = `
+                        <h3>${sym}</h3>
+                        <div style="font-size: 14px; line-height: 1.6;">
+                            <div>포지션: <span style="font-weight:bold; color:${posColor}">${state.position || 'NONE'}</span></div>
+                            <div>현재가: $${(state.current_price || 0).toFixed(4)}</div>
+                            <div>진입가: $${(state.entry_price || 0).toFixed(4)}</div>
+                            <div style="margin-top:10px; font-size:1.2em; font-weight:bold;">PnL: <span class="${pnlClass}">${pnlSign}${pnl.toFixed(2)}%</span></div>
+                        </div>
+                    `;
+                    listContainer.appendChild(card);
+                }
+            }
+
+            // 3. 로그 (최신순 유지)
+            const logContainer = document.getElementById('log-list');
+            logContainer.innerHTML = '';
+            if (data.logs) {
+                data.logs.forEach(log => {
+                    const div = document.createElement('div');
+                    div.className = 'log-entry';
+                    if (log.includes('[봇]')) div.classList.add('log-bot');
+                    if (log.includes('[긴급]')) div.classList.add('log-epic');
+                    div.innerText = log;
+                    logContainer.appendChild(div);
+                });
+                // 스크롤 하단 고정
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+        }
+
+        // 앱 시작
+        connect();
+    </script>
+</body>
+
+</html>
