@@ -17,6 +17,100 @@ from logger import get_logger
 
 logger = get_logger(__name__)
 
+# ── Telegram HTML 포맷터 ──────────────────────────────────────────────────────
+_TG_LINE = "─" * 24
+
+def _sym_short(symbol: str) -> str:
+    return symbol.split(':')[0]
+
+def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: int, is_test: bool = False) -> str:
+    d_emoji = "📈" if direction == "LONG" else "📉"
+    test_tag = "  <b>[TEST]</b>" if is_test else ""
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  진입{test_tag}\n"
+        f"{_TG_LINE}\n"
+        f"{d_emoji} <b>{direction}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{_TG_LINE}\n"
+        f"가격   │  <code>${price:,.2f}</code>\n"
+        f"수량   │  <code>{amount}계약  ·  {leverage}x</code>\n"
+        f"{_TG_LINE}"
+    )
+
+def _tg_exit(symbol: str, direction: str, avg_price: float, pnl_usdt: float, pnl_pct: float, reason: str) -> str:
+    is_profit = pnl_pct >= 0
+    result_emoji = "✅" if is_profit else "🔴"
+    result_label = "익절" if is_profit else "손절"
+    sign = "+" if pnl_usdt >= 0 else ""
+    pnl_label = "수익금" if is_profit else "손실금"
+    pct_label  = "수익률" if is_profit else "손실률"
+    _reason_ko = {"STOP_LOSS": "하드 손절", "TRAILING_STOP_EXIT": "트레일링 익절"}
+    reason_ko  = _reason_ko.get(reason, reason)
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  청산\n"
+        f"{_TG_LINE}\n"
+        f"{result_emoji} <b>{direction} {result_label}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{_TG_LINE}\n"
+        f"청산가  │  <code>${avg_price:,.2f}</code>\n"
+        f"{pnl_label}  │  <b><code>{sign}{pnl_usdt:.4f} USDT</code></b>\n"
+        f"{pct_label}  │  <b><code>{sign}{pnl_pct:.2f}%</code></b>\n"
+        f"사유    │  {reason_ko}\n"
+        f"{_TG_LINE}"
+    )
+
+def _tg_manual_exit(symbol: str, direction: str, avg_price: float, pnl_usdt: float, pnl_pct: float) -> str:
+    is_profit = pnl_pct >= 0
+    sign = "+" if pnl_usdt >= 0 else ""
+    pnl_label = "수익금" if is_profit else "손실금"
+    pct_label  = "수익률" if is_profit else "손실률"
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  수동청산 감지\n"
+        f"{_TG_LINE}\n"
+        f"✋ <b>{direction} 수동청산</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{_TG_LINE}\n"
+        f"청산가  │  <code>${avg_price:,.2f}</code>\n"
+        f"{pnl_label}  │  <b><code>{sign}{pnl_usdt:.4f} USDT</code></b>\n"
+        f"{pct_label}  │  <b><code>{sign}{pnl_pct:.2f}%</code></b>\n"
+        f"{_TG_LINE}"
+    )
+
+def _tg_scanner(symbols: list) -> str:
+    sym_list = "  ·  ".join([s.split('/')[0] for s in symbols])
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  스캐너\n"
+        f"{_TG_LINE}\n"
+        f"🔍 <b>거래량 Top 3 갱신 완료</b>\n"
+        f"{_TG_LINE}\n"
+        f"타겟   │  <code>{sym_list}</code>\n"
+        f"{_TG_LINE}"
+    )
+
+def _tg_circuit_breaker(symbol: str, balance: float) -> str:
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  경고\n"
+        f"{_TG_LINE}\n"
+        f"⚠️ <b>일일 손실 한도 초과</b>\n"
+        f"{_TG_LINE}\n"
+        f"심볼   │  <code>{_sym_short(symbol)}</code>\n"
+        f"잔고   │  <code>{balance:,.2f} USDT</code>\n"
+        f"{_TG_LINE}"
+    )
+
+def _tg_system(is_running: bool) -> str:
+    if is_running:
+        return (
+            f"⚡ <b>ANTIGRAVITY</b>  |  시스템\n"
+            f"{_TG_LINE}\n"
+            f"🟢 <b>자동매매 가동 시작</b>\n"
+            f"{_TG_LINE}"
+        )
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  시스템\n"
+        f"{_TG_LINE}\n"
+        f"🛑 <b>자동매매 중지</b>\n"
+        f"{_TG_LINE}"
+    )
+# ─────────────────────────────────────────────────────────────────────────────
+
 app_server = FastAPI()
 
 # CORS 설정
@@ -314,7 +408,7 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
     
     bot_global_state["logs"].append(msg)
     logger.info(msg)
-    send_telegram_sync(msg)
+    send_telegram_sync(_tg_manual_exit(symbol, prev_pos, avg_fill_price, pnl_amount, pnl_pct))
 
 
 async def async_trading_loop():
@@ -350,7 +444,7 @@ async def async_trading_loop():
                         scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 자동 갱신 완료: {top_symbols}"
                         bot_global_state["logs"].append(scan_msg)
                         logger.info(scan_msg)
-                        send_telegram_sync(scan_msg)
+                        send_telegram_sync(_tg_scanner(top_symbols))
                         last_scan_time = current_time
                 except Exception as scan_err:
                     err_msg = f"[오류] 스캐너 로직 실패: {scan_err}"
@@ -545,7 +639,7 @@ async def async_trading_loop():
                                         
                                     bot_global_state["logs"].append(msg)
                                     logger.info(msg)
-                                    send_telegram_sync(msg)
+                                    send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, pnl_amount, pnl_percent, risk_action))
 
                                     # 4. 프론트엔드 포지션 초기화
                                     bot_global_state["symbols"][symbol]["position"] = "NONE"
@@ -577,7 +671,7 @@ async def async_trading_loop():
                                 cb_msg = f"⚠️ [{symbol}] 일일 손실 한도 초과 - 신규 진입 차단 (잔고: {curr_bal:.2f} USDT)"
                                 bot_global_state["logs"].append(cb_msg)
                                 logger.warning(cb_msg)
-                                send_telegram_sync(cb_msg)
+                                send_telegram_sync(_tg_circuit_breaker(symbol, curr_bal))
                                 _circuit_breaker_last_warn[symbol] = now
                             continue
 
@@ -633,7 +727,7 @@ async def async_trading_loop():
                                 entry_msg = f"{entry_emoji} [{symbol}] {signal} 진입 성공! | 가격: ${current_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
                                 bot_global_state["logs"].append(entry_msg)
                                 logger.info(entry_msg)
-                                send_telegram_sync(entry_msg)
+                                send_telegram_sync(_tg_entry(symbol, signal, current_price, trade_amount, trade_leverage))
 
                             except Exception as e:
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
@@ -736,7 +830,7 @@ async def execute_test_order():
             test_msg = f"📈 [{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
             bot_global_state["logs"].append(test_msg)
             logger.info(test_msg)
-            send_telegram_sync(test_msg)
+            send_telegram_sync(_tg_entry(symbol, "LONG", current_price, trade_amount, trade_leverage, is_test=True))
             
             # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
             ticker = engine_api.exchange.fetch_ticker(symbol)
@@ -870,13 +964,13 @@ async def toggle_bot_action():
         msg = "[봇] 명령 수신: 시스템 가동 중지 (STOP)"
         bot_global_state["logs"].append(msg)
         logger.info(msg)
-        send_telegram_sync(msg)
+        send_telegram_sync(_tg_system(False))
     else:
         bot_global_state["is_running"] = True
         msg = "[봇] 명령 수신: 시스템 가동 시작 (START)!"
         bot_global_state["logs"].append(msg)
         logger.info(msg)
-        send_telegram_sync(msg)
+        send_telegram_sync(_tg_system(True))
         # 중복 태스크 방지: 이전 태스크가 완료된 경우에만 새 태스크 생성
         if _trading_task is None or _trading_task.done():
             _trading_task = asyncio.create_task(async_trading_loop())

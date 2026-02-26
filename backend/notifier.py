@@ -234,14 +234,14 @@ async def send_telegram(message: str):
         
     global _telegram_app
     try:
-        # 네이티브 봇 객체가 있다면 직접 비동기 호출
         if _telegram_app and _telegram_app.bot:
-            await _telegram_app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            await _telegram_app.bot.send_message(
+                chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="HTML"
+            )
         else:
-            # 안전장치 폴백 (Fallback)
             import httpx
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
             async with httpx.AsyncClient(timeout=10.0) as client:
                 await client.post(url, json=payload)
     except Exception as e:
