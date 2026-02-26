@@ -29,12 +29,25 @@ def init_db():
             exit_time TIMESTAMP,
             pnl REAL,
             pnl_percent REAL,
+            fee REAL DEFAULT 0.0,
+            gross_pnl REAL DEFAULT 0.0,
             amount REAL NOT NULL,
             exit_reason TEXT,
             leverage INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+
+    # 기존 DB 호환용 컬럼 추가 (fee, gross_pnl)
+    try:
+        cursor.execute('ALTER TABLE trades ADD COLUMN fee REAL DEFAULT 0.0')
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute('ALTER TABLE trades ADD COLUMN gross_pnl REAL DEFAULT 0.0')
+    except sqlite3.OperationalError:
+        pass
 
     # bot_config 테이블
     cursor.execute('''
@@ -80,6 +93,7 @@ def init_db():
 
 def save_trade(symbol: str, position_type: str, entry_price: float, amount: float,
                exit_price: float = None, pnl: float = None, pnl_percent: float = None,
+               fee: float = 0.0, gross_pnl: float = 0.0,
                exit_reason: str = None, leverage: int = 1):
     """거래 기록 저장"""
     conn = get_connection()
@@ -91,10 +105,10 @@ def save_trade(symbol: str, position_type: str, entry_price: float, amount: floa
     cursor.execute('''
         INSERT INTO trades
         (symbol, position_type, entry_price, exit_price, entry_time, exit_time,
-         pnl, pnl_percent, amount, exit_reason, leverage)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (symbol, position_type, entry_price, exit_price, entry_time, exit_time,
-          pnl, pnl_percent, amount, exit_reason, leverage))
+          pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage))
 
     conn.commit()
     trade_id = cursor.lastrowid

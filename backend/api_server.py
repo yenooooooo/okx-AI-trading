@@ -45,13 +45,12 @@ def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: 
     msg += f"{_TG_LINE}"
     return msg
 
-def _tg_exit(symbol: str, direction: str, avg_price: float, pnl_usdt: float, pnl_pct: float, reason: str) -> str:
+def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fee: float, net_pnl: float, pnl_pct: float, reason: str) -> str:
     is_profit = pnl_pct >= 0
     result_emoji = "✅" if is_profit else "🔴"
     result_label = "익절" if is_profit else "손절"
-    sign = "+" if pnl_usdt >= 0 else ""
-    pnl_label = "수익금" if is_profit else "손실금"
-    pct_label  = "수익률" if is_profit else "손실률"
+    sign_net = "+" if net_pnl >= 0 else ""
+    sign_gross = "+" if gross_pnl >= 0 else ""
     _reason_ko = {"STOP_LOSS": "하드 손절", "TRAILING_STOP_EXIT": "트레일링 익절"}
     reason_ko  = _reason_ko.get(reason, reason)
     return (
@@ -60,25 +59,28 @@ def _tg_exit(symbol: str, direction: str, avg_price: float, pnl_usdt: float, pnl
         f"{result_emoji} <b>{direction} {result_label}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
         f"청산가  │  <code>${avg_price:,.2f}</code>\n"
-        f"{pnl_label}  │  <b><code>{sign}{pnl_usdt:.4f} USDT</code></b>\n"
-        f"{pct_label}  │  <b><code>{sign}{pnl_pct:.2f}%</code></b>\n"
+        f"총수익  │  <code>{sign_gross}{gross_pnl:.4f} USDT</code>\n"
+        f"수수료  │  <code>{fee:.4f} USDT</code>\n"
+        f"순수익  │  <b><code>{sign_net}{net_pnl:.4f} USDT</code></b>\n"
+        f"수익률  │  <b><code>{sign_net}{pnl_pct:.2f}%</code></b>\n"
         f"사유    │  {reason_ko}\n"
         f"{_TG_LINE}"
     )
 
-def _tg_manual_exit(symbol: str, direction: str, avg_price: float, pnl_usdt: float, pnl_pct: float) -> str:
+def _tg_manual_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fee: float, net_pnl: float, pnl_pct: float) -> str:
     is_profit = pnl_pct >= 0
-    sign = "+" if pnl_usdt >= 0 else ""
-    pnl_label = "수익금" if is_profit else "손실금"
-    pct_label  = "수익률" if is_profit else "손실률"
+    sign_net = "+" if net_pnl >= 0 else ""
+    sign_gross = "+" if gross_pnl >= 0 else ""
     return (
         f"⚡ <b>ANTIGRAVITY</b>  |  수동청산 감지\n"
         f"{_TG_LINE}\n"
         f"✋ <b>{direction} 수동청산</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
         f"청산가  │  <code>${avg_price:,.2f}</code>\n"
-        f"{pnl_label}  │  <b><code>{sign}{pnl_usdt:.4f} USDT</code></b>\n"
-        f"{pct_label}  │  <b><code>{sign}{pnl_pct:.2f}%</code></b>\n"
+        f"총수익  │  <code>{sign_gross}{gross_pnl:.4f} USDT</code>\n"
+        f"수수료  │  <code>{fee:.4f} USDT</code>\n"
+        f"순수익  │  <b><code>{sign_net}{net_pnl:.4f} USDT</code></b>\n"
+        f"수익률  │  <b><code>{sign_net}{pnl_pct:.2f}%</code></b>\n"
         f"{_TG_LINE}"
     )
 
@@ -342,6 +344,8 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
     sym_state["stop_loss_price"]       = 0.0
 
     pnl_amount     = 0.0
+    total_gross    = 0.0
+    total_fee      = 0.0
     avg_fill_price = prev_entry  # fallback
     pnl_pct        = 0.0
 
@@ -404,6 +408,8 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
             exit_price    = round(avg_fill_price, 2),
             pnl           = round(pnl_amount, 4),
             pnl_percent   = round(pnl_pct, 4),
+            fee           = round(total_fee, 4),
+            gross_pnl     = round(total_gross, 4),
             amount        = prev_contracts,
             exit_reason   = "MANUAL_CLOSE",
             leverage      = prev_leverage,
@@ -413,11 +419,11 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
 
     # ── 터미널 로그 + 텔레그램 알림 (요청된 정확한 포맷) ────────────────────────────────────────
     emoji = "✅" if pnl_pct >= 0 else "🔴"
-    msg = f"{emoji} [수동청산 감지] {symbol} {prev_pos} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 실현 수익금(PnL): {pnl_amount:+.4f} USDT | 수익률: {pnl_pct:+.2f}% (수수료/펀딩비 반영 완료)"
+    msg = f"{emoji} [수동청산 감지] {symbol} {prev_pos} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_pct:+.2f}%"
     
     bot_global_state["logs"].append(msg)
     logger.info(msg)
-    send_telegram_sync(_tg_manual_exit(symbol, prev_pos, avg_fill_price, pnl_amount, pnl_pct))
+    send_telegram_sync(_tg_manual_exit(symbol, prev_pos, avg_fill_price, total_gross, total_fee, pnl_amount, pnl_pct))
 
 
 async def async_trading_loop():
@@ -620,6 +626,8 @@ async def async_trading_loop():
                                     # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 대기
                                     import time as _t
                                     net_pnl = 0.0
+                                    total_gross_pnl = 0.0
+                                    total_fee = 0.0
                                     avg_fill_price = current_price
                                     receipt_found = False
                                     
@@ -664,6 +672,8 @@ async def async_trading_loop():
                                         exit_price=avg_fill_price,
                                         pnl=round(pnl_amount, 4),
                                         pnl_percent=round(pnl_percent, 4),
+                                        fee=round(total_fee, 4),
+                                        gross_pnl=round(total_gross_pnl, 4),
                                         amount=amount,
                                         exit_reason=risk_action,
                                         leverage=leverage
@@ -677,11 +687,11 @@ async def async_trading_loop():
                                     reason_ko = _exit_reason_ko.get(risk_action, risk_action)
                                     emoji = "✅" if pnl_percent >= 0 else "🔴"
                                     
-                                    msg = f"{emoji} [{symbol}] {position_side} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 실현 수익금(PnL): {pnl_amount:+.4f} USDT | 수익률: {pnl_percent:+.2f}% (수수료/펀딩비 반영 완료) | {reason_ko}"
+                                    msg = f"{emoji} [{symbol}] {position_side} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross_pnl:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
                                         
                                     bot_global_state["logs"].append(msg)
                                     logger.info(msg)
-                                    send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, pnl_amount, pnl_percent, risk_action))
+                                    send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, risk_action))
 
                                     # 4. 프론트엔드 포지션 초기화
                                     bot_global_state["symbols"][symbol]["position"] = "NONE"

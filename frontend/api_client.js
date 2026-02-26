@@ -567,16 +567,22 @@ async function syncStats() {
                 // The API /api/v1/trades returns latest 100 trades (DESC order mapped from DB)
                 trades.slice(0, 3).forEach(t => {
                     const pnlVal = parseFloat(t.pnl || 0);
-                    const isProfit = pnlVal > 0;
+                    const isProfit = pnlVal >= 0;
                     const sign = isProfit ? '+' : '';
                     const color = isProfit ? 'text-neon-green' : 'text-neon-red';
                     const bg = isProfit ? 'bg-navy-900/40 border-l-2 border-l-neon-green' : 'bg-navy-900/40 border-l-2 border-l-neon-red';
                     const shortSym = (t.symbol || 'UNKNOWN').split(':')[0];
                     const pnlStr = t.pnl_percent !== undefined && t.pnl_percent !== null ? `${sign}${parseFloat(t.pnl_percent).toFixed(2)}%` : `${sign}${pnlVal.toFixed(2)}`;
+                    const feeStr = t.fee ? ` (F: ${parseFloat(t.fee).toFixed(3)})` : '';
+                    const usdtStr = `(Net: ${pnlVal > 0 ? '+' : ''}${pnlVal.toFixed(2)})`;
+
                     histHtml += `
                         <div class="flex justify-between items-center text-[11px] ${bg} p-1.5 rounded border border-navy-border/50">
-                            <span class="font-mono text-gray-300 ml-1"><span class="${t.position_side === 'LONG' ? 'text-neon-green' : 'text-neon-red'} font-bold">${(t.position_side || 'UKNWN').substring(0, 1)}</span> · ${shortSym}</span>
-                            <span class="font-mono ${color} font-bold mr-1">${pnlStr}</span>
+                            <div class="flex flex-col ml-1">
+                                <span class="font-mono text-gray-300"><span class="${t.position_side === 'LONG' ? 'text-neon-green' : 'text-neon-red'} font-bold">${(t.position_side || 'UKNWN').substring(0, 1)}</span> · ${shortSym}</span>
+                                <span class="font-mono text-[9px] text-gray-500">${usdtStr}${feeStr}</span>
+                            </div>
+                            <span class="font-mono ${color} font-bold mr-1 text-right text-[12px]">${pnlStr}</span>
                         </div>
                     `;
                 });

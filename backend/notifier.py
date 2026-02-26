@@ -131,6 +131,8 @@ async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
                     # 2. 거래소 API 체결 및 영수증 확보 대기 (최대 5초)
                     net_pnl = 0.0
+                    total_gross_pnl = 0.0
+                    total_fee = 0.0
                     avg_fill_price = 0.0
                     receipt_found = False
                     
@@ -163,7 +165,8 @@ async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         pnl_percent = (net_pnl / (position_value / leverage) * 100) if position_value > 0 else 0.0
                         
                         report_msg += f"✅ `{sym}` ({pos})\n"
-                        report_msg += f"  ▫️ 결과: {net_pnl:+.4f} USDT ({pnl_percent:+.2f}%)\n"
+                        report_msg += f"  ▫️ 순수익: {net_pnl:+.4f} USDT ({pnl_percent:+.2f}%)\n"
+                        report_msg += f"  ▫️ (항목: 총수익 {total_gross_pnl:+.4f} | 수수료 {total_fee:.4f})\n"
                         report_msg += f"  ▫️ 청산가: ${avg_fill_price:.4f}\n\n"
                     else:
                         report_msg += f"⚠️ `{sym}`: 주문 전송 완료 (정산 데이터 대기 시간 초과)\n\n"
