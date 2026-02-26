@@ -347,50 +347,52 @@
                     <p class="font-mono text-gray-500 tracking-widest text-lg animate-pulse">[ STANDBY ]</p>
                 </div>
 
-                <div id="position-active" class="hidden flex-col gap-3 z-10">
+                <div id="position-active" class="hidden flex-col gap-2 z-10">
 
                     <!-- 포지션 방향 + 미실현 손익 -->
-                    <div class="flex justify-between items-center bg-navy-900/60 rounded-lg p-3 border border-navy-border">
-                        <div class="flex flex-col gap-1">
-                            <span class="text-[10px] text-gray-500 uppercase tracking-wider">Position</span>
-                            <span id="pos-type" class="text-2xl font-black font-mono tracking-tighter leading-none flash-target">NONE</span>
-                            <span class="text-[10px] text-gray-600">포지션 방향</span>
+                    <div class="flex justify-between items-center bg-navy-900/60 rounded-lg px-3 py-2 border border-navy-border">
+                        <div>
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Position · 포지션 방향</div>
+                            <span id="pos-type" class="text-xl font-black font-mono tracking-tighter flash-target">NONE</span>
                         </div>
-                        <div class="flex flex-col items-end gap-1">
-                            <span class="text-[10px] text-gray-500 uppercase tracking-wider">Unrealized PnL</span>
-                            <span id="pos-roi" class="text-2xl font-mono font-bold leading-none flash-target">0.00%</span>
-                            <span id="pos-pnl-usdt" class="text-xs font-mono flash-target text-gray-400">0.00 USDT</span>
-                            <span class="text-[10px] text-gray-600">미실현 손익</span>
+                        <div class="text-right">
+                            <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Unrealized PnL · 미실현 손익</div>
+                            <span id="pos-roi" class="text-xl font-mono font-bold leading-none flash-target">0.00%</span>
+                            <span id="pos-pnl-usdt" class="text-[11px] font-mono block mt-0.5 flash-target text-gray-400">0.00 USDT</span>
                         </div>
                     </div>
 
                     <!-- 진입가 / 현재가 -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                            <span class="text-[10px] text-gray-500 uppercase tracking-wider">Entry</span>
+                    <div class="bg-navy-900/60 rounded-lg px-3 py-2 border border-navy-border flex flex-col gap-1.5">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[10px] text-gray-500">Entry · <span class="text-gray-600">진입가</span></span>
                             <span id="pos-entry" class="font-mono text-sm font-bold text-text-main flash-target">0.00</span>
-                            <span class="text-[10px] text-gray-600">진입가 ($)</span>
                         </div>
-                        <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                            <span class="text-[10px] text-gray-500 uppercase tracking-wider">Mark</span>
+                        <div class="flex justify-between items-center">
+                            <span class="text-[10px] text-gray-500">Mark · <span class="text-gray-600">현재가</span></span>
                             <span id="pos-current" class="font-mono text-sm font-bold text-text-main flash-target">0.00</span>
-                            <span class="text-[10px] text-gray-600">현재가 ($)</span>
                         </div>
                     </div>
 
-                    <!-- 목표가 / 손절가 -->
-                    <div class="grid grid-cols-2 gap-3">
-                        <div class="bg-navy-900/60 rounded-lg p-3 border border-l-2 border-neon-green/40 border-l-neon-green flex flex-col gap-1">
-                            <span class="text-[10px] text-neon-green uppercase tracking-wider">Take Profit</span>
-                            <span id="pos-tp" class="font-mono text-sm font-bold text-white">0.00</span>
-                            <span id="pos-tp-expect" class="text-[10px] font-bold text-neon-green/80"></span>
-                            <span class="text-[10px] text-gray-600">목표가 · 예상수익</span>
+                    <!-- 목표가 -->
+                    <div class="bg-navy-900/60 rounded-lg px-3 py-2 border border-l-2 border-navy-border border-l-neon-green">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[10px] text-neon-green">Take Profit · <span class="text-gray-600">목표가</span></span>
+                            <div class="text-right">
+                                <span id="pos-tp" class="font-mono text-sm font-bold text-white">0.00</span>
+                                <span id="pos-tp-expect" class="text-[10px] font-bold block text-neon-green/80"></span>
+                            </div>
                         </div>
-                        <div class="bg-navy-900/60 rounded-lg p-3 border border-l-2 border-neon-red/40 border-l-neon-red flex flex-col gap-1">
-                            <span class="text-[10px] text-neon-red uppercase tracking-wider">Stop Loss</span>
-                            <span id="pos-sl" class="font-mono text-sm font-bold text-white">0.00</span>
-                            <span id="pos-sl-expect" class="text-[10px] font-bold text-neon-red/80"></span>
-                            <span class="text-[10px] text-gray-600">손절가 · 예상손실</span>
+                    </div>
+
+                    <!-- 손절가 -->
+                    <div class="bg-navy-900/60 rounded-lg px-3 py-2 border border-l-2 border-navy-border border-l-neon-red">
+                        <div class="flex justify-between items-center">
+                            <span class="text-[10px] text-neon-red">Stop Loss · <span class="text-gray-600">손절가</span></span>
+                            <div class="text-right">
+                                <span id="pos-sl" class="font-mono text-sm font-bold text-white">0.00</span>
+                                <span id="pos-sl-expect" class="text-[10px] font-bold block text-neon-red/80"></span>
+                            </div>
                         </div>
                     </div>
                 </div>
