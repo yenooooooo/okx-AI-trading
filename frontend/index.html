@@ -447,8 +447,8 @@
                             class="bg-navy-900/30 rounded px-2 py-1.5 border-l-2 border-l-neon-green flex flex-col justify-between">
                             <span class="text-[10px] text-neon-green font-bold tracking-widest mb-1">TAKE PROFIT</span>
                             <div class="flex flex-col">
-                                <span id="pos-tp" class="font-mono text-sm font-bold text-white">0.00</span>
-                                <span id="pos-tp-expect" class="text-[10px] font-bold text-neon-green mt-0.5"></span>
+                                <span id="pos-tp" class="font-mono text-sm font-bold text-white">대기중</span>
+                                <span id="pos-tp-expect" class="text-[10px] font-bold text-neon-green mt-0.5">목표가 대기중</span>
                             </div>
                         </div>
 
@@ -458,10 +458,15 @@
                             <span class="text-[10px] text-neon-red font-bold tracking-widest mb-1">STOP LOSS</span>
                             <div class="flex flex-col">
                                 <span id="pos-sl" class="font-mono text-sm font-bold text-white">0.00</span>
-                                <span id="pos-sl-expect" class="text-[10px] font-bold text-neon-red mt-0.5"></span>
+                                <span id="pos-sl-expect" class="text-[10px] font-bold text-neon-red mt-0.5">(Dynamic)</span>
                             </div>
                         </div>
                     </div>
+
+                    <!-- 딜레이 안내 -->
+                    <p class="text-[9px] text-gray-600 mt-2 leading-snug">
+                        안내: 거래소 호가창(0.1s)과 봇의 감지 주기(1s) 간 미세 틱 차이가 발생할 수 있습니다.
+                    </p>
                 </div>
             </div>
 

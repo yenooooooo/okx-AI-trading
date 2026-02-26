@@ -132,28 +132,21 @@ async function syncBotStatus() {
             // (단, 포지션 유무, 진입가, 목표가 등 고정데이터는 계속 연동)
             updateText('pos-type', symbolData.position);
             updateNumberText('pos-entry', symbolData.entry_price);
-            updateNumberText('pos-tp', symbolData.take_profit_price);
-            updateNumberText('pos-sl', symbolData.stop_loss_price);
+            // TP/SL 상태 동기화 (백엔드 실시간 계산값 기반)
+            const trailingActive = symbolData.trailing_active === true;
+            const trailingTarget = parseFloat(symbolData.trailing_target || 0);
+            const realSl = parseFloat(symbolData.real_sl || 0);
 
-            // [자체 검열] TP/SL 예상 수익률 정밀 연산 (SHORT/LONG 완벽 대응)
-            const entry = parseFloat(symbolData.entry_price || 0);
-            const lev = parseFloat(symbolData.leverage || 1);
-            const tp = parseFloat(symbolData.take_profit_price || 0);
-            const sl = parseFloat(symbolData.stop_loss_price || 0);
-            const pos = symbolData.position;
-
-            if (entry > 0) {
-                let estTp = 0, estSl = 0;
-                if (pos === 'LONG') {
-                    estTp = ((tp - entry) / entry) * lev * 100;
-                    estSl = ((sl - entry) / entry) * lev * 100;
-                } else if (pos === 'SHORT') {
-                    estTp = ((entry - tp) / entry) * lev * 100;
-                    estSl = ((entry - sl) / entry) * lev * 100;
-                }
-                updateText('pos-tp-expect', tp > 0 ? `[예상: ${estTp >= 0 ? '+' : ''}${estTp.toFixed(2)}%]` : '');
-                updateText('pos-sl-expect', sl > 0 ? `[예상: ${estSl >= 0 ? '+' : ''}${estSl.toFixed(2)}%]` : '');
+            if (trailingActive && trailingTarget > 0) {
+                updateText('pos-tp', trailingTarget.toFixed(4));
+                updateText('pos-tp-expect', 'Trailing Active 🎯');
+            } else {
+                updateText('pos-tp', '대기중');
+                updateText('pos-tp-expect', '목표가 대기중');
             }
+
+            updateNumberText('pos-sl', realSl > 0 ? realSl : 0);
+            updateText('pos-sl-expect', realSl > 0 ? '(Dynamic)' : '');
 
             // PnL(%) 및 USDT 수익금 동기화
             const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);

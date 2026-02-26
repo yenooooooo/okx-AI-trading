@@ -489,7 +489,10 @@ async def async_trading_loop():
                             "take_profit_price": 0.0,
                             "stop_loss_price": 0.0,
                             "highest_price": 0.0,
-                            "lowest_price": 0.0
+                            "lowest_price": 0.0,
+                            "real_sl": 0.0,
+                            "trailing_active": False,
+                            "trailing_target": 0.0,
                         }
 
                     # OHLCV 데이터 수집
@@ -562,6 +565,28 @@ async def async_trading_loop():
                                 extreme_price = bot_global_state["symbols"][symbol].get("lowest_price", entry)
                             else:
                                 extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
+
+                            # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
+                            _sl_rate = strategy_instance.hard_stop_loss_rate
+                            if not symbol.startswith("BTC"):
+                                _sl_rate = max(0.05, _sl_rate * 3)
+                            if position_side == "LONG":
+                                _return_rate = (current_price - entry) / entry
+                                _real_sl = entry * (1 - _sl_rate)
+                            else:
+                                _return_rate = (entry - current_price) / entry
+                                _real_sl = entry * (1 + _sl_rate)
+                            _trailing_active = _return_rate >= strategy_instance.trailing_stop_activation
+                            _trailing_target = 0.0
+                            if _trailing_active:
+                                if position_side == "LONG":
+                                    _trailing_target = extreme_price * (1 - strategy_instance.trailing_stop_rate)
+                                else:
+                                    _trailing_target = extreme_price * (1 + strategy_instance.trailing_stop_rate)
+                            bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
+                            bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
+                            bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
+
                             risk_action = strategy_instance.evaluate_risk_management(
                                 entry, current_price, extreme_price, position_side
                             )
@@ -646,6 +671,9 @@ async def async_trading_loop():
                                     bot_global_state["symbols"][symbol]["entry_price"] = 0.0
                                     bot_global_state["symbols"][symbol]["take_profit_price"] = 0.0
                                     bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
+                                    bot_global_state["symbols"][symbol]["real_sl"] = 0.0
+                                    bot_global_state["symbols"][symbol]["trailing_active"] = False
+                                    bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
 
                                 except Exception as e:
                                     # API 호출 실패 시 에러만 기록하고 포지션을 유지 (DB 업데이트 안함)
@@ -713,15 +741,6 @@ async def async_trading_loop():
                                 bot_global_state["symbols"][symbol]["lowest_price"] = current_price
                                 bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
                                 bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
-                                # TP/SL 가격 계산 (전략 파라미터 기반)
-                                sl_rate = strategy_instance.hard_stop_loss_rate
-                                tp_rate = strategy_instance.trailing_stop_activation
-                                if signal == "LONG":
-                                    bot_global_state["symbols"][symbol]["take_profit_price"] = round(current_price * (1 + tp_rate), 2)
-                                    bot_global_state["symbols"][symbol]["stop_loss_price"] = round(current_price * (1 - sl_rate), 2)
-                                else:
-                                    bot_global_state["symbols"][symbol]["take_profit_price"] = round(current_price * (1 - tp_rate), 2)
-                                    bot_global_state["symbols"][symbol]["stop_loss_price"] = round(current_price * (1 + sl_rate), 2)
 
                                 entry_emoji = "📈" if signal == "LONG" else "📉"
                                 entry_msg = f"{entry_emoji} [{symbol}] {signal} 진입 성공! | 가격: ${current_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
