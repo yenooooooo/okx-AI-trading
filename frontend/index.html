@@ -388,24 +388,38 @@
             </div>
 
             <!-- Stats -->
-            <div class="glass-panel p-5 grid grid-cols-2 gap-4 text-xs">
-                <h3 class="col-span-2 text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2">
+            <div class="glass-panel p-5 flex flex-col gap-3 text-xs">
+                <h3 class="text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2">
                     누적 성과 지표 (Performance Metrics)</h3>
-                <div class="flex flex-col gap-1">
-                    <span class="text-[10px] text-gray-500 uppercase">Trades</span>
-                    <span id="stats-total-trades" class="font-mono text-sm text-text-main flash-target">0</span>
-                </div>
-                <div class="flex flex-col gap-1 text-right">
-                    <span class="text-[10px] text-gray-500 uppercase">Win Rate</span>
-                    <span id="stats-win-rate" class="font-mono text-sm text-neon-green flash-target">0.00%</span>
-                </div>
-                <div class="flex flex-col gap-1">
-                    <span class="text-[10px] text-gray-500 uppercase">Net PnL</span>
-                    <span id="stats-total-pnl" class="font-mono text-sm text-neon-green flash-target">0.00%</span>
-                </div>
-                <div class="flex flex-col gap-1 text-right">
-                    <span class="text-[10px] text-gray-500 uppercase">Max DD</span>
-                    <span id="stats-max-dd" class="font-mono text-sm text-neon-red flash-target">0.00%</span>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Trades -->
+                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Trades</span>
+                        <span id="stats-total-trades" class="font-mono text-lg font-bold text-text-main flash-target">0</span>
+                        <span class="text-[10px] text-gray-600">완료된 총 거래 횟수</span>
+                    </div>
+
+                    <!-- Win Rate -->
+                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
+                        <span id="stats-win-rate" class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
+                        <span class="text-[10px] text-gray-600">수익 거래 승률</span>
+                    </div>
+
+                    <!-- Net PnL -->
+                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Net PnL</span>
+                        <span id="stats-total-pnl" class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
+                        <span class="text-[10px] text-gray-600">누적 순손익률 합계</span>
+                    </div>
+
+                    <!-- Max Drawdown -->
+                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Max DD</span>
+                        <span id="stats-max-dd" class="font-mono text-lg font-bold text-neon-red flash-target">0.00%</span>
+                        <span class="text-[10px] text-gray-600">최고점 대비 최대 낙폭</span>
+                    </div>
                 </div>
             </div>
         </div>
