@@ -87,10 +87,10 @@ class TradingStrategy:
         """
         가장 최근 캔들을 분석하여 매수/매도 진입 시그널 판단
         공격적 다중 지표 (Multi-Indicators) 및 [Phase 1] 1h EMA 거시적 추세 필터 적용
-        반환값: (진입신호, 상태메세지) 형태의 튜플
+        반환값: (진입신호, 상태메세지, 페이로드) 형태의 튜플
         """
         if len(df) < 2:
-            return "HOLD", "데이터 부족 대기"
+            return "HOLD", "데이터 부족 대기", None
             
         latest = df.iloc[-1]
         previous = df.iloc[-2]
@@ -103,6 +103,13 @@ class TradingStrategy:
         # [Phase 2] 거래량 폭발 필터링
         volume_verified = vol_val > (vol_sma_20 * self.volume_surge_multiplier) if not pd.isna(vol_sma_20) else True
         
+        # [Telegram/Logging Payload Packaging]
+        payload = {
+            "ema_status": f"Uptrend (Price > EMA)" if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200 else (f"Downtrend (Price < EMA)" if macro_ema_200 is not None else "N/A"),
+            "vol_multiplier": f"{vol_val / vol_sma_20:.2f}x" if not pd.isna(vol_sma_20) and vol_sma_20 > 0 else "N/A",
+            "atr_sl_margin": f"ATR(14): {latest['atr']:.2f} -> SL Margin: {latest['atr'] * 2.0:.2f}" if 'atr' in latest and not pd.isna(latest['atr']) else "N/A"
+        }
+        
         # [테스트 모드] 진입 조건 완화: BB 제거, RSI 범위 확대, MACD 크로스만 유지
         # 원본 LONG:  BB하단 AND MACD골든크로스 AND RSI<=40
         # 원본 SHORT: BB상단 AND MACD데드크로스 AND RSI>=60
@@ -111,24 +118,24 @@ class TradingStrategy:
 
         if long_macd and long_rsi:
             if not volume_verified:
-                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})"
+                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
             if macro_ema_200 is not None and current_price is not None:
                 if current_price <= macro_ema_200:
-                    return "HOLD", f"LONG 역추세 차단 (현재가 <= 1h EMA 200: {macro_ema_200:.2f})"
-            return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파, 거래량 충족)"
+                    return "HOLD", f"LONG 역추세 차단 (현재가 <= 1h EMA 200: {macro_ema_200:.2f})", None
+            return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향 돌파, 거래량 충족)", payload
 
         short_macd = (latest['macd'] < latest['macd_signal']) and (previous['macd'] >= previous['macd_signal'])
         short_rsi = latest['rsi'] >= 45  # [테스트] 원본: 60
 
         if short_macd and short_rsi:
             if not volume_verified:
-                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})"
+                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
             if macro_ema_200 is not None and current_price is not None:
                 if current_price >= macro_ema_200:
-                    return "HOLD", f"SHORT 역추세 차단 (현재가 >= 1h EMA 200: {macro_ema_200:.2f})"
-            return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파, 거래량 충족)"
+                    return "HOLD", f"SHORT 역추세 차단 (현재가 >= 1h EMA 200: {macro_ema_200:.2f})", None
+            return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향 돌파, 거래량 충족)", payload
             
-        return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중"
+        return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중", None
 
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT"):
         """

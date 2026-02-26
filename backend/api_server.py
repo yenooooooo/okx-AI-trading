@@ -23,18 +23,27 @@ _TG_LINE = "─" * 24
 def _sym_short(symbol: str) -> str:
     return symbol.split(':')[0]
 
-def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: int, is_test: bool = False) -> str:
+def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: int, payload: dict = None, is_test: bool = False) -> str:
     d_emoji = "📈" if direction == "LONG" else "📉"
     test_tag = "  <b>[TEST]</b>" if is_test else ""
-    return (
+    msg = (
         f"⚡ <b>ANTIGRAVITY</b>  |  진입{test_tag}\n"
         f"{_TG_LINE}\n"
         f"{d_emoji} <b>{direction}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
         f"가격   │  <code>${price:,.2f}</code>\n"
         f"수량   │  <code>{amount}계약  ·  {leverage}x</code>\n"
-        f"{_TG_LINE}"
     )
+    if payload:
+        msg += (
+            f"{_TG_LINE}\n"
+            f"[진입 근거 데이터]\n"
+            f"📈 1h 추세: {payload.get('ema_status', 'N/A')}\n"
+            f"🔥 거래량 폭발: {payload.get('vol_multiplier', 'N/A')}\n"
+            f"🛡️ ATR 방어선: {payload.get('atr_sl_margin', 'N/A')}\n"
+        )
+    msg += f"{_TG_LINE}"
+    return msg
 
 def _tg_exit(symbol: str, direction: str, avg_price: float, pnl_usdt: float, pnl_pct: float, reason: str) -> str:
     is_profit = pnl_pct >= 0
@@ -524,7 +533,7 @@ async def async_trading_loop():
                     macro_ema_200 = await strategy_instance.get_macro_ema_200(engine_api, symbol)
 
                     # 매매 시그널 및 AI 판단 상태 평가 (거시적 필터 적용)
-                    signal, analysis_msg = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
+                    signal, analysis_msg, payload = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
 
                     # 뇌 상태 업데이트
                     if symbol not in ai_brain_state["symbols"]:
@@ -754,7 +763,7 @@ async def async_trading_loop():
                                 entry_msg = f"{entry_emoji} [{symbol}] {signal} 진입 성공! | 가격: ${current_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
                                 bot_global_state["logs"].append(entry_msg)
                                 logger.info(entry_msg)
-                                send_telegram_sync(_tg_entry(symbol, signal, current_price, trade_amount, trade_leverage))
+                                send_telegram_sync(_tg_entry(symbol, signal, current_price, trade_amount, trade_leverage, payload=payload))
 
                             except Exception as e:
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"

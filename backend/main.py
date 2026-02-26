@@ -103,10 +103,12 @@ def run_bot():
 
             # 5. 포지션이 없을 때: 신규 진입 시그널 체크
             if not current_position:
-                signal = strategy.check_entry_signal(df)
+                signal, msg, payload = strategy.check_entry_signal(df)
                 if signal in ["LONG", "SHORT"]:
-                    msg = f"조건 충족! 현재가 ${current_price}에 RSI {rsi_val:.1f} 확인. 즉시 시장가 매수({signal}) API 호출 시도!"
+                    # 기존 CLI용 단순 메시지 대신 페이로드 내용까지 출력
                     print(f"[{'모의' if PAPER_TRADING else '실제'} 신규 진입 포착] {msg}")
+                    if payload:
+                        print(f" -> 1h 추세: {payload.get('ema_status', 'N/A')} | 거래량폭발: {payload.get('vol_multiplier', 'N/A')} | ATR방어선: {payload.get('atr_sl_margin', 'N/A')}")
                     
                     if not PAPER_TRADING:
                         try:
