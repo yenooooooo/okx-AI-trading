@@ -570,27 +570,27 @@ async def async_trading_loop():
                             else:
                                 extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
 
-                            current_atr = df['atr'].iloc[-1] if 'atr' in df.columns else (entry * 0.01)
+                            current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
                             if pd.isna(current_atr) or current_atr <= 0:
-                                current_atr = entry * 0.01
+                                current_atr = float(entry * 0.01)
                                 
                             # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
-                            # [Phase 3] ATR 기반 탄력적 쉴드 계산
+                            # [Phase 3] ATR 기반 탄력적 쉴드 계산 (JSON 에러 방지용 dtype 명시 캐스팅)
                             if position_side == "LONG":
-                                profit_usdt = current_price - entry
-                                _real_sl = entry - (current_atr * 2.0)
+                                profit_usdt = float(current_price - entry)
+                                _real_sl = float(entry - (current_atr * 2.0))
                             else:
-                                profit_usdt = entry - current_price
-                                _real_sl = entry + (current_atr * 2.0)
+                                profit_usdt = float(entry - current_price)
+                                _real_sl = float(entry + (current_atr * 2.0))
                                 
-                            _trailing_active = profit_usdt >= (current_atr * 1.0)
+                            _trailing_active = bool(profit_usdt >= (current_atr * 1.0))
                             _trailing_target = 0.0
                             
                             if _trailing_active:
                                 if position_side == "LONG":
-                                    _trailing_target = extreme_price - (current_atr * 0.5)
+                                    _trailing_target = float(extreme_price - (current_atr * 0.5))
                                 else:
-                                    _trailing_target = extreme_price + (current_atr * 0.5)
+                                    _trailing_target = float(extreme_price + (current_atr * 0.5))
                             bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                             bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                             bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
