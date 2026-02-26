@@ -272,10 +272,31 @@ async def async_trading_loop():
     logger.info("자동매매 루프 시작")
     import time
     last_log_time = 0
+    last_scan_time = 0  # 스캐너 마지막 작동 시간
     _circuit_breaker_last_warn = {}  # 서킷 브레이커 로그 쓰로틀 (심볼별 마지막 경고 시각)
 
     while bot_global_state["is_running"]:
         try:
+            current_time = time.time()
+            
+            # ── 1시간 주기 다이내믹 볼륨 스캐너 가동 ──
+            if current_time - last_scan_time >= 3600:
+                try:
+                    bot_global_state["logs"].append("[시스템] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
+                    top_symbols = await engine_api.scan_top_volume_coins(limit=3)
+                    if top_symbols:
+                        # 설정에 바로 업데이트하여 영속화 및 프론트 반영
+                        set_config('symbols', top_symbols)
+                        scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 자동 갱신 완료: {top_symbols}"
+                        bot_global_state["logs"].append(scan_msg)
+                        logger.info(scan_msg)
+                        send_telegram_sync(scan_msg)
+                        last_scan_time = current_time
+                except Exception as scan_err:
+                    err_msg = f"[오류] 스캐너 로직 실패: {scan_err}"
+                    bot_global_state["logs"].append(err_msg)
+                    logger.error(err_msg)
+
             # 잔고 실시간 연동
             curr_bal = engine_api.get_usdt_balance()
             bot_global_state["balance"] = round(curr_bal, 2)
@@ -287,6 +308,13 @@ async def async_trading_loop():
             else:
                 symbols = ['BTC/USDT:USDT']
 
+            # 현재 보유 중인 포지션이 하나라도 있는지 확인 (단일 포지션 집중)
+            any_position_open = False
+            for sym, state in bot_global_state["symbols"].items():
+                if state.get("position", "NONE") != "NONE":
+                    any_position_open = True
+                    break
+
             # ── 매 사이클: 거래소 실제 포지션 조회 (수동 청산 감지용) ────────
             try:
                 _exch_pos       = engine_api.get_open_positions()
@@ -296,7 +324,11 @@ async def async_trading_loop():
                 exchange_open_symbols = None
 
             # 각 심볼에 대해 거래 루프 실행
-            for symbol in symbols:
+            for i, symbol in enumerate(symbols):
+                # 멀티 타겟팅 API Rate Limit 우회를 위한 물리적 딜레이 추가
+                if i > 0:
+                    await asyncio.sleep(1)
+                
                 try:
                     # 심볼 상태 초기화
                     if symbol not in bot_global_state["symbols"]:
@@ -474,6 +506,10 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
+                        # 이미 다른 코인의 포지션이 오픈되어 있다면 신규 진입 즉시 차단
+                        if any_position_open:
+                            continue
+                            
                         # 서킷 브레이커: 일일 손실 한도 초과 시 신규 진입 차단 (60초에 1회만 로그)
                         if strategy_instance.is_daily_drawdown_exceeded(curr_bal):
                             now = time.time()

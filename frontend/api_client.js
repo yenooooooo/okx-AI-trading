@@ -255,7 +255,7 @@ async function syncConfig() {
                 updateText('lev-val-display', val + 'x', false);
             } else if (key === 'symbols') {
                 const input = document.getElementById('config-symbols');
-                if (input && Array.isArray(val)) input.value = val.join(', ');
+                if (input && Array.isArray(val)) input.value = val.join(' | ');
                 if (Array.isArray(val) && val.length > 0) currentSymbol = val[0]; // 차트용 심볼 갱신
             } else if (key === 'manual_override_enabled') {
                 const toggle = document.getElementById('manual-override-toggle');
@@ -300,7 +300,7 @@ async function updateConfigValue(key) {
 async function updateConfigSymbols() {
     try {
         const symbolsText = document.getElementById('config-symbols').value;
-        const symbols = symbolsText.split(',').map(s => s.trim()).filter(s => s);
+        const symbols = symbolsText.split(/[,|]/).map(s => s.trim()).filter(s => s);
         const symbolsJson = JSON.stringify(symbols);
         const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, { method: 'POST' });
         await response.json();
@@ -404,7 +404,7 @@ async function updateLogs() {
                 let colorClass = 'text-gray-400';
                 if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
                     colorClass = 'text-neon-red drop-shadow-[0_0_5px_rgba(255,77,77,0.8)]';
-                } else if (msg.includes('[봇]') || msg.includes('진입 성공') || msg.includes('청산') || msg.includes('[엔진]')) {
+                } else if (msg.includes('[봇]') || msg.includes('진입 성공') || msg.includes('청산') || msg.includes('[엔진]') || msg.includes('[스캐너 가동]')) {
                     colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
                 }
 

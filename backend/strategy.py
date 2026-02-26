@@ -70,9 +70,10 @@ class TradingStrategy:
             
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} - 타점 탐색 중"
 
-    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side):
+    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, symbol="BTC/USDT:USDT"):
         """
         파산 방지 핵심 모듈: 현재 진행 중인 포지션의 강제 청산(손절/익절) 여부 반환
+        비트코인과 알트코인의 변동성을 다르게 고려하여 하드 스탑로스를 차등 적용합니다.
         """
         if position_side == "LONG":
             return_rate = (current_price - entry_price) / entry_price
@@ -84,10 +85,16 @@ class TradingStrategy:
             return "KEEP"
 
         # 1. 하드 스탑로스 (Hard Stop-loss)
-        if return_rate <= -self.hard_stop_loss_rate:
+        # 알트코인은 변동성이 극심하므로(Whipsaw) 스탑로스를 5~7% 수준으로 더 넓혀서 방어합니다.
+        dynamic_sl_rate = self.hard_stop_loss_rate
+        if not symbol.startswith("BTC"):
+            dynamic_sl_rate = max(0.05, dynamic_sl_rate * 3) # 알트코인은 최소 5% 보장, 혹은 기존 설정의 3배 확장
+
+        if return_rate <= -dynamic_sl_rate:
             return "STOP_LOSS"
 
         # 2. 트레일링 스탑 (Trailing Stop)
+        # 익절 활성화 라인이나 추적 폭도 알트코인 특성에 맞춰 변형할 수 있으나, 현재는 수익 확보를 위해 동일 적용
         if return_rate >= self.trailing_stop_activation:
             if drawdown_from_high >= self.trailing_stop_rate:
                 return "TRAILING_STOP_EXIT"
@@ -101,14 +108,21 @@ class TradingStrategy:
             return True
         return False
 
-    def calculate_position_size(self, balance, risk_rate, entry_price, leverage=1):
+    def calculate_position_size(self, balance, risk_rate, entry_price, leverage=1, contract_size=0.01):
         """
         동적 포지션 사이즈 계산
         공식: size = (balance × risk_rate × leverage) / entry_price
-        최소값: 0.001 BTC 보장
+        최소값: 지정된 계약 크기(contract_size) 에 맞춰 반올림 처리
         """
         if balance <= 0 or entry_price <= 0:
-            return 0.001
+            return float(contract_size)
 
         size = (balance * risk_rate * leverage) / entry_price
-        return max(size, 0.001)  # 최소 0.001 BTC
+        
+        # 계약 단위에 맞춘 소수점/정량 정리
+        # 예: size가 0.015 이고 contract_size가 0.01 이면, 0.01로 조정
+        if contract_size > 0:
+            contracts = max(1.0, round(size / contract_size))
+            return contracts * contract_size
+            
+        return max(size, 0.001)

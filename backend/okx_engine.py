@@ -116,3 +116,30 @@ class OKXEngine:
         if not self.exchange:
             raise Exception("OKX 거래소가 연결되지 않았습니다.")
         return self.exchange.fetch_my_trades(symbol, limit=limit)
+
+    async def scan_top_volume_coins(self, limit: int = 3) -> list:
+        """
+        OKX Swap 시장에서 24시간 거래량 기준 상위 USDT 페어 심볼을 가져옵니다.
+        """
+        if not self.exchange:
+            raise Exception("OKX 거래소가 연결되지 않았습니다.")
+            
+        import asyncio
+        loop = asyncio.get_event_loop()
+        # 동기 함수인 fetch_tickers를 비동기로 실행하여 블로킹 방지
+        tickers = await loop.run_in_executor(None, self.exchange.fetch_tickers)
+        
+        # 조건: 1) USDT 페어, 2) Swap(무기한 선물)
+        usdt_swap_tickers = []
+        for symbol, data in tickers.items():
+            if "USDT" in symbol and ":" in symbol and "USDT" in symbol.split(":")[1]:
+                vol = float(data.get('quoteVolume', 0) or 0)
+                if vol > 0:
+                    usdt_swap_tickers.append((symbol, vol))
+                    
+        # 거래량 기준 내림차순 정렬
+        usdt_swap_tickers.sort(key=lambda x: x[1], reverse=True)
+        
+        # 상위 N개 심볼 추출
+        top_symbols = [item[0] for item in usdt_swap_tickers[:limit]]
+        return top_symbols
