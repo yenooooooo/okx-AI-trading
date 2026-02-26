@@ -183,6 +183,39 @@ async function syncBotStatus() {
             }
         }
 
+        // --- NEW: Market Radar ---
+        if (data.symbols) {
+            const radarContainer = document.getElementById('market-radar-list');
+            if (radarContainer) {
+                let radarHtml = '';
+                const symKeys = Object.keys(data.symbols);
+                symKeys.slice(0, 3).forEach(sym => {
+                    const symData = data.symbols[sym];
+                    const priceStr = symData.current_price ? parseFloat(symData.current_price).toFixed(4) : "0.00";
+                    const pnl = parseFloat(symData.unrealized_pnl_percent || 0);
+                    let colorObj = "text-gray-500";
+                    let valStr = `$${priceStr}`;
+
+                    if (symData.position !== "NONE") {
+                        colorObj = pnl >= 0 ? "text-neon-green" : "text-neon-red";
+                        const sign = pnl > 0 ? "+" : "";
+                        valStr = `${sign}${pnl.toFixed(2)}%`;
+                    } else if (symData.current_price !== undefined && symData.current_price > 0) {
+                        colorObj = "text-text-main";
+                    }
+                    const shortSym = sym.split(':')[0];
+
+                    radarHtml += `
+                        <div class="flex justify-between items-center text-[11px] bg-navy-900/40 p-1.5 rounded border border-navy-border/50">
+                            <span class="font-mono text-gray-300 font-bold">${shortSym}</span>
+                            <span class="font-mono ${colorObj}">${valStr}</span>
+                        </div>
+                    `;
+                });
+                if (radarHtml) radarContainer.innerHTML = radarHtml;
+            }
+        }
+
         // 3. Status Info
         const statusDot = document.getElementById('status-dot');
         const statusPing = document.getElementById('status-ping');
@@ -235,6 +268,26 @@ async function syncBrain() {
             rsiEl.className = rsi <= 30 ? 'font-mono flash-target font-bold text-neon-green' : (rsi >= 70 ? 'font-mono flash-target font-bold text-neon-red' : 'font-mono flash-target font-bold text-text-main');
             const marker = document.getElementById('rsi-marker');
             if (marker) marker.style.left = `${Math.max(0, Math.min(100, rsi))}%`;
+
+            // --- NEW: AI Confidence Matrix ---
+            const longProb = Math.max(0, Math.min(100, Math.round(100 - rsi)));
+            const shortProb = Math.max(0, Math.min(100, Math.round(rsi)));
+
+            const longProbEl = document.getElementById('ai-long-prob');
+            const longBarEl = document.getElementById('ai-long-bar');
+            if (longProbEl && longBarEl) {
+                longProbEl.textContent = `${longProb}%`;
+                longBarEl.style.width = `${longProb}%`;
+                longProbEl.className = longProb >= 50 ? 'text-neon-green font-bold text-[10px]' : 'text-gray-500 font-bold text-[10px]';
+            }
+
+            const shortProbEl = document.getElementById('ai-short-prob');
+            const shortBarEl = document.getElementById('ai-short-bar');
+            if (shortProbEl && shortBarEl) {
+                shortProbEl.textContent = `${shortProb}%`;
+                shortBarEl.style.width = `${shortProb}%`;
+                shortProbEl.className = shortProb >= 50 ? 'text-neon-red font-bold text-[10px]' : 'text-gray-500 font-bold text-[10px]';
+            }
         }
         if (brainState.macd !== undefined) {
             const macd = parseFloat(brainState.macd);
@@ -509,6 +562,38 @@ async function syncStats() {
         updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
         updateNumberText('stats-total-pnl', stats.total_pnl_percent || 0, val => `${val.toFixed(2)}%`);
         updateNumberText('stats-max-dd', stats.max_drawdown || 0, val => `${val.toFixed(2)}%`);
+
+        // --- NEW: Recent Executions ---
+        try {
+            const tradesRes = await fetch(`${API_URL}/trades`);
+            const trades = await tradesRes.json();
+
+            const historyContainer = document.getElementById('recent-executions-list');
+            if (historyContainer && trades && Array.isArray(trades) && trades.length > 0) {
+                let histHtml = '';
+                // The API /api/v1/trades returns latest 100 trades (DESC order mapped from DB)
+                trades.slice(0, 3).forEach(t => {
+                    const pnlVal = parseFloat(t.pnl || 0);
+                    const isProfit = pnlVal > 0;
+                    const sign = isProfit ? '+' : '';
+                    const color = isProfit ? 'text-neon-green' : 'text-neon-red';
+                    const bg = isProfit ? 'bg-navy-900/40 border-l-2 border-l-neon-green' : 'bg-navy-900/40 border-l-2 border-l-neon-red';
+                    const shortSym = (t.symbol || 'UNKNOWN').split(':')[0];
+                    const pnlStr = t.pnl_percent !== undefined && t.pnl_percent !== null ? `${sign}${parseFloat(t.pnl_percent).toFixed(2)}%` : `${sign}${pnlVal.toFixed(2)}`;
+                    histHtml += `
+                        <div class="flex justify-between items-center text-[11px] ${bg} p-1.5 rounded border border-navy-border/50">
+                            <span class="font-mono text-gray-300 ml-1"><span class="${t.position_side === 'LONG' ? 'text-neon-green' : 'text-neon-red'} font-bold">${(t.position_side || 'UKNWN').substring(0, 1)}</span> · ${shortSym}</span>
+                            <span class="font-mono ${color} font-bold mr-1">${pnlStr}</span>
+                        </div>
+                    `;
+                });
+                historyContainer.innerHTML = histHtml;
+            } else if (historyContainer) {
+                historyContainer.innerHTML = `<div class="flex items-center justify-center text-[10px] bg-navy-900/40 p-2 rounded text-gray-500 font-mono italic">No recent executions</div>`;
+            }
+        } catch (te) {
+            console.warn("Trades Sync Failed:", te);
+        }
     } catch (e) {
         console.warn("Stats Sync Failed:", e);
     }
