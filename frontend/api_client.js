@@ -128,7 +128,7 @@ async function syncBotStatus() {
             updateNumberText('pos-tp', symbolData.take_profit_price);
             updateNumberText('pos-sl', symbolData.stop_loss_price);
 
-            // [추가] 예상 익절/손절 수익률 계산
+            // [자체 검열] TP/SL 예상 수익률 정밀 연산 (SHORT/LONG 완벽 대응)
             const entry = parseFloat(symbolData.entry_price || 0);
             const lev = parseFloat(symbolData.leverage || 1);
             const tp = parseFloat(symbolData.take_profit_price || 0);
@@ -148,17 +148,19 @@ async function syncBotStatus() {
                 updateText('pos-sl-expect', sl > 0 ? `[예상: ${estSl >= 0 ? '+' : ''}${estSl.toFixed(2)}%]` : '');
             }
 
-            // OKX 프라이빗 WS → 백엔드 → REST 경로로 항상 정확한 PnL 반영
+            // PnL(%) 및 USDT 수익금 동기화
             const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
             const pnlUsdt = parseFloat(symbolData.unrealized_pnl || 0);
+            const pnlSign = pnl >= 0 ? '+' : '';
 
-            updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
-            updateNumberText('pos-pnl-usdt', pnlUsdt, val => (val >= 0 ? `+${val.toFixed(2)} USDT` : `${val.toFixed(2)} USDT`));
+            updateNumberText('pos-roi', pnl, val => `${pnlSign}${val.toFixed(2)}%`);
+            updateNumberText('pos-pnl-usdt', pnlUsdt, val => `${pnlSign}${val.toFixed(2)} USDT`);
             updateNumberText('pos-current', symbolData.current_price);
 
             const roiEl = document.getElementById('pos-roi');
             const pnlUsdtEl = document.getElementById('pos-pnl-usdt');
 
+            // 색상 및 글로우 동적 적용 (숏/롱 관계없이 수익 여부에 따름)
             if (pnl > 0) {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
                 if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-green';
