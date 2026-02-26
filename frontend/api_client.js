@@ -128,20 +128,48 @@ async function syncBotStatus() {
             updateNumberText('pos-tp', symbolData.take_profit_price);
             updateNumberText('pos-sl', symbolData.stop_loss_price);
 
+            // [추가] 예상 익절/손절 수익률 계산
+            const entry = parseFloat(symbolData.entry_price || 0);
+            const lev = parseFloat(symbolData.leverage || 1);
+            const tp = parseFloat(symbolData.take_profit_price || 0);
+            const sl = parseFloat(symbolData.stop_loss_price || 0);
+            const pos = symbolData.position;
+
+            if (entry > 0) {
+                let estTp = 0, estSl = 0;
+                if (pos === 'LONG') {
+                    estTp = ((tp - entry) / entry) * lev * 100;
+                    estSl = ((sl - entry) / entry) * lev * 100;
+                } else if (pos === 'SHORT') {
+                    estTp = ((entry - tp) / entry) * lev * 100;
+                    estSl = ((entry - sl) / entry) * lev * 100;
+                }
+                updateText('pos-tp-expect', tp > 0 ? `[예상: ${estTp >= 0 ? '+' : ''}${estTp.toFixed(2)}%]` : '');
+                updateText('pos-sl-expect', sl > 0 ? `[예상: ${estSl >= 0 ? '+' : ''}${estSl.toFixed(2)}%]` : '');
+            }
+
             // OKX 프라이빗 WS → 백엔드 → REST 경로로 항상 정확한 PnL 반영
             const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
+            const pnlUsdt = parseFloat(symbolData.unrealized_pnl || 0);
+
             updateNumberText('pos-roi', pnl, val => (val > 0 ? `+${val.toFixed(2)}%` : `${val.toFixed(2)}%`));
+            updateNumberText('pos-pnl-usdt', pnlUsdt, val => (val >= 0 ? `+${val.toFixed(2)} USDT` : `${val.toFixed(2)} USDT`));
             updateNumberText('pos-current', symbolData.current_price);
 
             const roiEl = document.getElementById('pos-roi');
+            const pnlUsdtEl = document.getElementById('pos-pnl-usdt');
+
             if (pnl > 0) {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
+                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-green';
                 posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-green";
             } else if (pnl < 0) {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
+                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-red';
                 posCard.className = "glass-panel p-5 transition-all duration-500 flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden glow-red";
             } else {
                 roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
+                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-gray-400';
                 posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
             }
         }
