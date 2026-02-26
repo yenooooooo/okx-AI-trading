@@ -194,19 +194,33 @@
     </div>
 
     <script>
-        // 현재 호스트 IP 자동 감지 (백엔드와 동일 포트/주소 가정)
-        const wsUrl = "ws://" + window.location.hostname + ":8000/ws/dashboard";
+        // 현재 호스트 환경 자동 감지 (로컬 파일 실행 시 window.location.hostname이 부여되지 않는 경우 대응)
+        function getWsUrl() {
+            let host = window.location.hostname;
+            // file:// 프로토콜로 열었을 때는 호스트가 비어있으므로 127.0.0.1(로컬 서버)을 기본값으로 사용
+            if (!host || host === "") {
+                host = "127.0.0.1";
+            }
+
+            // 만약 실제 배포 서버 IP가 있다면 아래 host 주석을 풀고 강제로 입력하면 외부에서도 잘 보입니다.
+            // host = "본인의_서버_IP"; 
+
+            const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+            return `${protocol}${host}:8000/ws/dashboard`;
+        }
+
+        const wsUrl = getWsUrl();
         let socket;
 
         function connect() {
-            console.log("Connecting to WebSocket:", wsUrl);
+            console.log("WebSocket 연결 시도:", wsUrl);
             socket = new WebSocket(wsUrl);
 
             socket.onopen = () => {
                 const badge = document.getElementById('ws-status');
                 badge.innerText = "ONLINE";
                 badge.className = "status-badge status-on";
-                console.log("WebSocket Connected");
+                console.log("WebSocket 연결 성공");
             };
 
             socket.onmessage = (event) => {
@@ -214,7 +228,7 @@
                     const data = JSON.parse(event.data);
                     updateUI(data);
                 } catch (e) {
-                    console.error("JSON 파싱 오류:", e);
+                    console.error("데이터 파싱 오류:", e);
                 }
             };
 
@@ -222,13 +236,12 @@
                 const badge = document.getElementById('ws-status');
                 badge.innerText = "OFFLINE (재연결 중...)";
                 badge.className = "status-badge status-off";
-                console.log("WebSocket Disconnected. Reconnecting in 3s...");
+                console.log("WebSocket 닫힘. 3초 후 재연결 시도...");
                 setTimeout(connect, 3000);
             };
 
             socket.onerror = (err) => {
-                console.error("WebSocket Error:", err);
-                socket.close();
+                console.error("WebSocket 에러:", err);
             };
         }
 
@@ -264,6 +277,7 @@
                             <div>현재가: $${(state.current_price || 0).toFixed(4)}</div>
                             <div>진입가: $${(state.entry_price || 0).toFixed(4)}</div>
                             <div style="margin-top:10px; font-size:1.2em; font-weight:bold;">PnL: <span class="${pnlClass}">${pnlSign}${pnl.toFixed(2)}%</span></div>
+                            <div style="font-size:12px; color:#666; margin-top:5px;">실현 PnL: ${(state.unrealized_pnl || 0).toFixed(4)} USDT</div>
                         </div>
                     `;
                     listContainer.appendChild(card);
@@ -282,12 +296,10 @@
                     div.innerText = log;
                     logContainer.appendChild(div);
                 });
-                // 스크롤 하단 고정
                 logContainer.scrollTop = logContainer.scrollHeight;
             }
         }
 
-        // 앱 시작
         connect();
     </script>
 </body>
