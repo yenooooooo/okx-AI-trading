@@ -340,8 +340,10 @@
             <!-- Active Position -->
             <div id="active-position-card"
                 class="glass-panel p-5 transition-all duration-500 border-navy-border flex-grow flex flex-col relative overflow-hidden">
-                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-4 z-10">
-                    활성 포지션 (Active Deployment)</h3>
+                <div class="flex justify-between items-center border-b border-navy-border pb-2 mb-4 z-10">
+                    <h3 class="text-xs text-gray-400 uppercase tracking-widest">활성 포지션 (Active Deployment)</h3>
+                    <span id="pos-symbol" class="hidden font-mono text-xs font-bold text-neon-blue tracking-widest"></span>
+                </div>
 
                 <div id="position-none" class="flex-grow flex items-center justify-center z-10">
                     <p class="font-mono text-gray-500 tracking-widest text-lg animate-pulse">[ STANDBY ]</p>

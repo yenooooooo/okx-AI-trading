@@ -111,15 +111,22 @@ async function syncBotStatus() {
         const posNone = document.getElementById('position-none');
         const posActive = document.getElementById('position-active');
 
+        const posSymbolEl = document.getElementById('pos-symbol');
+
         if (!symbolData || symbolData.position === 'NONE') {
             posNone.classList.remove('hidden');
             posActive.classList.add('hidden');
             posActive.classList.remove('flex');
-            posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow max-h-[250px] flex flex-col justify-center relative overflow-hidden";
+            posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex-grow flex flex-col relative overflow-hidden";
+            if (posSymbolEl) posSymbolEl.classList.add('hidden');
         } else {
             posNone.classList.add('hidden');
             posActive.classList.remove('hidden');
             posActive.classList.add('flex');
+            if (posSymbolEl) {
+                posSymbolEl.textContent = firstSymbol.split(':')[0];
+                posSymbolEl.classList.remove('hidden');
+            }
 
             // 웹소켓(priceWs)이 연결되어 있을 때는 REST API 구형 가격/수익률 데이터 표시는 무시.
             // (단, 포지션 유무, 진입가, 목표가 등 고정데이터는 계속 연동)
