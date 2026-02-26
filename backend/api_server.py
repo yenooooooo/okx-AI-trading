@@ -148,14 +148,13 @@ async def startup_event():
 def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
     """
     외부 수동 청산 감지 후 처리:
-      - OKX 포지션 히스토리에서 공식 실현 PnL 추출
+      - OKX 체결 영수증에서 실현 PnL 추출
       - DB에 MANUAL_CLOSE 기록
       - 터미널 로그 + 텔레그램 알림 발송 (요청된 포맷)
       - 봇 내부 상태를 NONE으로 초기화
     sym_state 는 bot_global_state["symbols"][symbol] 의 참조(reference).
     """
-    import asyncio
-    import time
+    import time as _t
 
     prev_pos      = sym_state.get("position", "NONE")
     prev_entry    = sym_state.get("entry_price", 0.0)
@@ -177,47 +176,43 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict):
     avg_fill_price = prev_entry  # fallback
     pnl_pct        = 0.0
 
-    # ── OKX 공식 포지션 히스토리 조회 (최대 3회 시도) ─────────────────────────
-    # 매칭 엔진 반영 시간을 고려하여 약간 대기 후 조회
-    okx_inst_id = symbol.replace("/", "-").replace(":", "-") # BTC/USDT:USDT -> BTC-USDT-USDT -> BTC-USDT-SWAP
-    if okx_inst_id.endswith("-USDT"):
-        okx_inst_id = okx_inst_id[:-5] + "-SWAP"
-
+    # ── OKX 체결 영수증(Trades) 조회 (최대 3회 시도) ─────────────────────────
+    # positions-history는 API 반영 지연이 있으므로, 즉시 반영되는 fetch_my_trades 사용
     history_found = False
     for attempt in range(3):
-        time.sleep(1.0 + attempt * 0.5)
         try:
-            res = engine_api.exchange.privateGetAccountPositionsHistory({'instType': 'SWAP', 'instId': okx_inst_id, 'limit': 5})
-            if res and res.get('data'):
-                for pos in res['data']:
-                    # pos['direction'] doesn't usually exist in OKX positions-history, but 'posSide' might.
-                    # Or we just take the most recent closed position for this instId.
-                    # Usually, the first one is the most recently closed position.
-                    
-                    realized_pnl = float(pos.get('realizedPnl', 0) or 0)
-                    close_avg_px = float(pos.get('closeAvgPx', 0) or 0)
-                    if close_avg_px == 0:
-                        close_avg_px = float(pos.get('cTime', 0)) # fallback if needed, but closeAvgPx should exist
-                    
-                    # OKX might provide an official uPlRatio or we calculate it
-                    
-                    pnl_amount = realized_pnl
-                    avg_fill_price = close_avg_px if close_avg_px > 0 else avg_fill_price
-                    history_found = True
-                    break # 가장 최근 내역 사용
-            
-            if history_found:
+            _t.sleep(1.0 + attempt * 0.5)
+            trades = engine_api.exchange.fetch_my_trades(symbol, limit=20)
+            closing_side = 'sell' if prev_pos == 'LONG' else 'buy'
+            recent_closes = [t for t in trades if t.get('side') == closing_side]
+
+            if recent_closes:
+                order_id       = recent_closes[-1].get('order')
+                matching       = [t for t in recent_closes if t.get('order') == order_id]
+                total_gross    = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching)
+                total_fee      = sum(float(t.get('info', {}).get('fee',     0) or 0) for t in matching)
+                total_cost     = sum(t.get('cost',   0) for t in matching)
+                total_amt      = sum(t.get('amount', 0) for t in matching)
+                
+                # OKX 실현 수익금(Net PnL) = Gross PnL + Fee (OKX fee is usually negative)
+                pnl_amount     = total_gross + total_fee
+                if total_amt > 0:
+                    avg_fill_price = total_cost / total_amt
+                elif matching:
+                    avg_fill_price = float(matching[0].get('price', prev_entry))
+                
+                history_found = True
                 break
         except Exception as e:
-            logger.error(f"[수동청산 감지] {symbol} 포지션 히스토리 조회 오류(시도 {attempt+1}): {e}")
+            logger.error(f"[수동청산 감지] {symbol} 체결 영수증 조회 오류(시도 {attempt+1}): {e}")
 
     if not history_found:
-        logger.warning(f"[수동청산 감지] {symbol} 포지션 히스토리 없음 - PnL 0 으로 기록")
+        logger.warning(f"[수동청산 감지] {symbol} 체결 영수증 없음 - PnL 0 으로 기록")
 
     if avg_fill_price == 0:
         avg_fill_price = engine_api.get_current_price(symbol) or prev_entry
 
-    # ── PnL% 계산 (공식 수익금 기반 역산) ──────────────────────────────────────────────────────────
+    # ── PnL% 계산 (공식 수익금 기반) ──────────────────────────────────────────────────────────
     try:
         contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
     except Exception:
