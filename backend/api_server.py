@@ -362,17 +362,8 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
             if recent_closes:
                 order_id       = recent_closes[-1].get('order')
                 matching       = [t for t in recent_closes if t.get('order') == order_id]
-                total_gross    = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching)
-                total_fee      = sum(float(t.get('info', {}).get('fee',     0) or 0) for t in matching)
-                total_cost     = sum(t.get('cost',   0) for t in matching)
-                total_amt      = sum(t.get('amount', 0) for t in matching)
                 
-                # OKX 실현 수익금(Net PnL) = Gross PnL + Fee (OKX fee is usually negative)
-                pnl_amount     = total_gross + total_fee
-                if total_amt > 0:
-                    avg_fill_price = total_cost / total_amt
-                elif matching:
-                    avg_fill_price = float(matching[0].get('price', prev_entry))
+                pnl_amount, total_gross, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching, prev_entry)
                 
                 history_found = True
                 break
@@ -637,16 +628,7 @@ async def async_trading_loop():
                                             trades = engine_api.get_recent_trade_receipts(symbol, limit=20)
                                             matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
                                             if matching_trades:
-                                                total_gross_pnl = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
-                                                total_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
-                                                total_cost = sum(t.get('cost', 0) for t in matching_trades)
-                                                total_amount = sum(t.get('amount', 0) for t in matching_trades)
-                                                
-                                                net_pnl = total_gross_pnl + total_fee
-                                                if total_amount > 0:
-                                                    avg_fill_price = total_cost / total_amount
-                                                else:
-                                                    avg_fill_price = float(matching_trades[0].get('price', current_price))
+                                                net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
                                                 receipt_found = True
                                                 break
                                         except Exception as receipt_err:

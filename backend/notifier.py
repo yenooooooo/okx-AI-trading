@@ -142,13 +142,7 @@ async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             trades = _engine.get_recent_trade_receipts(sym, limit=10)
                             matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
                             if matching_trades:
-                                total_gross_pnl = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
-                                total_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
-                                total_cost = sum(t.get('cost', 0) for t in matching_trades)
-                                total_amount = sum(t.get('amount', 0) for t in matching_trades)
-                                
-                                net_pnl = total_gross_pnl + total_fee
-                                avg_fill_price = total_cost / total_amount if total_amount > 0 else 0.0
+                                net_pnl, total_gross_pnl, total_fee, avg_fill_price = _engine.calculate_realized_pnl(matching_trades, entry)
                                 receipt_found = True
                                 break
                         except Exception:

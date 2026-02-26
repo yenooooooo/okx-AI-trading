@@ -117,6 +117,32 @@ class OKXEngine:
             raise Exception("OKX 거래소가 연결되지 않았습니다.")
         return self.exchange.fetch_my_trades(symbol, limit=limit)
 
+    def calculate_realized_pnl(self, matching_trades: list, entry_price: float) -> tuple:
+        """
+        체결 영수증(Trades) 배열과 진입가를 바탕으로,
+        총수익(Gross), 수수료(Fee, 양방향 역산), 순수익(Net), 평균체결가를 반환합니다.
+        (DRY 원칙 강제: 모든 청산 로직에서 이 단일 함수만 사용)
+        """
+        total_gross = sum(float(t.get('info', {}).get('fillPnl', 0) or 0) for t in matching_trades)
+        exit_fee = sum(float(t.get('info', {}).get('fee', 0) or 0) for t in matching_trades)
+        total_cost = sum(t.get('cost', 0) for t in matching_trades)
+        total_amount = sum(t.get('amount', 0) for t in matching_trades)
+        
+        avg_fill_price = total_cost / total_amount if total_amount > 0 else 0.0
+        if avg_fill_price == 0.0 and matching_trades:
+            avg_fill_price = float(matching_trades[0].get('price', entry_price))
+            
+        # 1. 터미널/OKX 오차 원인 제거: 진입 시 발생한 수수료 역산 후 합산
+        total_fee = exit_fee
+        if avg_fill_price > 0 and entry_price > 0:
+            entry_fee = exit_fee * (entry_price / avg_fill_price)
+            total_fee += entry_fee
+            
+        net_pnl = total_gross + total_fee
+        return net_pnl, total_gross, total_fee, avg_fill_price
+
+
+
     async def scan_top_volume_coins(self, limit: int = 3) -> list:
         """
         OKX Swap 시장에서 24시간 거래량 기준 상위 USDT 페어 심볼을 가져옵니다.
