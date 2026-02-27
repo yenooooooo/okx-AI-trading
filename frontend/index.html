@@ -895,6 +895,15 @@
                 <div class="text-gray-500">[system@antigravity ~]$ Core initialized. Awaiting intelligence stream...
                 </div>
             </div>
+            <!-- Smart Auto-Scroll: New Message Alert Popup -->
+            <div id="new-log-alert"
+                class="hidden absolute bottom-4 right-8 bg-navy-800/95 border border-neon-green/50 text-neon-green px-4 py-1.5 rounded-full text-[10px] font-mono cursor-pointer shadow-[0_0_15px_rgba(0,255,136,0.15)] hover:bg-navy-900 transition-all z-50 flex items-center gap-2 backdrop-blur-md"
+                onclick="resumeTerminalScroll()">
+                <svg class="w-3 h-3 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+                </svg>
+                <span><strong id="unread-log-count">0</strong> NEW MESSAGES</span>
+            </div>
         </div>
     </main>
 
