@@ -241,7 +241,7 @@ async def _apply_position_ws_update(pos: dict):
 async def private_ws_loop():
     """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
     import websockets
-    WS_URL = "wss://wspap.okx.com:8443/ws/v5/private"  # 데모 환경
+    WS_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 실전 환경
     while True:
         try:
             if not _engine or not _engine.exchange:
@@ -284,7 +284,7 @@ async def startup_event():
     """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
     global _engine
     init_db()
-    bot_global_state["logs"].append("[봇] 서버 시스템 가동 시작 - 인프라 점검 중...")
+    bot_global_state["logs"].append("[봇] 🔴 실전망(LIVE) 서버 시스템 가동 시작 - 실전 API 연동 완료")
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
     loop = asyncio.get_event_loop()
     _engine = await loop.run_in_executor(None, OKXEngine)

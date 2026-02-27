@@ -34,10 +34,8 @@ class OKXEngine:
                 'enableRateLimit': True,
                 'options': {
                     'defaultType': 'swap',
-                    'sandbox': True  # 모의투자 모드
                 }
             })
-            self.exchange.set_sandbox_mode(True)
             self.exchange.load_markets()
             print("[시스템] OKX API 연결 성공 및 마켓 데이터 로드 완료.")
         except Exception as e:
