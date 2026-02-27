@@ -205,5 +205,13 @@ def get_logs(limit: int = 100, after_id: int = 0) -> List[Dict]:
 
     return [dict(row) for row in rows]
 
+def wipe_all_trades():
+    """trades 테이블 전체 삭제 — 실전 투입 전 테스트 데이터 완전 초기화"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM trades')
+    conn.commit()
+    conn.close()
+
 # 데이터베이스 초기화 (모듈 로드 시 자동 실행)
 init_db()

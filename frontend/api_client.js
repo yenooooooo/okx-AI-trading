@@ -716,21 +716,22 @@ async function syncStats() {
         updateNumberText('stats-total-trades', stats.total_trades || 0, val => Math.floor(val));
         updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
 
-        // Daily Gross — 항상 초록색, 항상 + 부호
-        const grossEl = document.getElementById('stats-daily-gross');
-        if (grossEl) {
-            const grossVal = parseFloat(stats.daily_gross_profit || 0);
-            grossEl.textContent = `+${grossVal.toFixed(2)} USDT`;
-            grossEl.className = grossEl.className.replace(/text-neon-(green|red)/g, '') + ' text-neon-green';
+        // Daily Net PnL — 양수 초록 / 음수 빨강 동적 스타일
+        const dailyNetEl = document.getElementById('stats-daily-net');
+        if (dailyNetEl) {
+            const dailyNetVal = parseFloat(stats.daily_net_pnl || 0);
+            const dailyNetSign = dailyNetVal >= 0 ? '+' : '';
+            dailyNetEl.textContent = `${dailyNetSign}${dailyNetVal.toFixed(2)} USDT`;
+            dailyNetEl.className = dailyNetEl.className.replace(/text-neon-(green|red)/g, '') + (dailyNetVal >= 0 ? ' text-neon-green' : ' text-neon-red');
         }
 
-        // Daily Net PnL — 양수 초록 / 음수 빨강 동적 스타일
-        const netEl = document.getElementById('stats-daily-net');
-        if (netEl) {
-            const netVal = parseFloat(stats.daily_net_pnl || 0);
-            const netSign = netVal >= 0 ? '+' : '';
-            netEl.textContent = `${netSign}${netVal.toFixed(2)} USDT`;
-            netEl.className = netEl.className.replace(/text-neon-(green|red)/g, '') + (netVal >= 0 ? ' text-neon-green' : ' text-neon-red');
+        // Total Net PnL — 양수 초록 / 음수 빨강 동적 스타일
+        const totalNetEl = document.getElementById('stats-total-net');
+        if (totalNetEl) {
+            const totalNetVal = parseFloat(stats.total_net_pnl || 0);
+            const totalNetSign = totalNetVal >= 0 ? '+' : '';
+            totalNetEl.textContent = `${totalNetSign}${totalNetVal.toFixed(2)} USDT`;
+            totalNetEl.className = totalNetEl.className.replace(/text-neon-(green|red)/g, '') + (totalNetVal >= 0 ? ' text-neon-green' : ' text-neon-red');
         }
 
         // --- NEW: Recent Executions ---
@@ -1071,6 +1072,31 @@ async function initializeApp() {
 
 // Start
 initializeApp();
+
+// ════════════ DB Wipe ════════════
+
+async function wipeDatabase() {
+    const input = prompt('⚠️ 경고: 이 작업은 모든 거래 기록을 영구 삭제합니다.\n실전 투입 준비가 완료된 경우에만 실행하세요.\n\n초기화하려면 아래에 정확히 CONFIRM 을 입력하세요:');
+    if (input === null) return; // 취소
+    if (input.trim() !== 'CONFIRM') {
+        alert('입력값이 일치하지 않습니다. 초기화가 취소되었습니다.');
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_URL}/wipe_db`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            alert('✅ DB 초기화 완료. 실전 매매 준비 상태로 전환됩니다.');
+            location.reload();
+        } else {
+            alert(`❌ 초기화 실패: ${data.message}`);
+        }
+    } catch (e) {
+        alert(`❌ 서버 통신 오류: ${e.message}`);
+        console.error('wipeDatabase Error:', e);
+    }
+}
 
 // ════════════ History Modal ════════════
 

@@ -372,6 +372,12 @@
                             class="text-xs w-full py-2 bg-emerald-500/10 border border-emerald-500/40 hover:bg-emerald-500 hover:text-white transition rounded text-emerald-400 font-mono tracking-widest font-bold">
                             강제 해제 (Reset) ✅
                         </button>
+                        <div class="border-t border-red-900/40 pt-2 mt-1">
+                            <button onclick="wipeDatabase()"
+                                class="text-xs w-full py-2 bg-red-900/30 border border-red-600/60 hover:bg-red-600 hover:text-white transition rounded text-red-400 font-mono tracking-widest font-bold">
+                                🗑️ DB 완전 초기화 (Wipe Data)
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -687,20 +693,20 @@
                         <span class="text-[10px] text-gray-600">수익 거래 승률</span>
                     </div>
 
-                    <!-- Daily Gross -->
-                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Daily Gross</span>
-                        <span id="stats-daily-gross"
-                            class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
-                        <span class="text-[10px] text-gray-600">오늘 벌어들인 총 수익 (USDT)</span>
-                    </div>
-
                     <!-- Daily Net PnL -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Daily Net PnL</span>
                         <span id="stats-daily-net"
                             class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
-                        <span class="text-[10px] text-gray-600">오늘 최종 순손익 (USDT)</span>
+                        <span class="text-[10px] text-gray-600">오늘 하루 최종 순손익 (USDT)</span>
+                    </div>
+
+                    <!-- Total Net PnL -->
+                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Total Net PnL</span>
+                        <span id="stats-total-net"
+                            class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
+                        <span class="text-[10px] text-gray-600">누적 최종 순손익 (USDT)</span>
                     </div>
                 </div>
 

@@ -11,7 +11,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
-from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs
+from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades
 from backtester import Backtester
 from notifier import send_telegram_sync
 from logger import get_logger
@@ -205,6 +205,7 @@ trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
 _broadcast_task = None  # /ws/dashboard 브로드캐스트 태스크 (클라이언트 연결 시 on-demand 시작)
 _engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
+_active_strategy: TradingStrategy = None  # 활성 전략 인스턴스 레퍼런스 (wipe_db 인메모리 리셋용)
 
 def _generate_ws_sign(secret_key: str, timestamp: str) -> str:
     """OKX WebSocket 인증 서명 생성 (HMAC-SHA256 Base64)"""
@@ -493,10 +494,11 @@ async def execute_entry_order(engine_api, symbol: str, signal: str, trade_amount
 
 async def async_trading_loop():
     """다중 심볼 백그라운드 매매 루프"""
-    global bot_global_state, ai_brain_state, _trading_task
+    global bot_global_state, ai_brain_state, _trading_task, _active_strategy
 
     engine_api = _engine  # 싱글톤 재사용 (load_markets 재호출 없음)
     strategy_instance = TradingStrategy(initial_seed=75.0)
+    _active_strategy = strategy_instance  # wipe_db 엔드포인트가 인메모리 상태를 리셋할 수 있도록 등록
     # [v2.2] DB 설정에서 일일 최대 손실율 동기화 (UI에서 변경 가능)
     strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
 
@@ -1530,12 +1532,10 @@ async def fetch_statistics():
             return ""
 
     today_trades = [t for t in trades if _parse_kst_date(t.get('created_at')) == today_kst]
-    # daily_gross_profit: 오늘 수익 거래(pnl > 0)의 gross_pnl 합산 — 항상 0 이상
-    daily_gross_profit = sum(
-        (t.get('gross_pnl') or 0) for t in today_trades if (t.get('pnl') or 0) > 0
-    )
-    # daily_net_pnl: 오늘 모든 거래의 순손익(fee 차감) 합산 — 양수/음수 가능
+    # daily_net_pnl: KST 기준 오늘 모든 거래의 순손익(fee 차감) 합산 — 양수/음수 가능
     daily_net_pnl = sum((t.get('pnl') or 0) for t in today_trades)
+    # total_net_pnl: 전체 기간 모든 거래의 순손익 합산
+    total_net_pnl = sum((t.get('pnl') or 0) for t in trades)
     # ─────────────────────────────────────────────────────────────────────────
 
     return {
@@ -1544,8 +1544,8 @@ async def fetch_statistics():
         'total_pnl_percent': round(total_pnl_percent, 2),
         'max_drawdown': round(max_drawdown * 100, 2),
         'sharpe_ratio': round(sharpe_ratio, 2),
-        'daily_gross_profit': round(daily_gross_profit, 4),
         'daily_net_pnl': round(daily_net_pnl, 4),
+        'total_net_pnl': round(total_net_pnl, 4),
     }
 
 
@@ -1604,6 +1604,34 @@ async def fetch_history_stats():
         'daily': _build_sorted_list(daily_map),
         'monthly': _build_sorted_list(monthly_map),
     }
+
+
+@app_server.post("/api/v1/wipe_db")
+async def wipe_database():
+    """[ADMIN] trades 테이블 전면 삭제 — 실전 투입 전 테스트 데이터 초기화"""
+    global _active_strategy
+
+    try:
+        # 1. DB 거래 기록 전체 삭제
+        wipe_all_trades()
+
+        # 2. 인메모리 일일 누적 상태 리셋 (활성 전략 인스턴스가 존재할 경우)
+        if _active_strategy is not None:
+            _active_strategy.daily_pnl_accumulated = 0.0
+            _active_strategy.daily_start_balance = 0.0
+            _active_strategy.consecutive_loss_count = 0
+            _active_strategy.loss_cooldown_until = 0
+
+        # 3. 로그 초기화 및 완료 메시지 기록
+        bot_global_state["logs"].clear()
+        bot_global_state["logs"].append("[🚨 ADMIN] 데이터베이스 전면 초기화 완료. 실전 매매 준비 끝.")
+        logger.warning("[ADMIN] wipe_db 실행: trades 테이블 전체 삭제 완료")
+
+        return {"success": True, "message": "DB 초기화 완료. 실전 매매 준비 상태."}
+    except Exception as e:
+        logger.error(f"[ADMIN] wipe_db 실패: {e}")
+        return {"success": False, "message": str(e)}
+
 
 @app_server.get("/api/v1/config")
 async def fetch_config():
