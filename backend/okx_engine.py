@@ -27,6 +27,9 @@ class OKXEngine:
             return
 
         try:
+            print(f"[OKX 엔진] .env 로딩 경로: {env_path}")
+            print(f"[OKX 엔진] API Key 앞 6자: {str(self.api_key)[:6]}***")
+
             self.exchange = ccxt.okx({
                 'apiKey': self.api_key,
                 'secret': self.secret_key,
@@ -36,11 +39,36 @@ class OKXEngine:
                     'defaultType': 'swap',
                 }
             })
+
+            # [진단 Step 1] 필수 credential 누락 검증
+            self.exchange.check_required_credentials()
+            print("[OKX 엔진] check_required_credentials() 통과 — 키 형식 이상 없음")
+
+            # [진단 Step 2] 퍼블릭 마켓 로드
             self.exchange.load_markets()
+            print("[OKX 엔진] load_markets() 성공 — 퍼블릭 연결 정상")
+
+            # [진단 Step 3] 프라이빗 인증 강제 테스트 (잔고 1회 동기 호출)
+            test_balance = self.exchange.fetch_balance({'type': 'trading'})
+            usdt_total = float(test_balance.get('USDT', {}).get('total', 0.0) or 0.0)
+            print(f"[OKX 엔진] \033[92m✅ 프라이빗 인증 성공! Trading 잔고: {usdt_total:.2f} USDT\033[0m")
             print("[시스템] OKX API 연결 성공 및 마켓 데이터 로드 완료.")
+
         except Exception as e:
-            print(f"[치명적 오류] OKX 서버 연결 실패. 암호문이나 키 값이 잘못되었습니다. 에러: {e}")
+            # [진단 Step 4] 원인 별 색상 경고 출력
+            raw_err = str(e)
+            print(f"\033[91m[치명적 오류] OKX 프라이빗 인증 실패!\033[0m")
+            print(f"\033[91m원인 RAW: {raw_err}\033[0m")
+            if "ip" in raw_err.lower() or "403" in raw_err:
+                print("\033[91m→ IP 제한 가능성: OKX API 설정에서 IP 화이트리스트를 확인하세요.\033[0m")
+            elif "invalid" in raw_err.lower() or "auth" in raw_err.lower():
+                print("\033[91m→ 키/비밀번호 오류: .env의 OKX_API_KEY / OKX_SECRET_KEY / OKX_PASSWORD 재확인.\033[0m")
+            elif "permission" in raw_err.lower():
+                print("\033[91m→ 권한 부족: 해당 API 키에 선물 거래 권한이 활성화되어 있는지 확인하세요.\033[0m")
+            else:
+                print("\033[91m→ 알 수 없는 오류 — 위 RAW 메시지를 OKX 공식 문서와 대조하세요.\033[0m")
             self.exchange = None
+
 
     def get_usdt_balance(self):
         """현재 USDT 총 자산 조회 (Trading 증거금 + Funding + 미실현 수익 포함)"""

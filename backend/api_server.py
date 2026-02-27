@@ -276,7 +276,11 @@ async def private_ws_loop():
                     except Exception as parse_err:
                         logger.warning(f"Private WS 메시지 처리 오류: {parse_err}")
         except Exception as e:
-            logger.warning(f"Private WS 연결 끊김, 5초 후 재연결: {e}")
+            logger.error(f"[Private WS] 연결 실패/끊김 — RAW 원인: {e}")
+            if "auth" in str(e).lower() or "invalid" in str(e).lower():
+                logger.error("[Private WS] → API 키 인증 오류 의심 — .env 키 재확인 필요")
+            elif "403" in str(e) or "ip" in str(e).lower():
+                logger.error("[Private WS] → IP 화이트리스트 차단 의심 — OKX API 설정 확인 필요")
             await asyncio.sleep(5)
 
 @app_server.on_event("startup")
@@ -1407,9 +1411,9 @@ async def fetch_current_status():
                             sym_state["position"] = side
 
             except Exception as pe:
-                logger.warning(f"포지션 데이터 스캔 실패: {pe}")
+                logger.error(f"[헬스체크] OKX 포지션 API 핑 실패 — RAW 원인: {pe}")
     except Exception as e:
-        logger.warning(f"실시간 잔고/포지션 갱신 실패: {e}")
+        logger.error(f"[헬스체크] OKX API 헬스체크 핑 실패 사유: {e}")
 
     # logs(300개)는 제외하고 반환 - 매초 전송 시 불필요한 대용량 페이로드 방지
     # 로그는 /api/v1/logs 엔드포인트에서 별도 조회
