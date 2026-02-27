@@ -191,8 +191,9 @@ class LogList(list):
 bot_global_state = {
     "is_running": False,
     "balance": 0.0,
-    "symbols": {},  # symbol별 상태
+    "symbols": {},
     "logs": LogList(["[봇] 시스템 코어 초기화 완료 - API 브릿지 대기 중"]),
+    "stress_inject": None,
 }
 
 ai_brain_state = {
@@ -558,6 +559,32 @@ async def async_trading_loop():
 
             # [v2.2] 일일 리셋 체크 (UTC 자정 기준)
             strategy_instance.check_daily_reset(curr_bal)
+
+            # ── [Phase 3] 스트레스 주입기 수신 (Fire Drill) ──────────────────
+            _stress_type = bot_global_state.get("stress_inject")
+            if _stress_type:
+                bot_global_state["stress_inject"] = None
+                if _stress_type == "KILL_SWITCH":
+                    fake_loss = -(curr_bal * 0.10)
+                    strategy_instance.daily_pnl_accumulated = fake_loss
+                    kill_triggered = strategy_instance.record_daily_pnl(0)
+                    drill_msg = f"🚨 [소방훈련: 킬스위치 강제 주입 완료] 가상 일일 손실: {fake_loss:+.2f} USDT | 발동: {'YES' if kill_triggered else 'NO'}"
+                    bot_global_state["logs"].append(drill_msg)
+                    logger.warning(drill_msg)
+                    if kill_triggered:
+                        send_telegram_sync(f"🚨 [소방훈련] 킬스위치 발동 확인\n가상 손실: {fake_loss:+.2f} USDT\n24시간 거래 중단")
+                elif _stress_type == "LOSS_STREAK":
+                    strategy_instance.consecutive_loss_count = strategy_instance.cooldown_losses_trigger - 1
+                    strategy_instance.record_trade_result(True)
+                    import datetime as _dt_s
+                    _cd_end = _dt_s.datetime.fromtimestamp(
+                        strategy_instance.loss_cooldown_until,
+                        tz=_dt_s.timezone(_dt_s.timedelta(hours=9))
+                    ).strftime("%H:%M:%S")
+                    drill_msg = f"🚨 [소방훈련: {strategy_instance.cooldown_losses_trigger}연패 쿨다운 강제 주입 완료] 15분간 진입 차단 | 해제: {_cd_end} KST"
+                    bot_global_state["logs"].append(drill_msg)
+                    logger.warning(drill_msg)
+                    send_telegram_sync(f"🚨 [소방훈련] {strategy_instance.cooldown_losses_trigger}연패 쿨다운 발동\n15분 진입 차단 | 해제: {_cd_end} KST")
 
             # 각 심볼에 대해 거래 루프 실행
             for i, symbol in enumerate(symbols):
@@ -1282,6 +1309,17 @@ async def close_paper_position():
 
     except Exception as e:
         return {"error": f"서버 오류: {str(e)}"}
+
+@app_server.post("/api/v1/inject_stress")
+async def inject_stress(type: str):
+    """[Phase 3] 스트레스 주입기 — 킬스위치/쿨다운 소방훈련"""
+    stress_type = type.upper()
+    if stress_type not in ("KILL_SWITCH", "LOSS_STREAK"):
+        return {"error": f"잘못된 type: {type}. KILL_SWITCH 또는 LOSS_STREAK만 허용."}
+    if not bot_global_state["is_running"]:
+        return {"error": "시스템이 중지되어 있습니다. 먼저 가동해 주세요."}
+    bot_global_state["stress_inject"] = stress_type
+    return {"status": "success", "message": f"스트레스 주입 예약 완료: {stress_type} (다음 매매루프 사이클에서 발동)"}
 
 @app_server.get("/api/v1/status")
 async def fetch_current_status():

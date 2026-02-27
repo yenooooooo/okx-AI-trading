@@ -349,6 +349,27 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Fire Drill (Stress Test) Panel -->
+                <div class="glass-panel p-4 border border-red-500/30">
+                    <h3
+                        class="text-xs font-mono font-bold text-red-400 tracking-widest uppercase mb-3 flex items-center gap-1.5">
+                        🚨 극한 스트레스 테스트 (Fire Drill)
+                    </h3>
+                    <p class="text-[9px] font-mono text-gray-500 mb-3 leading-relaxed">
+                        방어 기제 소방훈련: 킬스위치/쿨다운 강제 발동
+                    </p>
+                    <div class="flex flex-col gap-2">
+                        <button onclick="injectStress('KILL_SWITCH')"
+                            class="text-xs w-full py-2 bg-red-500/10 border border-red-500/40 hover:bg-red-500 hover:text-white transition rounded text-red-400 font-mono tracking-widest font-bold">
+                            -10% 폭락 주입 (Kill-Switch) 💀
+                        </button>
+                        <button onclick="injectStress('LOSS_STREAK')"
+                            class="text-xs w-full py-2 bg-orange-500/10 border border-orange-500/40 hover:bg-orange-500 hover:text-white transition rounded text-orange-400 font-mono tracking-widest font-bold">
+                            3연패 주입 (Cooldown) ⏸️
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
 

@@ -843,6 +843,21 @@ async function toggleShadowMode() {
     }
 }
 
+// --- Stress Injector (Fire Drill) ---
+async function injectStress(type) {
+    const labels = { KILL_SWITCH: '킬스위치 (-10% 폭락)', LOSS_STREAK: '3연패 쿨다운 (15분)' };
+    if (!confirm(`🚨 [소방훈련] ${labels[type] || type}\n실제 방어 로직을 강제 발동시킵니다. 진행하시겠습니까?`)) return;
+    try {
+        const response = await fetch(`${API_URL}/inject_stress?type=${encodeURIComponent(type)}`, { method: 'POST' });
+        const result = await response.json();
+        if (result.error) throw new Error(result.error);
+        alert(`🚨 ${result.message}`);
+        updateLogs();
+    } catch (error) {
+        alert('스트레스 주입 실패: ' + error.message);
+    }
+}
+
 async function closePaperPosition() {
     if (!confirm('Paper 포지션을 현재가 기준으로 강제 청산하시겠습니까?')) return;
     try {
