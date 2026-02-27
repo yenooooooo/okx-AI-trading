@@ -547,10 +547,76 @@ async function syncConfig() {
                 const enabled = val === true || val === 'true';
                 if (toggle) toggle.checked = enabled;
                 applyShadowModeVisuals(enabled);
+            } else if (key === 'adx_threshold') {
+                const input = document.getElementById('tuning-adx-threshold');
+                if (input) input.value = parseFloat(val);
+            } else if (key === 'adx_max') {
+                const input = document.getElementById('tuning-adx-max');
+                if (input) input.value = parseFloat(val);
+            } else if (key === 'chop_threshold') {
+                const input = document.getElementById('tuning-chop-threshold');
+                if (input) input.value = parseFloat(val);
+            } else if (key === 'volume_surge_multiplier') {
+                const input = document.getElementById('tuning-volume-surge');
+                if (input) input.value = parseFloat(val);
+            } else if (key === 'fee_margin') {
+                const input = document.getElementById('tuning-fee-margin');
+                if (input) input.value = parseFloat(val);
             }
         }
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncConfig 실패 (엔드포인트: /api/v1/config GET):", error);
+    }
+}
+
+// --- Engine Tuning Modal ---
+function openTuningModal() {
+    const modal = document.getElementById('tuning-modal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeTuningModal() {
+    const modal = document.getElementById('tuning-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+async function saveTuningConfig() {
+    const fields = [
+        { key: 'adx_threshold',           id: 'tuning-adx-threshold',  parse: parseFloat },
+        { key: 'adx_max',                  id: 'tuning-adx-max',         parse: parseFloat },
+        { key: 'chop_threshold',           id: 'tuning-chop-threshold',  parse: parseFloat },
+        { key: 'volume_surge_multiplier',  id: 'tuning-volume-surge',    parse: parseFloat },
+        { key: 'fee_margin',               id: 'tuning-fee-margin',      parse: parseFloat },
+    ];
+
+    const btn = document.querySelector('#tuning-modal button[onclick="saveTuningConfig()"]');
+    try {
+        for (const { key, id, parse } of fields) {
+            const input = document.getElementById(id);
+            if (!input) continue;
+            const value = parse(input.value);
+            if (isNaN(value)) { showToast('입력 오류', `${key}: 유효하지 않은 숫자입니다.`, 'ERROR'); return; }
+            await fetch(`${API_URL}/config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key, value: String(value) })
+            });
+        }
+        if (btn) {
+            const origText = btn.textContent;
+            btn.textContent = '✓ APPLIED';
+            btn.classList.add('border-neon-green', 'text-neon-green', 'bg-neon-green/10');
+            btn.classList.remove('border-purple-500', 'text-purple-300', 'bg-purple-500/20');
+            setTimeout(() => {
+                btn.textContent = origText;
+                btn.classList.remove('border-neon-green', 'text-neon-green', 'bg-neon-green/10');
+                btn.classList.add('border-purple-500', 'text-purple-300', 'bg-purple-500/20');
+            }, 2000);
+        }
+        showToast('엔진 튜닝 적용', '파라미터가 저장되었습니다. 최대 60초 내 반영됩니다.', 'SUCCESS');
+    } catch (error) {
+        console.error('[ANTIGRAVITY 디버그] saveTuningConfig 실패:', error);
+        showToast('저장 실패', '서버 통신 오류가 발생했습니다.', 'ERROR');
     }
 }
 

@@ -368,6 +368,14 @@
                     </div>
                 </div>
 
+                <!-- Engine Tuning Button -->
+                <div class="mt-5 border-t border-navy-border pt-4">
+                    <button onclick="openTuningModal()"
+                        class="text-xs w-full py-2.5 bg-purple-500/10 border border-purple-500/50 hover:bg-purple-500/20 hover:border-purple-400 transition rounded text-purple-300 font-mono tracking-widest font-bold flex items-center justify-center gap-2">
+                        ⚙️ 고급 뇌 구조 튜닝 (Engine Tuning)
+                    </button>
+                </div>
+
                 <!-- Fire Drill (Stress Test) Panel -->
                 <div class="glass-panel p-4 border border-red-500/30">
                     <h3
@@ -923,6 +931,95 @@
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+    </div>
+    <!-- ══════════════════════════════════════ -->
+
+    <!-- ════════════ Engine Tuning Modal ════════════ -->
+    <div id="tuning-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+        style="background: rgba(13,17,23,0.85); backdrop-filter: blur(6px);">
+        <div class="glass-panel w-full max-w-lg flex flex-col">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-navy-border">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-mono text-purple-300 font-bold">⚙️ 고급 뇌 구조 튜닝</span>
+                    <span class="text-[10px] font-mono text-gray-500 uppercase tracking-widest">Engine Tuning</span>
+                </div>
+                <button onclick="closeTuningModal()"
+                    class="text-gray-500 hover:text-text-main transition text-lg font-mono leading-none border border-navy-border rounded px-2 py-0.5 hover:bg-navy-800">✕</button>
+            </div>
+
+            <!-- Tuning Fields -->
+            <div class="px-5 py-5 space-y-4">
+                <p class="text-[10px] font-mono text-gray-500 leading-relaxed">
+                    전략 파라미터를 실시간으로 변경합니다. 저장 즉시 다음 사이클(최대 60초)에 적용됩니다.
+                </p>
+
+                <!-- ADX Threshold -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <div class="flex justify-between text-xs mb-1.5">
+                            <span class="text-gray-400 font-mono">ADX 하한선</span>
+                            <span class="text-[10px] text-gray-600 font-mono">adx_threshold</span>
+                        </div>
+                        <input type="number" id="tuning-adx-threshold" min="0" max="100" step="0.1" value="25.0"
+                            class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
+                        <p class="text-[9px] text-gray-600 font-mono mt-1">진입 허용 최소 ADX 값 (추세 강도 하한)</p>
+                    </div>
+                    <!-- ADX Max -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1.5">
+                            <span class="text-gray-400 font-mono">ADX 상한선</span>
+                            <span class="text-[10px] text-gray-600 font-mono">adx_max</span>
+                        </div>
+                        <input type="number" id="tuning-adx-max" min="0" max="100" step="0.1" value="40.0"
+                            class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
+                        <p class="text-[9px] text-gray-600 font-mono mt-1">과열 구간 진입 차단 상한 ADX 값</p>
+                    </div>
+                </div>
+
+                <!-- CHOP Threshold -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1.5">
+                        <span class="text-gray-400 font-mono">CHOP 상한선</span>
+                        <span class="text-[10px] text-gray-600 font-mono">chop_threshold</span>
+                    </div>
+                    <input type="number" id="tuning-chop-threshold" min="0" max="100" step="0.1" value="61.8"
+                        class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
+                    <p class="text-[9px] text-gray-600 font-mono mt-1">이 값 이상이면 횡보(Choppy) 판정 → 진입 차단. 권장: 61.8</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Volume Surge Multiplier -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1.5">
+                            <span class="text-gray-400 font-mono">거래량 서지 배율</span>
+                            <span class="text-[10px] text-gray-600 font-mono">volume_surge_multiplier</span>
+                        </div>
+                        <input type="number" id="tuning-volume-surge" min="1.0" max="10.0" step="0.1" value="1.5"
+                            class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
+                        <p class="text-[9px] text-gray-600 font-mono mt-1">평균 대비 N배 이상 거래량 서지 조건</p>
+                    </div>
+                    <!-- Fee Margin -->
+                    <div>
+                        <div class="flex justify-between text-xs mb-1.5">
+                            <span class="text-gray-400 font-mono">수수료 마진</span>
+                            <span class="text-[10px] text-gray-600 font-mono">fee_margin</span>
+                        </div>
+                        <input type="number" id="tuning-fee-margin" min="0" max="0.01" step="0.0001" value="0.0015"
+                            class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
+                        <p class="text-[9px] text-gray-600 font-mono mt-1">수수료 버퍼 (진입 실질 손익 보정값)</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="px-5 pb-5">
+                <button onclick="saveTuningConfig()"
+                    class="text-xs w-full py-2.5 bg-purple-500/20 border border-purple-500 hover:bg-purple-500 hover:text-white transition rounded text-purple-300 font-mono tracking-widest font-bold">
+                    SAVE &amp; APPLY
+                </button>
             </div>
         </div>
     </div>

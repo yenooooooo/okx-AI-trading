@@ -522,6 +522,11 @@ async def async_trading_loop():
             _config_sync_counter += 1
             if _config_sync_counter >= 20:
                 strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
+                strategy_instance.adx_threshold = float(get_config('adx_threshold') or 25.0)
+                strategy_instance.adx_max = float(get_config('adx_max') or 40.0)
+                strategy_instance.chop_threshold = float(get_config('chop_threshold') or 61.8)
+                strategy_instance.volume_surge_multiplier = float(get_config('volume_surge_multiplier') or 1.5)
+                strategy_instance.fee_margin = float(get_config('fee_margin') or 0.0015)
                 _config_sync_counter = 0
 
             # ── 15분 주기 다이내믹 볼륨 스캐너 가동 ──

@@ -85,6 +85,11 @@ def init_db():
         'manual_amount': '1',
         'manual_leverage': '1',
         'ENTRY_ORDER_TYPE': 'Market',
+        'adx_threshold': '25.0',
+        'adx_max': '40.0',
+        'chop_threshold': '61.8',
+        'volume_surge_multiplier': '1.5',
+        'fee_margin': '0.0015',
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))
