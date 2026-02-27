@@ -597,7 +597,8 @@ async def async_trading_loop():
                     ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
 
                     # 봇 혼잣말 — 지금 무엇을 기다리는지 한 줄 생성
-                    _ts = _dt.datetime.now().strftime("%H:%M:%S")
+                    _KST = _dt.timezone(_dt.timedelta(hours=9))
+                    _ts = _dt.datetime.now(_KST).strftime("%H:%M:%S")
                     if signal == "LONG":
                         _mono = f"[{_ts}] 🟢 LONG 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
                     elif signal == "SHORT":

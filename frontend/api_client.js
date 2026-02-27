@@ -410,11 +410,12 @@ function renderGates(gates, passed) {
 }
 
 // --- [B] 봇 혼잣말 피드 렌더링 ---
-let _lastMonologueLen = 0;
+let _lastMonologueLatest = '';
 function renderMonologue(lines) {
     if (!lines || lines.length === 0) return;
-    if (lines.length === _lastMonologueLen) return; // 변화 없으면 스킵
-    _lastMonologueLen = lines.length;
+    const latest = lines[lines.length - 1];
+    if (latest === _lastMonologueLatest) return; // 최신 메시지 동일하면 스킵
+    _lastMonologueLatest = latest;
 
     const feed = document.getElementById('monologue-feed');
     if (!feed) return;
