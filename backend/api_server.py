@@ -122,6 +122,9 @@ def _tg_system(is_running: bool) -> str:
     )
 # ─────────────────────────────────────────────────────────────────────────────
 
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+
 app_server = FastAPI()
 
 # CORS 설정
@@ -132,6 +135,19 @@ app_server.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 프론트엔드 정적 파일 서빙 (백엔드 IP로 직접 접속 가능하게 설정)
+# index.html이 있는 frontend 폴더 경로 (현재 백엔드 폴더의 상위에 있다고 가정)
+frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+if os.path.exists(frontend_path):
+    app_server.mount("/static", StaticFiles(directory=frontend_path), name="static")
+
+@app_server.get("/")
+async def serve_frontend():
+    index_file = os.path.join(frontend_path, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"message": "ANTIGRAVITY API Server is running. Frontend not found at " + frontend_path}
 
 # --- WebSocket 관리자 ---
 class ConnectionManager:

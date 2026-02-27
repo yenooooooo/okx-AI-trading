@@ -1,4 +1,4 @@
-const API_URL = `http://15.135.78.118:8000/api/v1`;
+const API_URL = `/api/v1`;
 let chart = null;
 let candleSeries = null;
 let lastLogId = 0;
