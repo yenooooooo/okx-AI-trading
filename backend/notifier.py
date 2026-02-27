@@ -225,8 +225,8 @@ async def stop_telegram_bot():
 
 
 async def send_telegram(message: str):
-    """(단방향 알림용) 시스템 내부 오류 및 체결 결과 등을 전송"""
-    if not TELEGRAM_CHAT_ID:
+    """단방향 알림용 비동기 전송 함수 (체결/오류 등 시스템 알림)"""
+    if not TELEGRAM_CHAT_ID or not TELEGRAM_BOT_TOKEN:
         return
         
     global _telegram_app
@@ -236,21 +236,33 @@ async def send_telegram(message: str):
                 chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="HTML"
             )
         else:
+            # Fallback: _telegram_app이 아직 초기화되기 전 또는 실패 시 HTTP 직통
             import httpx
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
+            payload_data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
             async with httpx.AsyncClient(timeout=10.0) as client:
-                await client.post(url, json=payload)
+                resp = await client.post(url, json=payload_data)
+                if resp.status_code != 200:
+                    logger.warning(f"Telegram HTTP fallback 응답 오류: {resp.status_code} | {resp.text[:200]}")
     except Exception as e:
         logger.error(f"Telegram 메시지 발송 실패: {e}")
 
+
 def send_telegram_sync(message: str):
-    """동기 환경 또는 예외 캡처 블록을 위한 래퍼 함수"""
+    """
+    동기 환경(FastAPI async 루프 내부 포함)에서 안전하게 텔레그램을 발송하는 래퍼
+    [Python 3.10+ 안전 패치]: asyncio.get_running_loop() 기반으로 태스크 생성
+    """
+    if not TELEGRAM_CHAT_ID or not TELEGRAM_BOT_TOKEN:
+        return
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(send_telegram(message))
-        else:
-            loop.run_until_complete(send_telegram(message))
+        try:
+            loop = asyncio.get_running_loop()
+            # 이미 실행 중인 루프가 있음 (정상 FastAPI 시나리오)
+            loop.create_task(send_telegram(message))
+        except RuntimeError:
+            # 실행 중인 루프가 없음 (결제 단계 외부 호출)
+            asyncio.run(send_telegram(message))
     except Exception as e:
         logger.error(f"Telegram 동기 전송 실패: {e}")
+

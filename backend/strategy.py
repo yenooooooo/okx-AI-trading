@@ -176,7 +176,7 @@ class TradingStrategy:
 
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} / ADX {adx_val:.1f} - 타점 탐색 중", None
 
-    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT"):
+    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False):
         """
         파산 방지 핵심 모듈: 현재 진행 중인 포지션의 강제 청산(손절/익절) 여부 반환
         [Step 2] 수수료 방어선 적용:
@@ -191,11 +191,17 @@ class TradingStrategy:
         if position_side == "LONG":
             profit_usdt = current_price - entry_price
             drawdown_usdt = highest_price - current_price
-            hard_sl_price = entry_price - (current_atr * 2.5)
+            if partial_tp_executed:
+                hard_sl_price = entry_price + (entry_price * 0.001)  # 1차 익절 후 본전 방어선 (+수수료 마진)
+            else:
+                hard_sl_price = entry_price - (current_atr * 2.5)
         elif position_side == "SHORT":
             profit_usdt = entry_price - current_price
             drawdown_usdt = current_price - highest_price
-            hard_sl_price = entry_price + (current_atr * 2.5)
+            if partial_tp_executed:
+                hard_sl_price = entry_price - (entry_price * 0.001)  # 1차 익절 후 본전 방어선 (-수수료 마진)
+            else:
+                hard_sl_price = entry_price + (current_atr * 2.5)
         else:
             return "KEEP"
 

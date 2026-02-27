@@ -594,6 +594,7 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["highest_price"] = executed_price
                                         bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
                                         bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
+                                        bot_global_state["symbols"][symbol]["partial_tp_executed"] = False  # [Partial TP] 진입 시 반드시 초기화
                                         
                                         del bot_global_state["symbols"][symbol]["pending_order_id"]
                                         del bot_global_state["symbols"][symbol]["pending_order_time"]
@@ -626,22 +627,16 @@ async def async_trading_loop():
 
                             # 익절/손절 체크 (PENDING이 아닐 때만)
                             if position_side in ["LONG", "SHORT"]:
-                                action, reason, exit_pnl = strategy_instance.evaluate_risk_management(
-                                    symbol=symbol,
-                                    current_price=current_price,
-                                    entry_price=entry,
-                                    position_side=position_side,
-                                    df=df,
-                                    highest_price=bot_global_state["symbols"][symbol].get("highest_price"),
-                                    lowest_price=bot_global_state["symbols"][symbol].get("lowest_price")
-                                )
-
                                 # 리스크 관리 체크
                                 # LONG: highest_price(고점) 추적 / SHORT: lowest_price(저점) 추적
                                 if position_side == "SHORT":
                                     extreme_price = bot_global_state["symbols"][symbol].get("lowest_price", entry)
                                 else:
                                     extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
+
+                                current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
+                                if pd.isna(current_atr) or current_atr <= 0:
+                                    current_atr = float(entry * 0.01)
 
                                 current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
                                 if pd.isna(current_atr) or current_atr <= 0:
@@ -668,6 +663,69 @@ async def async_trading_loop():
                                 bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                                 bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                                 bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
+
+                                partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
+                                action = strategy_instance.evaluate_risk_management(
+                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed
+                                )
+
+                                # --- [Step 2] 50% 분할 익절 (Partial TP) 조건 체크 ---
+                                if not partial_tp_executed:
+                                    # 발동 조건: 수수료 마진 0.3% + ATR*1.5 이상 수익 구간
+                                    partial_tp_threshold = (entry * 0.003) + (current_atr * 1.5)
+                                    if position_side == "LONG":
+                                        partial_profit = current_price - entry
+                                    else:
+                                        partial_profit = entry - current_price
+
+                                    if partial_profit >= partial_tp_threshold:
+                                        try:
+                                            full_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                            half_contracts = max(1, full_contracts // 2)
+
+                                            # 시장가 절반 청산 (Reduce-Only)
+                                            if position_side == "LONG":
+                                                partial_order = engine_api.exchange.create_market_sell_order(
+                                                    symbol, half_contracts,
+                                                    params={"reduceOnly": True}
+                                                )
+                                            else:
+                                                partial_order = engine_api.exchange.create_market_buy_order(
+                                                    symbol, half_contracts,
+                                                    params={"reduceOnly": True}
+                                                )
+
+                                            # 상태 업데이트
+                                            bot_global_state["symbols"][symbol]["partial_tp_executed"] = True
+                                            bot_global_state["symbols"][symbol]["contracts"] = full_contracts - half_contracts
+
+                                            # 본전 방어선 갱신 (프론트엔드 표시용)
+                                            if position_side == "LONG":
+                                                breakeven_sl = round(entry + (entry * 0.001), 4)
+                                            else:
+                                                breakeven_sl = round(entry - (entry * 0.001), 4)
+                                            bot_global_state["symbols"][symbol]["real_sl"] = breakeven_sl
+
+                                            partial_msg = (
+                                                f"🎯 [{symbol}] {position_side} 1차 분할 익절 완료 💰\n"
+                                                f"물량 50% ({half_contracts}계약) 시장가 첣음 | 잔여: {bot_global_state['symbols'][symbol]['contracts']}계약\n"
+                                                f"🛡️ 본전 방어선(Breakeven) 시작: ${breakeven_sl}"
+                                            )
+                                            bot_global_state["logs"].append(partial_msg)
+                                            logger.info(partial_msg)
+
+                                            # 텔레그램 분리 알림
+                                            partial_tg_msg = (
+                                                f"🎯 1차 분할 익절 완료\n"
+                                                f"코인: {symbol}\n"
+                                                f"물량 50% 수익 실현 완료 💰\n"
+                                                f"🛡️ 본전 방어선(Breakeven) 작동 시작"
+                                            )
+                                            send_telegram_sync(partial_tg_msg)
+
+                                        except Exception as partial_err:
+                                            logger.error(f"[{symbol}] 50% 분할 익절 실패: {partial_err}")
+                                # --- End of Partial TP 조건 체크 ---
 
                                 if action != "KEEP":
                                     # 1. 실제 거래소 청산 API 호출 (트랜잭션 무결성 방어)
@@ -747,12 +805,13 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["real_sl"] = 0.0
                                         bot_global_state["symbols"][symbol]["trailing_active"] = False
                                         bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
+                                        bot_global_state["symbols"][symbol]["partial_tp_executed"] = False  # [Partial TP] 전량 청산 후 다음 진입을 위해 리셋
 
                                     except Exception as e:
                                         error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
                                         bot_global_state["logs"].append(error_msg)
                                         logger.error(error_msg)
-                                        send_telegram_sync(_tg_exit(symbol, position_side, current_price, exit_pnl, reason, None))
+                                        send_telegram_sync(_tg_exit(symbol, position_side, current_price, 0.0, 0.0, 0.0, 0.0, action))
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
