@@ -769,10 +769,20 @@ async def async_trading_loop():
                             if position_side in ["PENDING_LONG", "PENDING_SHORT"]:
                                 pending_time = bot_global_state["symbols"][symbol].get("pending_order_time", 0)
                                 pending_id = bot_global_state["symbols"][symbol].get("pending_order_id")
+                                _is_paper_pending = bot_global_state["symbols"][symbol].get("is_paper", False)
                                 
-                                # OKX에서 실제 주문 상태 조회
+                                order_status = {}
+                                
                                 try:
-                                    order_status = await asyncio.to_thread(engine_api.exchange.fetch_order, pending_id, symbol)
+                                    if _is_paper_pending:
+                                        # [Shadow Mode] OKX API 완벽 바이패스 및 가상 체결 시뮬레이션
+                                        # 테스트를 위해 스마트 지정가도 다음 사이클(3초)에 즉시 체결된 것으로 간주
+                                        pending_target = bot_global_state["symbols"][symbol].get("pending_price", current_price)
+                                        order_status = {'status': 'closed', 'average': pending_target, 'filled': 1}
+                                    else:
+                                        # [실전 모드] OKX에서 실제 주문 상태 조회
+                                        order_status = await asyncio.to_thread(engine_api.exchange.fetch_order, pending_id, symbol)
+                                        
                                     status = order_status.get('status')
                                     filled = order_status.get('filled', 0)
                                     
@@ -795,23 +805,26 @@ async def async_trading_loop():
                                         del bot_global_state["symbols"][symbol]["pending_amount"]
                                         del bot_global_state["symbols"][symbol]["pending_price"]
                                         
+                                        _paper_tag = "[👻 PAPER] " if _is_paper_pending else ""
                                         entry_emoji = "🎯📈" if real_side == "LONG" else "🎯📉"
-                                        entry_msg = f"{entry_emoji} [{symbol}] {real_side} 스마트 지정가 체결 완료! | 체결가: ${executed_price:.2f} | {trade_amount}계약"
+                                        entry_msg = f"{_paper_tag}{entry_emoji} [{symbol}] {real_side} 스마트 지정가 체결 완료! | 체결가: ${executed_price:.2f} | {trade_amount}계약"
                                         bot_global_state["logs"].append(entry_msg)
                                         logger.info(entry_msg)
-                                        send_telegram_sync(_tg_entry(symbol, real_side, executed_price, trade_amount, trade_leverage, payload=None))
+                                        send_telegram_sync(_tg_entry(symbol, real_side, executed_price, trade_amount, trade_leverage, payload=None, is_test=_is_paper_pending))
                                         
                                     elif status in ['canceled', 'rejected'] or (time.time() - pending_time > 300):
                                         # 취소되었거나 5분 초과 시 -> 주문 취소 및 PENDING 해제 (고스트 오더 방지)
                                         if status not in ['canceled', 'rejected']:
-                                            try:
-                                                await asyncio.to_thread(engine_api.exchange.cancel_order, pending_id, symbol)
-                                            except Exception as cancel_err:
-                                                logger.warning(f"[{symbol}] 미체결 주문 취소 실패 (이미 취소되었을 수 있음): {cancel_err}")
+                                            if not _is_paper_pending: # Paper면 cancel_order API 호출 절대 금지
+                                                try:
+                                                    await asyncio.to_thread(engine_api.exchange.cancel_order, pending_id, symbol)
+                                                except Exception as cancel_err:
+                                                    logger.warning(f"[{symbol}] 미체결 주문 취소 실패 (이미 취소되었을 수 있음): {cancel_err}")
                                                 
                                         bot_global_state["symbols"][symbol]["position"] = "NONE"
                                         
-                                        cancel_msg = f"⏱️ [{symbol}] 지정가 5분 미체결 취소 완료 → 봇이 새로운 최적의 타점을 즉시 재탐색합니다."
+                                        _paper_tag = "[👻 PAPER] " if _is_paper_pending else ""
+                                        cancel_msg = f"{_paper_tag}⏱️ [{symbol}] 지정가 5분 미체결 취소 완료 → 봇이 새로운 최적의 타점을 즉시 재탐색합니다."
                                         bot_global_state["logs"].append(cancel_msg)
                                         logger.info(cancel_msg)
                                         
