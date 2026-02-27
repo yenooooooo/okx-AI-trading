@@ -687,22 +687,29 @@
                         <span class="text-[10px] text-gray-600">수익 거래 승률</span>
                     </div>
 
-                    <!-- Net PnL -->
+                    <!-- Daily Gross -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Net PnL</span>
-                        <span id="stats-total-pnl"
-                            class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
-                        <span class="text-[10px] text-gray-600">누적 순손익률 합계</span>
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Daily Gross</span>
+                        <span id="stats-daily-gross"
+                            class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
+                        <span class="text-[10px] text-gray-600">오늘 벌어들인 총 수익 (USDT)</span>
                     </div>
 
-                    <!-- Max Drawdown -->
+                    <!-- Daily Net PnL -->
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Max DD</span>
-                        <span id="stats-max-dd"
-                            class="font-mono text-lg font-bold text-neon-red flash-target">0.00%</span>
-                        <span class="text-[10px] text-gray-600">최고점 대비 최대 낙폭</span>
+                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Daily Net PnL</span>
+                        <span id="stats-daily-net"
+                            class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
+                        <span class="text-[10px] text-gray-600">오늘 최종 순손익 (USDT)</span>
                     </div>
                 </div>
+
+                <!-- 히스토리 열람 버튼 -->
+                <button onclick="openHistoryModal()"
+                    class="w-full mt-2 py-2 px-3 rounded-lg border border-navy-border bg-navy-900/60 text-[11px] font-mono text-gray-400 hover:text-text-main hover:border-gray-500 hover:bg-navy-800/80 transition-all duration-200 flex items-center justify-center gap-2">
+                    <span>📜</span>
+                    <span>과거 기록 열람 (Daily / Monthly)</span>
+                </button>
             </div>
 
             <!-- AI Confidence Matrix -->
@@ -781,6 +788,73 @@
             </div>
         </div>
     </main>
+
+    <!-- ════════════ History Modal ════════════ -->
+    <div id="history-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+        style="background: rgba(13,17,23,0.85); backdrop-filter: blur(6px);">
+        <div class="glass-panel w-full max-w-3xl flex flex-col" style="max-height: 85vh;">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-navy-border">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-mono text-gray-300 font-bold">📜 과거 기록 열람</span>
+                    <span class="text-[10px] font-mono text-gray-500 uppercase tracking-widest">KST 기준</span>
+                </div>
+                <button onclick="closeHistoryModal()"
+                    class="text-gray-500 hover:text-text-main transition text-lg font-mono leading-none border border-navy-border rounded px-2 py-0.5 hover:bg-navy-800">✕</button>
+            </div>
+
+            <!-- Tab Buttons -->
+            <div class="flex gap-2 px-5 pt-4 pb-2">
+                <button id="tab-btn-daily" onclick="switchHistoryTab('daily')"
+                    class="history-tab-btn text-[11px] font-mono px-4 py-1.5 rounded-md border border-neon-green text-neon-green bg-neon-green/10 transition-all">
+                    일별 기록
+                </button>
+                <button id="tab-btn-monthly" onclick="switchHistoryTab('monthly')"
+                    class="history-tab-btn text-[11px] font-mono px-4 py-1.5 rounded-md border border-navy-border text-gray-500 hover:border-gray-500 hover:text-gray-300 transition-all">
+                    월별 기록
+                </button>
+            </div>
+
+            <!-- Table Container -->
+            <div class="px-5 pb-5 overflow-y-auto flex-1 custom-scrollbar">
+                <!-- Daily Tab -->
+                <div id="history-tab-daily">
+                    <table class="w-full text-[11px] font-mono border-collapse">
+                        <thead>
+                            <tr class="text-[10px] text-gray-500 uppercase tracking-widest border-b border-navy-border">
+                                <th class="py-2 text-left">날짜 (KST)</th>
+                                <th class="py-2 text-right">거래</th>
+                                <th class="py-2 text-right">승률</th>
+                                <th class="py-2 text-right">Gross PnL</th>
+                                <th class="py-2 text-right">Net PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-daily-body">
+                            <tr><td colspan="5" class="py-6 text-center text-gray-600">데이터 로딩 중...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Monthly Tab -->
+                <div id="history-tab-monthly" class="hidden">
+                    <table class="w-full text-[11px] font-mono border-collapse">
+                        <thead>
+                            <tr class="text-[10px] text-gray-500 uppercase tracking-widest border-b border-navy-border">
+                                <th class="py-2 text-left">월 (KST)</th>
+                                <th class="py-2 text-right">거래</th>
+                                <th class="py-2 text-right">승률</th>
+                                <th class="py-2 text-right">Gross PnL</th>
+                                <th class="py-2 text-right">Net PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-monthly-body">
+                            <tr><td colspan="5" class="py-6 text-center text-gray-600">데이터 로딩 중...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- ══════════════════════════════════════ -->
 
     <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="api_client.js"></script>

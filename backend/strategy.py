@@ -331,11 +331,12 @@ class TradingStrategy:
 
     def check_daily_reset(self, current_balance):
         """
-        [v2.2] UTC 자정 기준 일일 리셋 및 킬스위치 체크
+        [v2.2] KST(UTC+9) 자정 기준 일일 리셋 및 킬스위치 체크
         매 루프 시작 시 호출하여 날짜가 바뀌면 누적 PnL 초기화
         """
-        from datetime import datetime, timezone
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        from datetime import datetime, timezone, timedelta
+        KST = timezone(timedelta(hours=9))
+        today_str = datetime.now(KST).strftime("%Y-%m-%d")
 
         if today_str != self.daily_reset_date:
             self.daily_reset_date = today_str

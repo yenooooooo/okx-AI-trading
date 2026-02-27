@@ -715,8 +715,23 @@ async function syncStats() {
 
         updateNumberText('stats-total-trades', stats.total_trades || 0, val => Math.floor(val));
         updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
-        updateNumberText('stats-total-pnl', stats.total_pnl_percent || 0, val => `${val.toFixed(2)}%`);
-        updateNumberText('stats-max-dd', stats.max_drawdown || 0, val => `${val.toFixed(2)}%`);
+
+        // Daily Gross — 항상 초록색, 항상 + 부호
+        const grossEl = document.getElementById('stats-daily-gross');
+        if (grossEl) {
+            const grossVal = parseFloat(stats.daily_gross_profit || 0);
+            grossEl.textContent = `+${grossVal.toFixed(2)} USDT`;
+            grossEl.className = grossEl.className.replace(/text-neon-(green|red)/g, '') + ' text-neon-green';
+        }
+
+        // Daily Net PnL — 양수 초록 / 음수 빨강 동적 스타일
+        const netEl = document.getElementById('stats-daily-net');
+        if (netEl) {
+            const netVal = parseFloat(stats.daily_net_pnl || 0);
+            const netSign = netVal >= 0 ? '+' : '';
+            netEl.textContent = `${netSign}${netVal.toFixed(2)} USDT`;
+            netEl.className = netEl.className.replace(/text-neon-(green|red)/g, '') + (netVal >= 0 ? ' text-neon-green' : ' text-neon-red');
+        }
 
         // --- NEW: Recent Executions ---
         try {
@@ -1056,3 +1071,94 @@ async function initializeApp() {
 
 // Start
 initializeApp();
+
+// ════════════ History Modal ════════════
+
+let _historyData = null;
+
+function _renderHistoryTable(bodyId, rows) {
+    const tbody = document.getElementById(bodyId);
+    if (!tbody) return;
+
+    if (!rows || rows.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-600 font-mono text-[11px]">기록 없음</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = rows.map(row => {
+        const netColor = row.net_pnl >= 0 ? 'text-neon-green' : 'text-neon-red';
+        const grossColor = row.gross_pnl >= 0 ? 'text-neon-green' : 'text-gray-400';
+        const netSign = row.net_pnl >= 0 ? '+' : '';
+        const grossSign = row.gross_pnl >= 0 ? '+' : '';
+        return `
+            <tr class="border-b border-navy-border/40 hover:bg-navy-800/40 transition-colors">
+                <td class="py-2.5 text-left text-gray-300">${row.date}</td>
+                <td class="py-2.5 text-right text-gray-400">${row.total_trades}</td>
+                <td class="py-2.5 text-right ${row.win_rate >= 50 ? 'text-neon-green' : 'text-neon-red'}">${row.win_rate.toFixed(2)}%</td>
+                <td class="py-2.5 text-right ${grossColor}">${grossSign}${row.gross_pnl.toFixed(4)}</td>
+                <td class="py-2.5 text-right font-bold ${netColor}">${netSign}${row.net_pnl.toFixed(4)}</td>
+            </tr>`;
+    }).join('');
+}
+
+async function openHistoryModal() {
+    const modal = document.getElementById('history-modal');
+    if (!modal) return;
+
+    // 로딩 상태 초기화
+    const dailyBody = document.getElementById('history-daily-body');
+    const monthlyBody = document.getElementById('history-monthly-body');
+    if (dailyBody) dailyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-600 font-mono text-[11px]">데이터 로딩 중...</td></tr>`;
+    if (monthlyBody) monthlyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-600 font-mono text-[11px]">데이터 로딩 중...</td></tr>`;
+
+    modal.classList.remove('hidden');
+    switchHistoryTab('daily');
+
+    try {
+        const res = await fetch(`${API_URL}/history_stats`);
+        _historyData = await res.json();
+        _renderHistoryTable('history-daily-body', _historyData.daily || []);
+        _renderHistoryTable('history-monthly-body', _historyData.monthly || []);
+    } catch (e) {
+        if (dailyBody) dailyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-neon-red font-mono text-[11px]">데이터 로드 실패</td></tr>`;
+        if (monthlyBody) monthlyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-neon-red font-mono text-[11px]">데이터 로드 실패</td></tr>`;
+        console.error("History Stats Fetch Failed:", e);
+    }
+}
+
+function closeHistoryModal() {
+    const modal = document.getElementById('history-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function switchHistoryTab(tab) {
+    const dailyTab = document.getElementById('history-tab-daily');
+    const monthlyTab = document.getElementById('history-tab-monthly');
+    const dailyBtn = document.getElementById('tab-btn-daily');
+    const monthlyBtn = document.getElementById('tab-btn-monthly');
+
+    const activeClass = ['border-neon-green', 'text-neon-green', 'bg-neon-green/10'];
+    const inactiveClass = ['border-navy-border', 'text-gray-500', 'bg-transparent'];
+
+    if (tab === 'daily') {
+        if (dailyTab) dailyTab.classList.remove('hidden');
+        if (monthlyTab) monthlyTab.classList.add('hidden');
+        if (dailyBtn) { activeClass.forEach(c => dailyBtn.classList.add(c)); inactiveClass.forEach(c => dailyBtn.classList.remove(c)); }
+        if (monthlyBtn) { inactiveClass.forEach(c => monthlyBtn.classList.add(c)); activeClass.forEach(c => monthlyBtn.classList.remove(c)); }
+    } else {
+        if (dailyTab) dailyTab.classList.add('hidden');
+        if (monthlyTab) monthlyTab.classList.remove('hidden');
+        if (monthlyBtn) { activeClass.forEach(c => monthlyBtn.classList.add(c)); inactiveClass.forEach(c => monthlyBtn.classList.remove(c)); }
+        if (dailyBtn) { inactiveClass.forEach(c => dailyBtn.classList.add(c)); activeClass.forEach(c => dailyBtn.classList.remove(c)); }
+    }
+}
+
+// 모달 외부 클릭 시 닫기
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('history-modal');
+    if (modal && !modal.classList.contains('hidden') && e.target === modal) {
+        closeHistoryModal();
+    }
+});
+
+// ══════════════════════════════════════

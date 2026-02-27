@@ -1476,7 +1476,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app_server.get("/api/v1/stats")
 async def fetch_statistics():
-    """성과 분석 통계"""
+    """성과 분석 통계 — KST 기준 오늘 일일 지표 포함"""
+    from datetime import datetime, timezone, timedelta
     trades = get_trades(limit=1000)
 
     total_trades = len(trades)
@@ -1512,12 +1513,96 @@ async def fetch_statistics():
         if std_pnl > 0:
             sharpe_ratio = mean_pnl / std_pnl
 
+    # ── KST 기준 오늘 일일 지표 계산 ──────────────────────────────────────────
+    KST = timezone(timedelta(hours=9))
+    today_kst = datetime.now(KST).strftime("%Y-%m-%d")
+
+    def _parse_kst_date(created_at_str):
+        """DB created_at(UTC naive 문자열)을 KST 날짜 문자열로 변환"""
+        if not created_at_str:
+            return ""
+        try:
+            dt = datetime.fromisoformat(str(created_at_str).replace(' ', 'T'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(KST).strftime("%Y-%m-%d")
+        except Exception:
+            return ""
+
+    today_trades = [t for t in trades if _parse_kst_date(t.get('created_at')) == today_kst]
+    # daily_gross_profit: 오늘 수익 거래(pnl > 0)의 gross_pnl 합산 — 항상 0 이상
+    daily_gross_profit = sum(
+        (t.get('gross_pnl') or 0) for t in today_trades if (t.get('pnl') or 0) > 0
+    )
+    # daily_net_pnl: 오늘 모든 거래의 순손익(fee 차감) 합산 — 양수/음수 가능
+    daily_net_pnl = sum((t.get('pnl') or 0) for t in today_trades)
+    # ─────────────────────────────────────────────────────────────────────────
+
     return {
         'total_trades': total_trades,
         'win_rate': round(win_rate, 2),
         'total_pnl_percent': round(total_pnl_percent, 2),
         'max_drawdown': round(max_drawdown * 100, 2),
-        'sharpe_ratio': round(sharpe_ratio, 2)
+        'sharpe_ratio': round(sharpe_ratio, 2),
+        'daily_gross_profit': round(daily_gross_profit, 4),
+        'daily_net_pnl': round(daily_net_pnl, 4),
+    }
+
+
+@app_server.get("/api/v1/history_stats")
+async def fetch_history_stats():
+    """KST 기준 일별/월별 누적 거래 통계"""
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+
+    trades = get_trades(limit=99999)
+    KST = timezone(timedelta(hours=9))
+
+    daily_map = defaultdict(lambda: {'total': 0, 'wins': 0, 'gross_pnl': 0.0, 'net_pnl': 0.0})
+    monthly_map = defaultdict(lambda: {'total': 0, 'wins': 0, 'gross_pnl': 0.0, 'net_pnl': 0.0})
+
+    for t in trades:
+        created_at_str = t.get('created_at')
+        if not created_at_str:
+            continue
+        try:
+            dt = datetime.fromisoformat(str(created_at_str).replace(' ', 'T'))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt_kst = dt.astimezone(KST)
+        except Exception:
+            continue
+
+        date_key = dt_kst.strftime("%Y-%m-%d")
+        month_key = dt_kst.strftime("%Y-%m")
+        net_pnl = t.get('pnl') or 0
+        gross_pnl = t.get('gross_pnl') or 0
+        is_win = net_pnl > 0
+
+        for key, mapping in [(date_key, daily_map), (month_key, monthly_map)]:
+            mapping[key]['total'] += 1
+            mapping[key]['gross_pnl'] += gross_pnl
+            mapping[key]['net_pnl'] += net_pnl
+            if is_win:
+                mapping[key]['wins'] += 1
+
+    def _build_sorted_list(mapping):
+        result = []
+        for key, data in mapping.items():
+            total = data['total']
+            win_rate = round(data['wins'] / total * 100, 2) if total > 0 else 0.0
+            result.append({
+                'date': key,
+                'total_trades': total,
+                'win_rate': win_rate,
+                'gross_pnl': round(data['gross_pnl'], 4),
+                'net_pnl': round(data['net_pnl'], 4),
+            })
+        return sorted(result, key=lambda x: x['date'], reverse=True)
+
+    return {
+        'daily': _build_sorted_list(daily_map),
+        'monthly': _build_sorted_list(monthly_map),
     }
 
 @app_server.get("/api/v1/config")
