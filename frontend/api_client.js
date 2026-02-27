@@ -656,12 +656,10 @@ async function saveTuningConfig() {
             if (isNaN(value)) throw new Error(`${key}: 유효하지 않은 숫자입니다.`);
             payloads.push({ key, value: String(value) });
         }
-        // 2. 10개 키 병렬 POST
+        // 2. 10개 키 병렬 POST (Query Param 방식 — 백엔드 시그니처와 일치)
         await Promise.all(payloads.map(payload =>
-            fetch(`${API_URL}/config`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+            fetch(`${API_URL}/config?key=${encodeURIComponent(payload.key)}&value=${encodeURIComponent(payload.value)}`, {
+                method: 'POST'
             })
         ));
         // 3. 버튼 플래시 피드백
