@@ -492,6 +492,11 @@ async function syncConfig() {
                 const display = document.getElementById('manual-lev-display');
                 if (input) input.value = val;
                 if (display) display.textContent = val + 'x';
+            } else if (key === 'SHADOW_MODE_ENABLED') {
+                const toggle = document.getElementById('shadow-mode-toggle');
+                const enabled = val === true || val === 'true';
+                if (toggle) toggle.checked = enabled;
+                applyShadowModeVisuals(enabled);
             }
         }
     } catch (error) {
@@ -804,6 +809,39 @@ async function saveManualOverride() {
         flashBtn(btn, true);
     } catch (error) {
         flashBtn(btn, false);
+    }
+}
+
+// --- Shadow Mode (Paper Trading) ---
+function applyShadowModeVisuals(enabled) {
+    const watermark = document.getElementById('shadow-watermark');
+    const header = document.querySelector('header');
+    const status = document.getElementById('shadow-mode-status');
+    if (watermark) watermark.classList.toggle('active', enabled);
+    if (header) header.classList.toggle('shadow-active-glow', enabled);
+    if (status) {
+        status.textContent = enabled
+            ? '활성 — 가상 매매 모드 (OKX API 미실행, PnL 시뮬레이션)'
+            : '해제 — 실전 거래 모드 (OKX API 실행)';
+        status.className = enabled
+            ? 'text-[10px] font-mono text-purple-400 mt-1 px-1 transition-colors'
+            : 'text-[10px] font-mono text-gray-500 mt-1 px-1 transition-colors';
+    }
+}
+
+async function toggleShadowMode() {
+    const toggle = document.getElementById('shadow-mode-toggle');
+    const enabled = toggle ? toggle.checked : false;
+    try {
+        await fetch(`${API_URL}/config`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'SHADOW_MODE_ENABLED', value: enabled ? 'true' : 'false' })
+        });
+        applyShadowModeVisuals(enabled);
+    } catch (error) {
+        console.error('Shadow mode toggle failed:', error);
+        if (toggle) toggle.checked = !enabled; // 롤백
     }
 }
 

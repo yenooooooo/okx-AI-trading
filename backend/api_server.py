@@ -422,11 +422,26 @@ async def execute_entry_order(engine_api, symbol: str, signal: str, trade_amount
     Returns (executed_price, pending_order_id)
       - Market  → (current_price, None)
       - Smart Limit → (limit_price, order_id)
+      - Shadow Mode → (current_price or limit_price, paper_xxx) — CCXT 바이패스
     3회 재시도(50013 방어) 포함. 실패 시 예외를 raise 한다.
     """
+    import uuid
     if ema_20_val is None:
         ema_20_val = current_price
 
+    # ── [Shadow Mode] CCXT 완전 바이패스 ──────────────────────────────────────
+    is_shadow = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
+    if is_shadow:
+        if order_type == 'Smart Limit':
+            if signal == "LONG":
+                executed_price = round(max(current_price, ema_20_val), 2)
+            else:
+                executed_price = round(min(current_price, ema_20_val), 2)
+            return executed_price, f"paper_{uuid.uuid4().hex[:8]}"
+        else:
+            return current_price, None
+
+    # ── [실전 모드] 실제 거래소 API 호출 ──────────────────────────────────────
     order_success = False
     last_error = None
     executed_price = current_price
@@ -801,20 +816,23 @@ async def async_trading_loop():
                                         try:
                                             full_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                             half_contracts = max(1, full_contracts // 2)
+                                            _is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
+                                            _paper_tag = "[👻 PAPER] " if _is_paper else ""
 
-                                            # 시장가 절반 청산 (Reduce-Only)
-                                            if position_side == "LONG":
-                                                partial_order = await asyncio.to_thread(
-                                                    engine_api.exchange.create_market_sell_order,
-                                                    symbol, half_contracts,
-                                                    {"reduceOnly": True}
-                                                )
-                                            else:
-                                                partial_order = await asyncio.to_thread(
-                                                    engine_api.exchange.create_market_buy_order,
-                                                    symbol, half_contracts,
-                                                    {"reduceOnly": True}
-                                                )
+                                            # 시장가 절반 청산 (Reduce-Only) — Paper면 바이패스
+                                            if not _is_paper:
+                                                if position_side == "LONG":
+                                                    partial_order = await asyncio.to_thread(
+                                                        engine_api.exchange.create_market_sell_order,
+                                                        symbol, half_contracts,
+                                                        {"reduceOnly": True}
+                                                    )
+                                                else:
+                                                    partial_order = await asyncio.to_thread(
+                                                        engine_api.exchange.create_market_buy_order,
+                                                        symbol, half_contracts,
+                                                        {"reduceOnly": True}
+                                                    )
 
                                             # 상태 업데이트
                                             bot_global_state["symbols"][symbol]["partial_tp_executed"] = True
@@ -828,7 +846,7 @@ async def async_trading_loop():
                                             bot_global_state["symbols"][symbol]["real_sl"] = breakeven_sl
 
                                             partial_msg = (
-                                                f"🎯 [{symbol}] {position_side} 1차 분할 익절 완료 💰\n"
+                                                f"{_paper_tag}🎯 [{symbol}] {position_side} 1차 분할 익절 완료 💰\n"
                                                 f"물량 50% ({half_contracts}계약) 시장가 첣음 | 잔여: {bot_global_state['symbols'][symbol]['contracts']}계약\n"
                                                 f"🛡️ 본전 방어선(Breakeven) 시작: ${breakeven_sl}"
                                             )
@@ -837,7 +855,7 @@ async def async_trading_loop():
 
                                             # 텔레그램 분리 알림
                                             partial_tg_msg = (
-                                                f"🎯 1차 분할 익절 완료\n"
+                                                f"{_paper_tag}🎯 1차 분할 익절 완료\n"
                                                 f"코인: {symbol}\n"
                                                 f"물량 50% 수익 실현 완료 💰\n"
                                                 f"🛡️ 본전 방어선(Breakeven) 작동 시작"
@@ -849,61 +867,72 @@ async def async_trading_loop():
                                 # --- End of Partial TP 조건 체크 ---
 
                                 if action != "KEEP":
-                                    # 1. 실제 거래소 청산 API 호출 (트랜잭션 무결성 방어)
+                                    # 1. 청산 실행 (Paper/Real 분기)
                                     try:
-                                        # 진입 시 저장한 실제 계약수 사용 (없으면 1 fallback)
                                         amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
-                                        
-                                        # 1. 실제 거래소 청산 API 호출 (엔진 분리)
-                                        order_id = await asyncio.to_thread(engine_api.close_position, symbol, position_side, amount)
-                                        
-                                        # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 대기
-                                        net_pnl = 0.0
-                                        total_gross_pnl = 0.0
-                                        total_fee = 0.0
-                                        avg_fill_price = current_price
-                                        receipt_found = False
-                                        
-                                        for _attempt in range(5):
-                                            await asyncio.sleep(1.0)
+                                        _is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
+                                        _paper_tag = "[👻 PAPER] " if _is_paper else ""
+
+                                        if _is_paper:
+                                            # ── [Shadow Mode] 가상 PnL 시뮬레이션 ──
+                                            avg_fill_price = current_price
                                             try:
-                                                trades = await asyncio.to_thread(engine_api.get_recent_trade_receipts, symbol, limit=20)
-                                                matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
-                                                if matching_trades:
-                                                    net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
-                                                    receipt_found = True
-                                                    break
-                                            except Exception as receipt_err:
-                                                logger.warning(f"[{symbol}] 청산 체결 영수증 파싱 오류 시도 {_attempt+1}: {receipt_err}")
-                                                
-                                        if not receipt_found:
-                                            raise Exception("청산 주문은 들어갔으나 영수증(실현PnL) 파싱에 실패했습니다.")
-                                            
-                                        pnl_amount = net_pnl
-                                        
-                                        # 물리적 원금 = (진입가 * 계약수 * 계약단위) / 레버리지
-                                        try:
-                                            contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
-                                        except:
-                                            contract_size = 0.01
-                                        position_value = entry * amount * contract_size
-                                        pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
+                                                contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                            except Exception:
+                                                contract_size = 0.01
+                                            position_value = entry * amount * contract_size
+                                            if position_side == "LONG":
+                                                total_gross_pnl = (current_price - entry) * amount * contract_size
+                                            else:
+                                                total_gross_pnl = (entry - current_price) * amount * contract_size
+                                            total_fee = -(position_value * 0.0005 * 2)  # 0.05% Taker 양방향 가상 수수료
+                                            pnl_amount = total_gross_pnl + total_fee
+                                            pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
+                                            # DB 저장 차단 (is_paper == True)
+                                        else:
+                                            # ── [실전 모드] 거래소 청산 + 영수증 파싱 ──
+                                            order_id = await asyncio.to_thread(engine_api.close_position, symbol, position_side, amount)
+                                            net_pnl = 0.0
+                                            total_gross_pnl = 0.0
+                                            total_fee = 0.0
+                                            avg_fill_price = current_price
+                                            receipt_found = False
+                                            for _attempt in range(5):
+                                                await asyncio.sleep(1.0)
+                                                try:
+                                                    trades = await asyncio.to_thread(engine_api.get_recent_trade_receipts, symbol, limit=20)
+                                                    matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
+                                                    if matching_trades:
+                                                        net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
+                                                        receipt_found = True
+                                                        break
+                                                except Exception as receipt_err:
+                                                    logger.warning(f"[{symbol}] 청산 체결 영수증 파싱 오류 시도 {_attempt+1}: {receipt_err}")
+                                            if not receipt_found:
+                                                raise Exception("청산 주문은 들어갔으나 영수증(실현PnL) 파싱에 실패했습니다.")
+                                            pnl_amount = net_pnl
+                                            try:
+                                                contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                            except Exception:
+                                                contract_size = 0.01
+                                            position_value = entry * amount * contract_size
+                                            pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
 
-                                        save_trade(
-                                            symbol=symbol,
-                                            position_type=position_side,
-                                            entry_price=entry,
-                                            exit_price=avg_fill_price,
-                                            pnl=round(pnl_amount, 4),
-                                            pnl_percent=round(pnl_percent, 4),
-                                            fee=round(total_fee, 4),
-                                            gross_pnl=round(total_gross_pnl, 4),
-                                            amount=amount,
-                                            exit_reason=action,
-                                            leverage=leverage
-                                        )
+                                            save_trade(
+                                                symbol=symbol,
+                                                position_type=position_side,
+                                                entry_price=entry,
+                                                exit_price=avg_fill_price,
+                                                pnl=round(pnl_amount, 4),
+                                                pnl_percent=round(pnl_percent, 4),
+                                                fee=round(total_fee, 4),
+                                                gross_pnl=round(total_gross_pnl, 4),
+                                                amount=amount,
+                                                exit_reason=action,
+                                                leverage=leverage
+                                            )
 
-                                        # 3. 청산 알림 (사유 한글 변환) - 영수증 기반 확정 로깅만 사용
+                                        # 3. 청산 알림 (Paper/Real 공통 — 태그만 다름)
                                         _exit_reason_ko = {
                                             "STOP_LOSS": "🛑 손절",
                                             "TRAILING_STOP_EXIT": "✅ 트레일링 익절",
@@ -911,7 +940,7 @@ async def async_trading_loop():
                                         reason_ko = _exit_reason_ko.get(action, action)
                                         emoji = "✅" if pnl_percent >= 0 else "🔴"
                                         
-                                        msg = f"{emoji} [{symbol}] {position_side} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross_pnl:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
+                                        msg = f"{_paper_tag}{emoji} [{symbol}] {position_side} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross_pnl:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
                                             
                                         bot_global_state["logs"].append(msg)
                                         logger.info(msg)
@@ -925,19 +954,21 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["real_sl"] = 0.0
                                         bot_global_state["symbols"][symbol]["trailing_active"] = False
                                         bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
-                                        bot_global_state["symbols"][symbol]["partial_tp_executed"] = False  # [Partial TP] 전량 청산 후 다음 진입을 위해 리셋
+                                        bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+                                        bot_global_state["symbols"][symbol]["is_paper"] = False  # 플래그 리셋
 
-                                        # [v2.1] 연패 쿨다운 카운터 업데이트
+                                        # [v2.1] 연패 쿨다운 카운터 업데이트 (Paper도 카운트하여 전략 검증)
                                         is_loss = (pnl_amount < 0)
                                         strategy_instance.record_trade_result(is_loss)
 
-                                        # [v2.2] 일일 누적 PnL 반영 + 킬스위치 체크
-                                        kill_triggered = strategy_instance.record_daily_pnl(pnl_amount)
-                                        if kill_triggered:
-                                            kill_msg = f"🚨 [킬스위치 발동] 일일 최대 손실({strategy_instance.daily_max_loss_pct*100:.0f}%) 도달. 24시간 동안 매매 엔진 셋다운."
-                                            bot_global_state["logs"].append(kill_msg)
-                                            logger.warning(kill_msg)
-                                            send_telegram_sync(f"🚨 킬스위치 발동\n일일 누적 손실: {strategy_instance.daily_pnl_accumulated:+.2f} USDT\n24시간 거래 중단")
+                                        # [v2.2] 일일 누적 PnL 반영 + 킬스위치 체크 (Paper는 제외)
+                                        if not _is_paper:
+                                            kill_triggered = strategy_instance.record_daily_pnl(pnl_amount)
+                                            if kill_triggered:
+                                                kill_msg = f"🚨 [킬스위치 발동] 일일 최대 손실({strategy_instance.daily_max_loss_pct*100:.0f}%) 도달. 24시간 동안 매매 엔진 셋다운."
+                                                bot_global_state["logs"].append(kill_msg)
+                                                logger.warning(kill_msg)
+                                                send_telegram_sync(f"🚨 킬스위치 발동\n일일 누적 손실: {strategy_instance.daily_pnl_accumulated:+.2f} USDT\n24시간 거래 중단")
 
                                     except Exception as e:
                                         error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
@@ -999,26 +1030,32 @@ async def async_trading_loop():
 
                                 # 포지션 상태 업데이트 (Smart Limit인 경우 PENDING 상태로 대기)
                                 if order_type == 'Smart Limit':
+                                    _is_shadow_pending = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
+                                    _paper_tag_p = "[👻 PAPER] " if _is_shadow_pending else ""
                                     bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
                                     bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
                                     bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
                                     bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
                                     bot_global_state["symbols"][symbol]["pending_price"] = executed_price
+                                    bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pending
                                     
                                     entry_emoji = "⏳"
-                                    entry_msg = f"{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
+                                    entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
                                     bot_global_state["logs"].append(entry_msg)
                                     logger.info(entry_msg)
                                 else:
+                                    _is_shadow_entry = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
+                                    _paper_tag = "[👻 PAPER] " if _is_shadow_entry else ""
                                     bot_global_state["symbols"][symbol]["position"] = signal
                                     bot_global_state["symbols"][symbol]["entry_price"] = executed_price
                                     bot_global_state["symbols"][symbol]["highest_price"] = executed_price
                                     bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
                                     bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
-                                    bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
+                                    bot_global_state["symbols"][symbol]["contracts"] = trade_amount
+                                    bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
 
                                     entry_emoji = "📈" if signal == "LONG" else "📉"
-                                    entry_msg = f"{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
+                                    entry_msg = f"{_paper_tag}{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
                                     bot_global_state["logs"].append(entry_msg)
                                     logger.info(entry_msg)
                                     send_telegram_sync(_tg_entry(symbol, signal, executed_price, trade_amount, trade_leverage, payload=payload))
@@ -1133,16 +1170,21 @@ async def execute_test_order(direction: str = "LONG"):
             # 포지션 상태 갱신 (Smart Limit → PENDING, Market → 즉시 반영)
             if order_type == 'Smart Limit' and pending_order_id:
                 import time
+                _is_shadow_pend_test = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
+                _paper_tag_pt = "[👻 PAPER] " if _is_shadow_pend_test else ""
                 bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
                 bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
                 bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
                 bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
                 bot_global_state["symbols"][symbol]["pending_price"] = executed_price
                 bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pend_test
 
                 entry_emoji = "⏳📈" if signal == "LONG" else "⏳📉"
-                test_msg = f"{entry_emoji} [{symbol}] 테스트 {signal} 스마트 지정가 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 | {trade_leverage}x"
+                test_msg = f"{_paper_tag_pt}{entry_emoji} [{symbol}] 테스트 {signal} 스마트 지정가 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 | {trade_leverage}x"
             else:
+                _is_shadow_test = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
+                _paper_tag = "[👻 PAPER] " if _is_shadow_test else ""
                 bot_global_state["symbols"][symbol]["position"] = signal
                 bot_global_state["symbols"][symbol]["entry_price"] = executed_price or current_price
                 bot_global_state["symbols"][symbol]["highest_price"] = executed_price or current_price
@@ -1150,9 +1192,10 @@ async def execute_test_order(direction: str = "LONG"):
                 bot_global_state["symbols"][symbol]["contracts"] = trade_amount
                 bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
                 bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+                bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_test
 
                 entry_emoji = "📈" if signal == "LONG" else "📉"
-                test_msg = f"{entry_emoji} [{symbol}] 테스트 {signal} 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
+                test_msg = f"{_paper_tag}{entry_emoji} [{symbol}] 테스트 {signal} 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
 
             bot_global_state["logs"].append(test_msg)
             logger.info(test_msg)

@@ -118,10 +118,50 @@
             background: #30363d;
             border-radius: 3px;
         }
+
+        /* Shadow Mode Watermark */
+        .shadow-watermark {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 999;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+
+        .shadow-watermark.active {
+            opacity: 1;
+        }
+
+        .shadow-watermark::before {
+            content: 'PAPER TRADING \00A0\00A0 \1F47B \00A0\00A0 PAPER TRADING \00A0\00A0 \1F47B \00A0\00A0 PAPER TRADING \00A0\00A0 \1F47B \00A0\00A0 PAPER TRADING \00A0\00A0 \1F47B \00A0\00A0 PAPER TRADING';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) rotate(-35deg);
+            font-size: 2.5rem;
+            font-weight: 900;
+            font-family: 'JetBrains Mono', monospace;
+            color: rgba(168, 85, 247, 0.06);
+            white-space: nowrap;
+            letter-spacing: 0.3em;
+        }
+
+        /* Shadow Mode border glow */
+        .shadow-active-glow {
+            box-shadow: 0 0 30px rgba(168, 85, 247, 0.25) !important;
+            border-color: rgba(168, 85, 247, 0.5) !important;
+        }
     </style>
 </head>
 
 <body class="min-h-screen flex flex-col p-4 gap-4 font-sans">
+    <!-- Shadow Mode Watermark Overlay -->
+    <div id="shadow-watermark" class="shadow-watermark"></div>
     <!-- Header -->
     <header class="flex justify-between items-center glass-panel p-4 z-20">
         <div>
@@ -225,6 +265,26 @@
                             class="flex-1 text-xs py-2 bg-neon-red/20 border border-neon-red hover:bg-neon-red hover:text-navy-900 transition rounded text-neon-red font-mono tracking-widest font-bold">
                             TEST 숏 📉
                         </button>
+                    </div>
+                    <!-- Shadow Mode (Paper Trading) Toggle -->
+                    <div class="mt-4 border-t border-navy-border pt-4">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-xs text-gray-400 uppercase tracking-wide">섀도우 모드 👻</span>
+                                <span class="text-[9px] text-gray-600 font-mono">(Paper Trading)</span>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="shadow-mode-toggle" class="sr-only peer"
+                                    onchange="toggleShadowMode()">
+                                <div
+                                    class="w-9 h-5 bg-navy-900 border border-navy-border rounded-full peer peer-checked:border-purple-400 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4 peer-checked:after:bg-purple-400">
+                                </div>
+                            </label>
+                        </div>
+                        <p id="shadow-mode-status"
+                            class="text-[10px] font-mono text-gray-500 mt-1 px-1 transition-colors">
+                            해제 — 실전 거래 모드 (OKX API 실행)
+                        </p>
                     </div>
                 </div>
 
