@@ -122,6 +122,17 @@ def _tg_system(is_running: bool) -> str:
     )
 # ─────────────────────────────────────────────────────────────────────────────
 
+app_server = FastAPI()
+
+# CORS 설정
+app_server.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --- WebSocket 관리자 ---
 class ConnectionManager:
     def __init__(self):
