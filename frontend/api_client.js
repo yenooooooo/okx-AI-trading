@@ -1124,7 +1124,8 @@ async function initializeApp() {
         syncStats(),
         syncChart(),
         updateLogs(),
-        syncSystemHealth()
+        syncSystemHealth(),
+        fetchAndRenderHeatmap(),  // 히트맵 초기 렌더링
     ]);
 
     // 초기 렌더링 후 타이머 설정
@@ -1135,6 +1136,7 @@ async function initializeApp() {
     setInterval(updateLogs, 3000);
     setInterval(syncConfig, 30000);     // 외부 설정 변경 자동 반영
     setInterval(syncSystemHealth, 5000); // 헬스 체크 (5초 — 매매 뇌 부하 최소화)
+    setInterval(fetchAndRenderHeatmap, 60000); // 히트맵 1분마다 갱신
 }
 
 // Start
@@ -1212,6 +1214,8 @@ async function openHistoryModal() {
         _historyData = await res.json();
         _renderHistoryTable('history-daily-body', _historyData.daily || []);
         _renderHistoryTable('history-monthly-body', _historyData.monthly || []);
+        // 히트맵도 동일 데이터로 갱신 (별도 fetch 없이 재사용)
+        renderHeatmap(_historyData.daily || []);
     } catch (e) {
         if (dailyBody) dailyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-neon-red font-mono text-[11px]">데이터 로드 실패</td></tr>`;
         if (monthlyBody) monthlyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-neon-red font-mono text-[11px]">데이터 로드 실패</td></tr>`;
@@ -1253,5 +1257,145 @@ document.addEventListener('click', (e) => {
         closeHistoryModal();
     }
 });
+
+// ══════════════════════════════════════
+
+// ════════════ PnL Heatmap ════════════
+
+/**
+ * renderHeatmap(dailyData)
+ * - dailyData: /api/v1/history_stats의 daily 배열 [{ date, net_pnl, total_trades }, ...]
+ * - 최근 26주(182일) GitHub 스타일 그리드를 #pnl-heatmap에 렌더링
+ * - 외부 라이브러리 없이 순수 JS/HTML로 구현
+ */
+function renderHeatmap(dailyData) {
+    const container = document.getElementById('pnl-heatmap');
+    if (!container) return;
+
+    // ── PnL 맵 구성 ──
+    const pnlMap = {}; // { 'YYYY-MM-DD': { net_pnl, total_trades } }
+    if (Array.isArray(dailyData)) {
+        dailyData.forEach(d => {
+            pnlMap[d.date] = { net_pnl: parseFloat(d.net_pnl || 0), total_trades: d.total_trades || 0 };
+        });
+    }
+
+    // ── 색상 스케일 기준값 산출 (빈 배열 안전 처리) ──
+    const profits = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v > 0);
+    const losses  = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v < 0);
+    const maxProfit = profits.length > 0 ? Math.max(...profits) : 1;
+    const maxLoss   = losses.length  > 0 ? Math.abs(Math.min(...losses)) : 1;
+
+    function _cellColor(dateStr) {
+        const d = pnlMap[dateStr];
+        if (!d || d.net_pnl === 0) return '#161b22'; // 거래 없음
+        const pnl = d.net_pnl;
+        if (pnl > 0) {
+            const r = Math.min(pnl / maxProfit, 1);
+            if (r < 0.25) return '#0e4429';
+            if (r < 0.5)  return '#006d32';
+            if (r < 0.75) return '#26a641';
+            return '#39d353';
+        } else {
+            const r = Math.min(Math.abs(pnl) / maxLoss, 1);
+            if (r < 0.25) return '#3d0000';
+            if (r < 0.5)  return '#7a0000';
+            if (r < 0.75) return '#b00020';
+            return '#ff4d4d';
+        }
+    }
+
+    // ── 날짜 범위 생성: KST 기준 오늘부터 26주(182일) 전까지 ──
+    // KST 오늘 날짜를 UTC Date 객체로 계산
+    const kstNow  = new Date(Date.now() + 9 * 3600 * 1000);
+    const todayKst = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()));
+    const todayStr = todayKst.toISOString().split('T')[0];
+
+    // 26주 전 일요일(getUTCDay()=0)까지 롤백하여 그리드 시작점 확정
+    const startDate = new Date(todayKst);
+    startDate.setUTCDate(startDate.getUTCDate() - 26 * 7);
+    const startOffset = startDate.getUTCDay(); // 0=Sun ... 6=Sat
+    startDate.setUTCDate(startDate.getUTCDate() - startOffset); // 해당 주의 일요일로 정렬
+
+    // ── 주(Week) 단위 열 생성 ──
+    const weeks = [];
+    const cur = new Date(startDate);
+    while (cur <= todayKst) {
+        const week = [];
+        for (let dow = 0; dow < 7; dow++) {
+            week.push(cur.toISOString().split('T')[0]);
+            cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+        weeks.push(week);
+    }
+
+    // ── HTML 구성 ──
+    let html = '';
+    weeks.forEach(week => {
+        html += `<div class="flex flex-col shrink-0" style="gap:2px;">`;
+        week.forEach(dateStr => {
+            const isFuture = dateStr > todayStr;
+            if (isFuture) {
+                // 미래 날짜: 투명 칸
+                html += `<div style="width:11px;height:11px;border-radius:2px;background:transparent;"></div>`;
+                return;
+            }
+            const color  = _cellColor(dateStr);
+            const d      = pnlMap[dateStr];
+            const pnlVal = d ? d.net_pnl : 0;
+            const pnlStr = pnlVal >= 0 ? `+${pnlVal.toFixed(2)}` : `${pnlVal.toFixed(2)}`;
+            const trades = d ? d.total_trades : 0;
+            html += `<div
+                class="heatmap-cell"
+                style="width:11px;height:11px;border-radius:2px;background:${color};cursor:default;"
+                data-date="${dateStr}"
+                data-pnl="${pnlVal}"
+                data-trades="${trades}"
+                data-label="${dateStr} | Net PnL: ${pnlStr} USDT | 거래: ${trades}건"
+            ></div>`;
+        });
+        html += `</div>`;
+    });
+    container.innerHTML = html;
+
+    // ── 커스텀 툴팁 이벤트 바인딩 ──
+    const tooltip = document.getElementById('heatmap-tooltip');
+    if (!tooltip) return;
+    container.querySelectorAll('.heatmap-cell').forEach(cell => {
+        cell.addEventListener('mousemove', (e) => {
+            tooltip.textContent = cell.dataset.label;
+            tooltip.classList.remove('hidden');
+            tooltip.style.left = (e.clientX + 14) + 'px';
+            tooltip.style.top  = (e.clientY - 32) + 'px';
+        });
+        cell.addEventListener('mouseleave', () => {
+            tooltip.classList.add('hidden');
+        });
+    });
+}
+
+/** history_stats를 fetch 후 히트맵 렌더링 (페이지 로드 & 주기적 갱신용) */
+async function fetchAndRenderHeatmap() {
+    try {
+        const res  = await fetch(`${API_URL}/history_stats`);
+        const data = await res.json();
+        // 모달이 열려있을 경우 테이블도 함께 갱신 (데이터 일관성)
+        if (_historyData === null) _historyData = data;
+        renderHeatmap(data.daily || []);
+    } catch (e) {
+        console.warn('Heatmap fetch failed:', e);
+    }
+}
+
+// ════════════ CSV Download ════════════
+
+function downloadCSV() {
+    const a = document.createElement('a');
+    a.href = `${API_URL}/export_csv`;
+    a.download = 'antigravity_trades.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
 
 // ══════════════════════════════════════

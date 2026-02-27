@@ -1633,6 +1633,46 @@ async def wipe_database():
         return {"success": False, "message": str(e)}
 
 
+@app_server.get("/api/v1/export_csv")
+async def export_csv():
+    """전체 거래 내역 CSV 파일 다운로드"""
+    import csv, io
+    from fastapi.responses import Response as FastAPIResponse
+
+    trades = get_trades(limit=99999)
+    fieldnames = [
+        'ID', 'Symbol', 'Position', 'Entry_Price', 'Exit_Price',
+        'Amount', 'Leverage', 'Gross_PnL', 'Fee', 'Net_PnL',
+        'Entry_Time', 'Exit_Time', 'Exit_Reason',
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction='ignore', lineterminator='\n')
+    writer.writeheader()
+    for t in trades:
+        writer.writerow({
+            'ID':          t.get('id', ''),
+            'Symbol':      t.get('symbol', ''),
+            'Position':    t.get('position_type', ''),
+            'Entry_Price': t.get('entry_price', ''),
+            'Exit_Price':  t.get('exit_price', ''),
+            'Amount':      t.get('amount', ''),
+            'Leverage':    t.get('leverage', ''),
+            'Gross_PnL':   t.get('gross_pnl', ''),
+            'Fee':         t.get('fee', ''),
+            'Net_PnL':     t.get('pnl', ''),
+            'Entry_Time':  t.get('entry_time', ''),
+            'Exit_Time':   t.get('exit_time', ''),
+            'Exit_Reason': t.get('exit_reason', ''),
+        })
+    csv_bytes = output.getvalue().encode('utf-8-sig')  # BOM: Excel 한글 깨짐 방지
+    output.close()
+    return FastAPIResponse(
+        content=csv_bytes,
+        media_type='text/csv',
+        headers={'Content-Disposition': 'attachment; filename="antigravity_trades.csv"'},
+    )
+
+
 @app_server.get("/api/v1/config")
 async def fetch_config():
     """현재 봇 설정 조회"""

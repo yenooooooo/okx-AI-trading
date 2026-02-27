@@ -775,6 +775,54 @@
             <span class="ml-auto text-[9px] text-gray-600 font-mono" id="health-last-checked"></span>
         </div>
 
+        <!-- PnL HEATMAP PANEL (12 cols) -->
+        <div class="col-span-12 glass-panel p-4 mt-2">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <h3 class="text-xs font-mono text-gray-400 uppercase tracking-widest">📊 PnL Heatmap</h3>
+                    <span class="text-[9px] text-gray-600 font-mono">KST 기준 · 최근 26주</span>
+                </div>
+                <button onclick="downloadCSV()"
+                    class="flex items-center gap-1.5 text-[10px] font-mono px-3 py-1 rounded border border-blue-500/50 text-blue-400 bg-blue-600/10 hover:bg-blue-600/30 transition-all">
+                    📥 거래 내역 CSV 다운로드
+                </button>
+            </div>
+            <div class="flex items-start gap-2">
+                <!-- 요일 레이블 (Sun=0 ~ Sat=6) -->
+                <div class="flex flex-col shrink-0 text-[8px] text-gray-600 font-mono" style="gap:2px;margin-top:1px;">
+                    <div style="height:11px;line-height:11px;">Sun</div>
+                    <div style="height:11px;line-height:11px;">Mon</div>
+                    <div style="height:11px;line-height:11px;">Tue</div>
+                    <div style="height:11px;line-height:11px;">Wed</div>
+                    <div style="height:11px;line-height:11px;">Thu</div>
+                    <div style="height:11px;line-height:11px;">Fri</div>
+                    <div style="height:11px;line-height:11px;">Sat</div>
+                </div>
+                <!-- 히트맵 셀 그리드 (JS 동적 생성) -->
+                <div id="pnl-heatmap" class="flex overflow-x-auto pb-1" style="gap:2px;"></div>
+            </div>
+            <!-- 색상 범례 -->
+            <div class="flex items-center gap-1.5 mt-2.5 text-[9px] text-gray-600 font-mono flex-wrap">
+                <span>수익:</span>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#0e4429;"></div>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#006d32;"></div>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#26a641;"></div>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#39d353;"></div>
+                <span class="mx-1 text-gray-700">|</span>
+                <span>손실:</span>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#3d0000;"></div>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#7a0000;"></div>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#b00020;"></div>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#ff4d4d;"></div>
+                <span class="mx-1 text-gray-700">|</span>
+                <div class="w-2.5 h-2.5 rounded-sm" style="background:#161b22;border:1px solid #30363d;"></div>
+                <span>거래없음</span>
+            </div>
+        </div>
+        <!-- 히트맵 커스텀 툴팁 (fixed — JS로 위치 제어) -->
+        <div id="heatmap-tooltip" class="hidden fixed z-[200] px-2.5 py-1.5 text-[10px] font-mono rounded border pointer-events-none"
+            style="background:rgba(22,27,34,0.97);border-color:#30363d;color:#e6edf3;white-space:nowrap;"></div>
+
         <!-- BOTTOM: Terminal Module (12 cols) -->
         <div class="col-span-12 glass-panel flex flex-col h-56 mt-2 mb-4 relative z-0">
             <div
