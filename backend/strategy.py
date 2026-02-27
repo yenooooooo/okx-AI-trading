@@ -11,9 +11,10 @@ class TradingStrategy:
         self.hard_stop_loss_rate = 0.005      # [테스트] 원본: 0.02 (2%) → 0.5% 빠른 손절
         self.trailing_stop_activation = 0.003 # [테스트] 원본: 0.03 (3%) → 0.3% 수익 시 트레일링 활성화
         self.trailing_stop_rate = 0.002       # [테스트] 원본: 0.01 (1%) → 0.2% 하락 시 익절
-        self.volume_surge_multiplier = 0.5    # [Phase 2] 거래량 폭발 기준 배수
+        self.volume_surge_multiplier = 1.5    # [Phase 2] 거래량 폭발 기준 배수 (원본 0.5 -> 1.5 상향)
         self.fee_margin = 0.003               # [Step 2] 수수료 방어 마진: 왕복 수수료 + 슬리피지 0.3%
-        self.adx_threshold = 25.0            # [Step 1] ADX 추세 강도 필터: 25 이상만 진입 허용
+        self.adx_threshold = 25.0            # [Step 1] ADX 추세 강도 필터 하한 (25 이상)
+        self.adx_max = 40.0                  # [Step 2] ADX 과열 필터 상한 (40 초과 시 진입 차단)
         self.macro_cache = {}                 # 1시간봉 거시적 추세 데이터 캐싱
 
     async def get_macro_ema_200(self, engine_api, symbol):
@@ -77,6 +78,9 @@ class TradingStrategy:
         # 4. [Phase 2] 거래량 SMA 계산 (20주기)
         df['vol_sma_20'] = df['volume'].rolling(window=20).mean()
 
+        # 4-1. [Step 3] 단기 이격도 방어를 위한 EMA 20 계산 (5분봉 기준)
+        df['ema_20'] = df['close'].ewm(span=20, adjust=False).mean()
+
         # 5. [Phase 3] ATR 계산 (14주기)
         high_low = df['high'] - df['low']
         high_close = (df['high'] - df['close'].shift()).abs()
@@ -123,12 +127,21 @@ class TradingStrategy:
         vol_sma_20 = latest['vol_sma_20']
         adx_val = latest['adx'] if 'adx' in latest and not pd.isna(latest['adx']) else 0.0
 
-        # [Step 1] ADX 횡보장 필터: 추세 강도 25 미만이면 전면 관망
+        # [Step 1,2] ADX 횡보장 및 과열장 필터 (25 <= ADX <= 40)
         if adx_val < self.adx_threshold:
             return "HOLD", f"횡보장 차단 — ADX {adx_val:.1f} < {self.adx_threshold:.0f} (추세 없음, 관망)", None
+        if adx_val > self.adx_max:
+            return "HOLD", f"과열장 차단 — ADX {adx_val:.1f} > {self.adx_max:.0f} (추세 끝물, 추격매수 방지)", None
 
         # [Phase 2] 거래량 폭발 필터링
         volume_verified = vol_val > (vol_sma_20 * self.volume_surge_multiplier) if not pd.isna(vol_sma_20) else True
+        
+        # [Step 3] 단기 5m EMA 20 이격도(Disparity) 필터: 0.8% 이상 벌어지면 진입 금지 (가짜 상승/하락 추격 방지)
+        ema_20_val = latest['ema_20'] if 'ema_20' in latest and not pd.isna(latest['ema_20']) else current_price
+        disparity_pct = abs((current_price - ema_20_val) / ema_20_val) * 100 if current_price and ema_20_val else 0.0
+        
+        if disparity_pct >= 0.8:
+            return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 이격 (안전 이격거리 0.8% 초과)", None
 
         # [Telegram/Logging Payload Packaging]
         payload = {
@@ -142,6 +155,7 @@ class TradingStrategy:
                 if 'atr' in latest and not pd.isna(latest['atr']) else "N/A"
             ),
             "adx": f"{adx_val:.1f}",
+            "disparity": f"{disparity_pct:.2f}%",
         }
 
         long_macd = (latest['macd'] > latest['macd_signal'])
