@@ -571,28 +571,28 @@ async def async_trading_loop():
                     _vsma_v    = float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0
                     _ema20_v   = float(_row['ema_20'])   if 'ema_20'   in _row.index and not pd.isna(_row['ema_20'])   else (current_price or 1)
 
-                    _vol_ratio  = _vol_v / _vsma_v if _vsma_v > 0 else 0.0
-                    _disparity  = abs((current_price - _ema20_v) / _ema20_v) * 100 if current_price and _ema20_v else 0.0
-                    _long_macd  = _macd_v > _msig_v
-                    _short_macd = _macd_v < _msig_v
-                    _long_rsi   = 30 <= _rsi_v <= 55
-                    _short_rsi  = 45 <= _rsi_v <= 70
-                    _mr_ok      = (_long_macd and _long_rsi) or (_short_macd and _short_rsi)
+                    _vol_ratio  = float(_vol_v / _vsma_v) if _vsma_v > 0 else 0.0
+                    _disparity  = float(abs((current_price - _ema20_v) / _ema20_v) * 100) if current_price and _ema20_v else 0.0
+                    _long_macd  = bool(_macd_v > _msig_v)
+                    _short_macd = bool(_macd_v < _msig_v)
+                    _long_rsi   = bool(30 <= _rsi_v <= 55)
+                    _short_rsi  = bool(45 <= _rsi_v <= 70)
+                    _mr_ok      = bool((_long_macd and _long_rsi) or (_short_macd and _short_rsi))
                     _macro_ok   = True
                     _macro_lbl  = "N/A"
                     if macro_ema_200 is not None and current_price is not None:
-                        _macro_ok  = current_price > macro_ema_200
-                        _macro_lbl = f"상승추세 ↑" if _macro_ok else f"하락추세 ↓"
+                        _macro_ok  = bool(current_price > float(macro_ema_200))
+                        _macro_lbl = "상승추세 ↑" if _macro_ok else "하락추세 ↓"
 
                     _gates = {
-                        "adx":       {"pass": 25 <= _adx_v <= 40,  "value": f"{_adx_v:.1f}",      "target": "25~40"},
-                        "chop":      {"pass": _chop_v < 61.8,       "value": f"{_chop_v:.1f}",     "target": "< 61.8"},
-                        "volume":    {"pass": _vol_ratio >= 1.5,    "value": f"{_vol_ratio:.2f}x", "target": "≥ 1.5x"},
-                        "disparity": {"pass": _disparity < 0.8,     "value": f"{_disparity:.2f}%", "target": "< 0.8%"},
-                        "macd_rsi":  {"pass": _mr_ok,               "value": f"RSI {_rsi_v:.1f}",  "target": "크로스+구간"},
-                        "macro":     {"pass": _macro_ok,            "value": _macro_lbl,           "target": "EMA200"},
+                        "adx":       {"pass": bool(25 <= _adx_v <= 40),  "value": f"{_adx_v:.1f}",      "target": "25~40"},
+                        "chop":      {"pass": bool(_chop_v < 61.8),       "value": f"{_chop_v:.1f}",     "target": "< 61.8"},
+                        "volume":    {"pass": bool(_vol_ratio >= 1.5),    "value": f"{_vol_ratio:.2f}x", "target": "≥ 1.5x"},
+                        "disparity": {"pass": bool(_disparity < 0.8),     "value": f"{_disparity:.2f}%", "target": "< 0.8%"},
+                        "macd_rsi":  {"pass": bool(_mr_ok),               "value": f"RSI {_rsi_v:.1f}",  "target": "크로스+구간"},
+                        "macro":     {"pass": bool(_macro_ok),            "value": _macro_lbl,           "target": "EMA200"},
                     }
-                    _passed = sum(1 for g in _gates.values() if g["pass"])
+                    _passed = int(sum(1 for g in _gates.values() if g["pass"]))
                     ai_brain_state["symbols"][symbol]["gates"]        = _gates
                     ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
 
