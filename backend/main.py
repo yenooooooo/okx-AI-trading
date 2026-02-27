@@ -5,7 +5,7 @@ from strategy import TradingStrategy
 
 # --- 봇 설정 영역 ---
 SYMBOL = "BTC/USDT:USDT"  # 대상 코인 (비트코인 무기한 선물)
-TIMEFRAME = "1m"          # 1분봉 기준 (빠른 단기매매 테스트용)
+TIMEFRAME = "5m"          # 5분봉 기준 (노이즈 필터링 및 수수료 방어선 확보)
 PAPER_TRADING = False     # 실제 모의투자 계정으로 주문 실행
 # --------------------
 
@@ -37,7 +37,7 @@ def run_bot():
                 break # 무한 루프 종료
 
             # 2. 시장 데이터(OHLCV) 수집 (최근 100개 캔들)
-            ohlcv = engine.exchange.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=100)
+            ohlcv = engine.exchange.fetch_ohlcv(SYMBOL, TIMEFRAME, limit=200)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
             # 3. 기술적 지표 계산 및 현재가 확인
@@ -67,7 +67,8 @@ def run_bot():
                 elif current_position == "SHORT" and current_price < highest_price:
                     highest_price = current_price
 
-                risk_action = strategy.evaluate_risk_management(entry_price, current_price, highest_price, current_position)
+                current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else float(entry_price * 0.01)
+                risk_action = strategy.evaluate_risk_management(entry_price, current_price, highest_price, current_position, current_atr)
                 
                 if risk_action != "KEEP":
                     print(f"[{'모의' if PAPER_TRADING else '실제'} 포지션 청산] 사유: {risk_action}")
@@ -98,7 +99,7 @@ def run_bot():
                     entry_price = 0.0
                     highest_price = 0.0
                     print("-" * 50)
-                    time.sleep(60) # 청산 후 시장 안정을 위해 1분 대기
+                    time.sleep(300) # 청산 후 시장 안정을 위해 5분(다음 캔들) 대기
                     continue 
 
             # 5. 포지션이 없을 때: 신규 진입 시그널 체크
@@ -132,8 +133,8 @@ def run_bot():
                     print("[진입 성공] 포지션 상태 갱신 완료!")
                     print("-" * 50)
 
-            # API 호출 제한 방지 (Rate Limit) 및 다음 분석을 위한 대기
-            time.sleep(60)
+            # API 호출 제한 방지 (Rate Limit) 및 다음 5분봉 캔들 대기
+            time.sleep(300)
 
         except Exception as e:
             print(f"[루프 에러] 실행 중 통신 장애 또는 오류 발생: {e}")

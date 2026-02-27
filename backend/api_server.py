@@ -502,8 +502,8 @@ async def async_trading_loop():
                             "trailing_target": 0.0,
                         }
 
-                    # OHLCV 데이터 수집
-                    ohlcv = engine_api.exchange.fetch_ohlcv(symbol, "1m", limit=100)
+                    # OHLCV 데이터 수집 (5분봉, limit=200: ADX/MACD 지표 충분한 캔들 확보)
+                    ohlcv = engine_api.exchange.fetch_ohlcv(symbol, "5m", limit=200)
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     current_price = engine_api.get_current_price(symbol)
 
@@ -525,6 +525,7 @@ async def async_trading_loop():
                     latest_macd = df['macd'].iloc[-1]
                     latest_upper = df['upper_band'].iloc[-1]
                     latest_lower = df['lower_band'].iloc[-1]
+                    latest_adx = df['adx'].iloc[-1] if 'adx' in df.columns else float('nan')
 
                     # ── [Phase 1] 거시적 추세(1h EMA200) 데이터 수집 (비동기, 캐시 적용) ──
                     macro_ema_200 = await strategy_instance.get_macro_ema_200(engine_api, symbol)
@@ -542,6 +543,7 @@ async def async_trading_loop():
                         "macd": round(latest_macd, 2) if not pd.isna(latest_macd) else 0.0,
                         "bb_upper": round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0,
                         "bb_lower": round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0,
+                        "adx": round(latest_adx, 2) if not pd.isna(latest_adx) else 0.0,
                         "decision": analysis_msg  # 프론트엔드 출력을 위해 추가
                     })
 
@@ -581,22 +583,23 @@ async def async_trading_loop():
                                 current_atr = float(entry * 0.01)
                                 
                             # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
-                            # [Phase 3] ATR 기반 탄력적 쉴드 계산 (JSON 에러 방지용 dtype 명시 캐스팅)
+                            # [Step 2] strategy.py evaluate_risk_management 로직과 완전 동기화
                             if position_side == "LONG":
                                 profit_usdt = float(current_price - entry)
-                                _real_sl = float(entry - (current_atr * 2.0))
+                                _real_sl = float(entry - (current_atr * 2.5))
                             else:
                                 profit_usdt = float(entry - current_price)
-                                _real_sl = float(entry + (current_atr * 2.0))
-                                
-                            _trailing_active = bool(profit_usdt >= (current_atr * 1.0))
+                                _real_sl = float(entry + (current_atr * 2.5))
+
+                            _fee_cover_threshold = float((entry * strategy_instance.fee_margin) + (current_atr * 0.5))
+                            _trailing_active = bool(profit_usdt >= _fee_cover_threshold)
                             _trailing_target = 0.0
-                            
+
                             if _trailing_active:
                                 if position_side == "LONG":
-                                    _trailing_target = float(extreme_price - (current_atr * 0.5))
+                                    _trailing_target = float(extreme_price - (current_atr * 1.0))
                                 else:
-                                    _trailing_target = float(extreme_price + (current_atr * 0.5))
+                                    _trailing_target = float(extreme_price + (current_atr * 1.0))
                             bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                             bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                             bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
@@ -1123,7 +1126,7 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
         if not engine or not engine.exchange:
             return {"error": "거래소 연결 실패"}
 
-        ohlcv = engine.exchange.fetch_ohlcv(symbol, "1m", limit=limit)
+        ohlcv = engine.exchange.fetch_ohlcv(symbol, "5m", limit=limit)
         
         # 샌드박스 환경 등에서 데이터가 아예 안 들어올 경우를 대비한 가상 데이터 생성 로직
         if not ohlcv or len(ohlcv) == 0:
