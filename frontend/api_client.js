@@ -493,6 +493,40 @@ async function toggleBot() {
     }
 }
 
+// 원클릭 전술 프리셋 정의 — 5가지 매매 스타일별 10개 파라미터 완전 매핑
+const PRESET_CONFIGS = {
+    sniper: {
+        adx_threshold: 30.0, adx_max: 45.0, chop_threshold: 55.0,
+        volume_surge_multiplier: 2.0,  fee_margin: 0.002,
+        hard_stop_loss_rate: 0.008,    trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.003,     cooldown_losses_trigger: 2,  cooldown_duration_sec: 1800,
+    },
+    trend_rider: {
+        adx_threshold: 25.0, adx_max: 60.0, chop_threshold: 58.0,
+        volume_surge_multiplier: 1.3,  fee_margin: 0.001,
+        hard_stop_loss_rate: 0.010,    trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.004,     cooldown_losses_trigger: 4,  cooldown_duration_sec: 600,
+    },
+    scalper: {
+        adx_threshold: 20.0, adx_max: 50.0, chop_threshold: 65.0,
+        volume_surge_multiplier: 1.2,  fee_margin: 0.002,
+        hard_stop_loss_rate: 0.003,    trailing_stop_activation: 0.002,
+        trailing_stop_rate: 0.001,     cooldown_losses_trigger: 5,  cooldown_duration_sec: 300,
+    },
+    iron_dome: {
+        adx_threshold: 28.0, adx_max: 42.0, chop_threshold: 50.0,
+        volume_surge_multiplier: 2.5,  fee_margin: 0.002,
+        hard_stop_loss_rate: 0.004,    trailing_stop_activation: 0.004,
+        trailing_stop_rate: 0.002,     cooldown_losses_trigger: 2,  cooldown_duration_sec: 3600,
+    },
+    factory_reset: {
+        adx_threshold: 25.0, adx_max: 40.0, chop_threshold: 61.8,
+        volume_surge_multiplier: 1.5,  fee_margin: 0.0015,
+        hard_stop_loss_rate: 0.005,    trailing_stop_activation: 0.003,
+        trailing_stop_rate: 0.002,     cooldown_losses_trigger: 3,  cooldown_duration_sec: 900,
+    },
+};
+
 // 튜닝 파라미터 맵 — syncConfig() 와 saveTuningConfig() 공유 단일 진실 소스
 const TUNING_INPUT_MAP = {
     'adx_threshold':            { id: 'tuning-adx-threshold',       parse: parseFloat },
@@ -573,6 +607,26 @@ async function syncConfig() {
 }
 
 // --- Engine Tuning Modal ---
+async function applyPreset(presetName) {
+    const config = PRESET_CONFIGS[presetName];
+    if (!config) return;
+
+    // 1. 각 input에 값 주입 + preset-flash 애니메이션 트리거
+    for (const [key, { id }] of Object.entries(TUNING_INPUT_MAP)) {
+        if (!(key in config)) continue;
+        const input = document.getElementById(id);
+        if (!input) continue;
+        input.value = config[key];
+        // reflow trick: 연속 클릭 시에도 애니메이션 재시작 보장
+        input.classList.remove('preset-flash');
+        void input.offsetWidth;
+        input.classList.add('preset-flash');
+    }
+
+    // 2. 값 주입 직후 서버에 즉시 일괄 저장
+    await saveTuningConfig();
+}
+
 function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
