@@ -84,6 +84,7 @@ def init_db():
         'manual_override_enabled': 'false',
         'manual_amount': '1',
         'manual_leverage': '1',
+        'ENTRY_ORDER_TYPE': 'Market',
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))

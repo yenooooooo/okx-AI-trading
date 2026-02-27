@@ -32,8 +32,9 @@ def run_bot():
         try:
             # 1. 일일 최대 손실 한도 체크 (서킷 브레이커)
             current_balance = engine.get_usdt_balance()
-            if strategy.is_daily_drawdown_exceeded(current_balance):
-                print("[긴급] 일일 최대 손실 한도(-5%) 도달! 뇌동매매 방지를 위해 봇을 전면 중단합니다.")
+            strategy.check_daily_reset(current_balance)
+            if strategy.kill_switch_active:
+                print("[긴급] 일일 최대 손실 한도 도달! 뇌동매매 방지를 위해 봇을 전면 중단합니다.")
                 break # 무한 루프 종료
 
             # 2. 시장 데이터(OHLCV) 수집 (최근 100개 캔들)
@@ -68,8 +69,8 @@ def run_bot():
                     highest_price = current_price
 
                 current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else float(entry_price * 0.01)
-                risk_action = strategy.evaluate_risk_management(entry_price, current_price, highest_price, current_position, current_atr)
-                
+                risk_action, _real_sl, _trailing_active, _trailing_target = strategy.evaluate_risk_management(entry_price, current_price, highest_price, current_position, current_atr)
+
                 if risk_action != "KEEP":
                     print(f"[{'모의' if PAPER_TRADING else '실제'} 포지션 청산] 사유: {risk_action}")
                     print(f" - 진입가: {entry_price} -> 청산가: {current_price}")

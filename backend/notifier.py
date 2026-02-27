@@ -105,8 +105,7 @@ async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @auth_required
 async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from api_server import bot_global_state, _engine
-    import time as _t
-    
+
     bot_global_state["is_running"] = False
     bot_global_state["logs"].append("🚨 [긴급] [PANIC] 텔레그램 긴급 킬스위치 발동!")
     

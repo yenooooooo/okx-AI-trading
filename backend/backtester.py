@@ -72,11 +72,14 @@ class Backtester:
 
                 # 포지션 유지 중 - 리스크 관리
                 if position:
-                    risk_action = self.strategy.evaluate_risk_management(
-                        entry_price, current_price, extreme_price, position
+                    _atr_val = float(df.iloc[idx]['atr']) if 'atr' in df.columns and not pd.isna(df.iloc[idx]['atr']) else entry_price * 0.01
+                    if _atr_val <= 0:
+                        _atr_val = entry_price * 0.01
+                    action, _real_sl, _trailing_active, _trailing_target = self.strategy.evaluate_risk_management(
+                        entry_price, current_price, extreme_price, position, _atr_val
                     )
 
-                    if risk_action != "KEEP":
+                    if action != "KEEP":
                         # 포지션 청산
                         pnl = 0
                         if position == "LONG":
@@ -94,7 +97,7 @@ class Backtester:
                             'exit_price': current_price,
                             'position': position,
                             'pnl_percent': pnl_percent,
-                            'exit_reason': risk_action,
+                            'exit_reason': action,
                             'balance': balance
                         })
 
@@ -106,7 +109,8 @@ class Backtester:
 
                 # 포지션 없을 때 - 진입 신호 체크
                 if not position and idx >= 50:  # 지표 계산에 필요한 최소 캔들 수 (MACD 26+signal 9+여유)
-                    signal, _, _ = self.strategy.check_entry_signal(df.iloc[:idx+1])
+                    # current_price 전달: 이격도 필터(EMA20 ±0.8%)가 실거래와 동일하게 적용됨
+                    signal, _, _ = self.strategy.check_entry_signal(df.iloc[:idx+1], current_price=current_price)
 
                     if signal in ["LONG", "SHORT"]:
                         position = signal

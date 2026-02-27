@@ -4,7 +4,10 @@
       "Bash(cd /c/Users/ailee/github/okx/backend && python -m py_compile logger.py database.py notifier.py backtester.py 2>&1)",
       "Bash(cd /c/Users/ailee/github/okx/backend && python -m py_compile api_server.py strategy.py okx_engine.py 2>&1)",
       "Bash(echo:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(python:*)"
     ]
   }
 }

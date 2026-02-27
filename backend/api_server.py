@@ -209,7 +209,7 @@ def _generate_ws_sign(secret_key: str, timestamp: str) -> str:
     mac = hmac.new(bytes(secret_key, 'utf-8'), bytes(message, 'utf-8'), digestmod=hashlib.sha256)
     return base64.b64encode(mac.digest()).decode('utf-8')
 
-def _apply_position_ws_update(pos: dict):
+async def _apply_position_ws_update(pos: dict):
     """OKX positions 채널 데이터 → 글로벌 상태 반영 (OKX 정확 PnL)"""
     inst_id = pos.get('instId', '')
     parts = inst_id.split('-')
@@ -223,7 +223,7 @@ def _apply_position_ws_update(pos: dict):
     if pos_qty == 0:
         # OKX가 포지션 종료를 알림 → 통합된 수동청산 감지 로직 호출
         if bot_global_state["symbols"][symbol].get("entry_price", 0.0) > 0:
-            _detect_and_handle_manual_close(_engine, symbol, bot_global_state["symbols"][symbol])
+            asyncio.create_task(_detect_and_handle_manual_close(_engine, symbol, bot_global_state["symbols"][symbol]))
     else:
         upl_ratio = float(pos.get('uplRatio', 0) or 0)
         upl = float(pos.get('upl', 0) or 0)
@@ -270,7 +270,7 @@ async def private_ws_loop():
                         data = json.loads(message)
                         if data.get('arg', {}).get('channel') == 'positions':
                             for pos in data.get('data', []):
-                                _apply_position_ws_update(pos)
+                                await _apply_position_ws_update(pos)
                     except Exception as parse_err:
                         logger.warning(f"Private WS 메시지 처리 오류: {parse_err}")
         except Exception as e:
@@ -299,9 +299,9 @@ async def startup_event():
     bot_global_state["logs"].append("[봇] 텔레그램 양방향 컨트롤 타워 비동기 가동 완료")
     logger.info("텔레그램 양방향 컨트롤 타워 비동기 시작 완료")
 
-    # 실시간 웹 대시보드 브로드캐스트 시작
-    asyncio.create_task(broadcast_dashboard_state())
-    logger.info("실시간 웹소켓 브로드캐스트 태스크 시작 완료")
+    # [DRY] broadcast_dashboard_state: 프론트는 OKX Public WS 직결 사용 중
+    # 클라이언트 연결 시점에 on-demand 활성화 구조로 대기 (startup 공회전 제거)
+    logger.info("서버 초기화 완료 - 대시보드 WS 브로드캐스트 클라이언트 대기 중")
 
 @app_server.on_event("shutdown")
 async def shutdown_event():
@@ -310,7 +310,7 @@ async def shutdown_event():
     await stop_telegram_bot()
     logger.info("API 서버 종료 - 텔레그램 자원 릴리즈 완료")
 
-def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, manual_prev_state: dict = None):
+async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, manual_prev_state: dict = None):
     """
     외부 수동 청산 감지 후 처리:
       - OKX 체결 영수증에서 실현 PnL 추출
@@ -319,8 +319,6 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
       - 봇 내부 상태를 NONE으로 초기화
     sym_state 는 bot_global_state["symbols"][symbol] 의 참조(reference).
     """
-    import time as _t
-
     if manual_prev_state:
         prev_pos       = manual_prev_state.get("position", "NONE")
         prev_entry     = manual_prev_state.get("entry_price", 0.0)
@@ -354,8 +352,8 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
     history_found = False
     for attempt in range(3):
         try:
-            _t.sleep(1.0 + attempt * 0.5)
-            trades = engine_api.exchange.fetch_my_trades(symbol, limit=20)
+            await asyncio.sleep(1.0 + attempt * 0.5)
+            trades = await asyncio.to_thread(engine_api.exchange.fetch_my_trades, symbol, limit=20)
             closing_side = 'sell' if prev_pos == 'LONG' else 'buy'
             recent_closes = [t for t in trades if t.get('side') == closing_side]
 
@@ -374,7 +372,7 @@ def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: dict, ma
         logger.warning(f"[수동청산 감지] {symbol} 체결 영수증 없음 - PnL 0 으로 기록")
 
     if avg_fill_price == 0:
-        avg_fill_price = engine_api.get_current_price(symbol) or prev_entry
+        avg_fill_price = await asyncio.to_thread(engine_api.get_current_price, symbol) or prev_entry
 
     # ── PnL% 계산 (공식 수익금 기반) ──────────────────────────────────────────────────────────
     try:
@@ -423,6 +421,8 @@ async def async_trading_loop():
 
     engine_api = _engine  # 싱글톤 재사용 (load_markets 재호출 없음)
     strategy_instance = TradingStrategy(initial_seed=75.0)
+    # [v2.2] DB 설정에서 일일 최대 손실율 동기화 (UI에서 변경 가능)
+    strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
 
     if not engine_api or not engine_api.exchange:
         logger.error("OKXEngine 미초기화 상태 - 매매 루프 중단")
@@ -459,7 +459,7 @@ async def async_trading_loop():
                     logger.error(err_msg)
 
             # 잔고 실시간 연동
-            curr_bal = engine_api.get_usdt_balance()
+            curr_bal = await asyncio.to_thread(engine_api.get_usdt_balance)
             bot_global_state["balance"] = round(curr_bal, 2)
 
             # 설정된 심볼 목록 로드
@@ -473,7 +473,7 @@ async def async_trading_loop():
 
             # ── 매 사이클: 거래소 실제 포지션 조회 (수동 청산 감지용) ────────
             try:
-                _exch_pos       = engine_api.get_open_positions()
+                _exch_pos       = await asyncio.to_thread(engine_api.get_open_positions)
                 exchange_open_symbols = {p['symbol'] for p in _exch_pos}
             except Exception as _pos_err:
                 logger.warning(f"거래소 포지션 조회 실패 (수동청산 감지 스킵): {_pos_err}")
@@ -506,9 +506,9 @@ async def async_trading_loop():
                         }
 
                     # OHLCV 데이터 수집 (5분봉, limit=200: ADX/MACD 지표 충분한 캔들 확보)
-                    ohlcv = engine_api.exchange.fetch_ohlcv(symbol, "5m", limit=200)
+                    ohlcv = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, "5m", limit=200)
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                    current_price = engine_api.get_current_price(symbol)
+                    current_price = await asyncio.to_thread(engine_api.get_current_price, symbol)
 
                     bot_global_state["symbols"][symbol]["current_price"] = current_price
 
@@ -517,7 +517,7 @@ async def async_trading_loop():
                             and bot_global_state["symbols"][symbol]["position"] != "NONE"
                             and bot_global_state["symbols"][symbol]["entry_price"] > 0
                             and symbol not in exchange_open_symbols):
-                        _detect_and_handle_manual_close(
+                        await _detect_and_handle_manual_close(
                             engine_api, symbol, bot_global_state["symbols"][symbol]
                         )
                         continue  # 이번 사이클은 신규 진입 시도 없이 다음 심볼로
@@ -582,7 +582,7 @@ async def async_trading_loop():
                                 
                                 # OKX에서 실제 주문 상태 조회
                                 try:
-                                    order_status = engine_api.exchange.fetch_order(pending_id, symbol)
+                                    order_status = await asyncio.to_thread(engine_api.exchange.fetch_order, pending_id, symbol)
                                     status = order_status.get('status')
                                     filled = order_status.get('filled', 0)
                                     
@@ -615,7 +615,7 @@ async def async_trading_loop():
                                         # 취소되었거나 5분 초과 시 -> 주문 취소 및 PENDING 해제 (고스트 오더 방지)
                                         if status not in ['canceled', 'rejected']:
                                             try:
-                                                engine_api.exchange.cancel_order(pending_id, symbol)
+                                                await asyncio.to_thread(engine_api.exchange.cancel_order, pending_id, symbol)
                                             except Exception as cancel_err:
                                                 logger.warning(f"[{symbol}] 미체결 주문 취소 실패 (이미 취소되었을 수 있음): {cancel_err}")
                                                 
@@ -669,14 +669,16 @@ async def async_trading_loop():
 
                                             # 시장가 절반 청산 (Reduce-Only)
                                             if position_side == "LONG":
-                                                partial_order = engine_api.exchange.create_market_sell_order(
+                                                partial_order = await asyncio.to_thread(
+                                                    engine_api.exchange.create_market_sell_order,
                                                     symbol, half_contracts,
-                                                    params={"reduceOnly": True}
+                                                    {"reduceOnly": True}
                                                 )
                                             else:
-                                                partial_order = engine_api.exchange.create_market_buy_order(
+                                                partial_order = await asyncio.to_thread(
+                                                    engine_api.exchange.create_market_buy_order,
                                                     symbol, half_contracts,
-                                                    params={"reduceOnly": True}
+                                                    {"reduceOnly": True}
                                                 )
 
                                             # 상태 업데이트
@@ -718,10 +720,9 @@ async def async_trading_loop():
                                         amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                         
                                         # 1. 실제 거래소 청산 API 호출 (엔진 분리)
-                                        order_id = engine_api.close_position(symbol, position_side, amount)
+                                        order_id = await asyncio.to_thread(engine_api.close_position, symbol, position_side, amount)
                                         
                                         # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 대기
-                                        import time as _t
                                         net_pnl = 0.0
                                         total_gross_pnl = 0.0
                                         total_fee = 0.0
@@ -729,9 +730,9 @@ async def async_trading_loop():
                                         receipt_found = False
                                         
                                         for _attempt in range(5):
-                                            _t.sleep(1.0)
+                                            await asyncio.sleep(1.0)
                                             try:
-                                                trades = engine_api.get_recent_trade_receipts(symbol, limit=20)
+                                                trades = await asyncio.to_thread(engine_api.get_recent_trade_receipts, symbol, limit=20)
                                                 matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
                                                 if matching_trades:
                                                     net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
@@ -849,49 +850,49 @@ async def async_trading_loop():
                                     )
                                 # 레버리지 거래소 적용
                                 try:
-                                    engine_api.exchange.set_leverage(trade_leverage, symbol)
+                                    await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
                                 except Exception as lev_err:
                                     logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
                                 # 진입 방식 (Market vs Smart Limit)
                                 order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')
-                                
+
                                 # 시장가 진입 (OKX Sandbox 50013 에러 방어를 위한 3회 재시도 로직)
                                 order_success = False
                                 last_error = None
                                 executed_price = current_price
                                 pending_order_id = None
-                                
+
                                 for attempt in range(3):
                                     try:
                                         if order_type == 'Smart Limit':
                                             # 호가창 조회 (최우선 매수/매도 호가)
-                                            ob = engine_api.exchange.fetch_order_book(symbol, limit=5)
+                                            ob = await asyncio.to_thread(engine_api.exchange.fetch_order_book, symbol, 5)
                                             best_bid = ob['bids'][0][0] if ob['bids'] else current_price
                                             best_ask = ob['asks'][0][0] if ob['asks'] else current_price
                                             ema_20_val = latest_ema_20 = bot_global_state["symbols"][symbol].get("ema_20", current_price)
                                             if 'ema_20' in df.columns:
                                                 ema_20_val = float(df['ema_20'].iloc[-1])
-                                                
+
                                             if signal == "LONG":
                                                 # LONG: Best Bid와 EMA 20 중 더 높은 가격 (체결 확률 높이기 위함)
                                                 limit_price = max(best_bid, ema_20_val)
                                                 limit_price = round(limit_price, 2) # 소수점 정리
-                                                order = engine_api.exchange.create_limit_buy_order(symbol, trade_amount, limit_price)
+                                                order = await asyncio.to_thread(engine_api.exchange.create_limit_buy_order, symbol, trade_amount, limit_price)
                                                 pending_order_id = order.get('id')
                                                 executed_price = limit_price
                                             else:
                                                 # SHORT: Best Ask와 EMA 20 중 더 낮은 가격
                                                 limit_price = min(best_ask, ema_20_val)
                                                 limit_price = round(limit_price, 2)
-                                                order = engine_api.exchange.create_limit_sell_order(symbol, trade_amount, limit_price)
+                                                order = await asyncio.to_thread(engine_api.exchange.create_limit_sell_order, symbol, trade_amount, limit_price)
                                                 pending_order_id = order.get('id')
                                                 executed_price = limit_price
                                         else:
                                             # 기본 Market 주문
                                             if signal == "LONG":
-                                                order = engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                                                order = await asyncio.to_thread(engine_api.exchange.create_market_buy_order, symbol, trade_amount)
                                             else:
-                                                order = engine_api.exchange.create_market_sell_order(symbol, trade_amount)
+                                                order = await asyncio.to_thread(engine_api.exchange.create_market_sell_order, symbol, trade_amount)
                                                 
                                         order_success = True
                                         break
@@ -1008,20 +1009,22 @@ async def execute_test_order():
             trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
             trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
         else:
-            risk_rate = float(get_config('risk_per_trade') or 0.01)
+            # [DRY] 레거시 calculate_position_size 제거 → 메인루프와 동일한 ATR 기반 동적 사이징 사용
             trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
-            current_price_now = engine_api.get_current_price(symbol) or 1
-            curr_bal_now = engine_api.get_usdt_balance()
-            strategy_tmp = TradingStrategy(initial_seed=75.0)
-            size_btc = strategy_tmp.calculate_position_size(curr_bal_now, risk_rate, current_price_now, trade_leverage)
+            current_price_now = (await asyncio.to_thread(engine_api.get_current_price, symbol)) or 1
+            curr_bal_now = await asyncio.to_thread(engine_api.get_usdt_balance)
             try:
                 contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
             except Exception:
                 contract_size = 0.01
-            trade_amount = max(1, round(size_btc / contract_size))
+            # ATR 조회 불가 시 현재가 1% fallback (test_order는 OKX 연결 상태 검증 목적)
+            strategy_tmp = TradingStrategy(initial_seed=75.0)
+            trade_amount = strategy_tmp.calculate_position_size_dynamic(
+                curr_bal_now, current_price_now * 0.01, trade_leverage, contract_size
+            )
         # 레버리지 거래소 적용
         try:
-            engine_api.exchange.set_leverage(trade_leverage, symbol)
+            await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
         except Exception as lev_err:
             logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
 
@@ -1031,7 +1034,7 @@ async def execute_test_order():
             last_error = None
             for attempt in range(3):
                 try:
-                    engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                    await asyncio.to_thread(engine_api.exchange.create_market_buy_order, symbol, trade_amount)
                     order_success = True
                     break
                 except Exception as api_err:
@@ -1046,7 +1049,7 @@ async def execute_test_order():
                 raise last_error
             
             # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
-            ticker = engine_api.exchange.fetch_ticker(symbol)
+            ticker = await asyncio.to_thread(engine_api.exchange.fetch_ticker, symbol)
             current_price = ticker['last']
             
             # 테스트 진입 로그 기록
@@ -1060,9 +1063,7 @@ async def execute_test_order():
             bot_global_state["symbols"][symbol]["highest_price"] = current_price
             bot_global_state["symbols"][symbol]["lowest_price"] = current_price
             bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 정확한 수량 사용
-            # TP/SL 가격 자동 계산 (LONG 기준: +3% TP, -2% SL)
-            bot_global_state["symbols"][symbol]["take_profit_price"] = round(float(current_price) * 1.03, 2)
-            bot_global_state["symbols"][symbol]["stop_loss_price"] = round(float(current_price) * 0.98, 2)
+            # TP/SL은 매매루프의 evaluate_risk_management(ATR 기반 동적 계산)에서 자동 설정됨
 
             return {"status": "success", "message": test_msg}
 
@@ -1083,25 +1084,14 @@ async def fetch_current_status():
         engine = _engine
         if engine and engine.exchange:
             # 1. 잔고 무조건 갱신 (0이어도 반영 - 초기 로드 0 버그 수정)
-            curr_bal = engine.get_usdt_balance()
+            curr_bal = await asyncio.to_thread(engine.get_usdt_balance)
             bot_global_state["balance"] = round(curr_bal, 2)
 
             # 2. OKX 포지션 Hydration - CCXT ROE(percentage) 직접 바이패스
+            # [DRY] 수동청산 감지는 매매루프(trading loop) 및 Private WS에서 단일 처리
+            # /api/v1/status는 포지션 표시 동기화 전용 — 중복 감지 제거
             try:
-                # 리셋 전 스냅샷: 포지션이 열려있던 심볼 저장 (수동청산 감지용)
-                prev_open = {}
-                for sym in bot_global_state["symbols"]:
-                    s = bot_global_state["symbols"][sym]
-                    if s.get("position", "NONE") not in ("NONE", "") and s.get("entry_price", 0.0) > 0:
-                        prev_open[sym] = {
-                            "position": s["position"],
-                            "entry_price": s["entry_price"],
-                            "contracts": s.get("contracts", 1),
-                            "leverage": int(s.get("leverage", 1)),
-                            "current_price": s.get("current_price", 0.0),
-                        }
-
-                positions = engine.exchange.fetch_positions()
+                positions = await asyncio.to_thread(engine.exchange.fetch_positions)
                 # fetch_positions() 성공한 경우에만 NONE 리셋 (실패 시 기존 포지션 유지)
                 for sym in bot_global_state["symbols"]:
                     bot_global_state["symbols"][sym]["position"] = "NONE"
@@ -1134,22 +1124,6 @@ async def fetch_current_status():
                                 bot_global_state["symbols"][symbol]["unrealized_pnl"] = unrealized
                                 bot_global_state["symbols"][symbol]["leverage"] = leverage
                                 bot_global_state["symbols"][symbol]["contracts"] = contracts
-                                # TP/SL 표시용 복원 (서버 재시작 후 0.00 방지)
-                                if entry > 0 and bot_global_state["symbols"][symbol].get("take_profit_price", 0) == 0:
-                                    if side == 'LONG':
-                                        bot_global_state["symbols"][symbol]["take_profit_price"] = round(entry * 1.03, 2)
-                                        bot_global_state["symbols"][symbol]["stop_loss_price"] = round(entry * 0.98, 2)
-                                    else:
-                                        bot_global_state["symbols"][symbol]["take_profit_price"] = round(entry * 0.97, 2)
-                                        bot_global_state["symbols"][symbol]["stop_loss_price"] = round(entry * 1.02, 2)
-                # 수동청산 감지: 직전에 열려있었으나 OKX REST 조회 후 NONE으로 바뀐 심볼
-                for sym, prev in prev_open.items():
-                    curr_pos = bot_global_state["symbols"][sym].get("position", "NONE")
-                    curr_entry = bot_global_state["symbols"][sym].get("entry_price", 0.0)
-                    # curr_entry > 0: 봇 자체 청산(entry_price=0으로 초기화)이 아님을 확인
-                    if curr_pos == "NONE" and curr_entry > 0:
-                        # 봇 자체 청산이 아닌 외부 수동 청산 감지
-                        _detect_and_handle_manual_close(engine, sym, bot_global_state["symbols"][sym], manual_prev_state=prev)
 
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
@@ -1285,7 +1259,7 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
         if not engine or not engine.exchange:
             return {"error": "거래소 연결 실패"}
 
-        ohlcv = engine.exchange.fetch_ohlcv(symbol, "5m", limit=limit)
+        ohlcv = await asyncio.to_thread(engine.exchange.fetch_ohlcv, symbol, "5m", limit=limit)
         
         # 샌드박스 환경 등에서 데이터가 아예 안 들어올 경우를 대비한 가상 데이터 생성 로직
         if not ohlcv or len(ohlcv) == 0:
@@ -1296,7 +1270,7 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
             import random
             current_time = int(time.time() * 1000)
             mock_ohlcv = []
-            base_price = engine.get_current_price(symbol)
+            base_price = await asyncio.to_thread(engine.get_current_price, symbol)
             if not base_price:
                  base_price = 50000.0  # BTC/USDT 임시 기준가
             
