@@ -215,11 +215,17 @@
                                 onclick="updateOrderType('Smart Limit')">SMART LIMIT 🎯</button>
                         </div>
                     </div>
-                    <!-- 강제 테스트 매수 버튼 -->
-                    <button onclick="testOrder()"
-                        class="mt-4 text-xs w-full py-2 bg-neon-green/20 border border-neon-green hover:bg-neon-green hover:text-navy-900 transition rounded text-neon-green font-mono tracking-widest font-bold">
-                        [테스트 진입 (Test Order)]
-                    </button>
+                    <!-- 강제 테스트 진입 버튼 (LONG / SHORT) -->
+                    <div class="mt-4 flex gap-2">
+                        <button onclick="testOrder('LONG')"
+                            class="flex-1 text-xs py-2 bg-neon-green/20 border border-neon-green hover:bg-neon-green hover:text-navy-900 transition rounded text-neon-green font-mono tracking-widest font-bold">
+                            TEST 롱 📈
+                        </button>
+                        <button onclick="testOrder('SHORT')"
+                            class="flex-1 text-xs py-2 bg-neon-red/20 border border-neon-red hover:bg-neon-red hover:text-navy-900 transition rounded text-neon-red font-mono tracking-widest font-bold">
+                            TEST 숏 📉
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Manual Override -->
@@ -362,10 +368,14 @@
                     <span>Choppiness Index (횡보 탐지)</span>
                     <span id="brain-chop" class="font-mono text-text-main flash-target font-bold">0.0</span>
                 </h3>
-                <div class="w-full bg-navy-900 h-3 rounded-full overflow-hidden relative border border-navy-border shadow-inner">
+                <div
+                    class="w-full bg-navy-900 h-3 rounded-full overflow-hidden relative border border-navy-border shadow-inner">
                     <!-- 위험 구간 배경 (61.8 이상) -->
-                    <div class="absolute inset-0" style="background: linear-gradient(to right, rgba(0,255,136,0.15) 0%, rgba(0,255,136,0.15) 61.8%, rgba(255,77,77,0.25) 61.8%, rgba(255,77,77,0.25) 100%);"></div>
-                    <div id="chop-bar" class="absolute top-0 bottom-0 transition-all duration-500 rounded-full" style="width: 50%; background: #aaa; box-shadow: 0 0 6px #aaa;"></div>
+                    <div class="absolute inset-0"
+                        style="background: linear-gradient(to right, rgba(0,255,136,0.15) 0%, rgba(0,255,136,0.15) 61.8%, rgba(255,77,77,0.25) 61.8%, rgba(255,77,77,0.25) 100%);">
+                    </div>
+                    <div id="chop-bar" class="absolute top-0 bottom-0 transition-all duration-500 rounded-full"
+                        style="width: 50%; background: #aaa; box-shadow: 0 0 6px #aaa;"></div>
                 </div>
                 <div class="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
                     <span>Trending (추세장 &lt; 38.2)</span>
@@ -382,7 +392,8 @@
 
             <!-- [A] 진입 관문 실시간 체크리스트 -->
             <div class="glass-panel p-5">
-                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between items-center">
+                <h3
+                    class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between items-center">
                     <span>⚡ Entry Readiness — 진입 관문</span>
                     <span class="font-mono text-xs">
                         <span id="gates-passed" class="text-neon-green font-bold">0</span>
@@ -391,31 +402,38 @@
                 </h3>
                 <!-- 준비도 바 -->
                 <div class="w-full bg-navy-900 h-2 rounded-full overflow-hidden border border-navy-border mb-3">
-                    <div id="gates-bar" class="h-full bg-neon-green transition-all duration-700 rounded-full" style="width:0%;box-shadow:0 0 6px rgba(0,255,136,0.5);"></div>
+                    <div id="gates-bar" class="h-full bg-neon-green transition-all duration-700 rounded-full"
+                        style="width:0%;box-shadow:0 0 6px rgba(0,255,136,0.5);"></div>
                 </div>
                 <!-- 관문 목록 -->
                 <div class="grid grid-cols-2 gap-x-4 gap-y-1.5" id="gates-list">
-                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                    <div
+                        class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">ADX 추세강도</span>
                         <span id="gate-adx" class="text-gray-600">--</span>
                     </div>
-                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                    <div
+                        class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">CHOP 횡보탐지</span>
                         <span id="gate-chop" class="text-gray-600">--</span>
                     </div>
-                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                    <div
+                        class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">거래량 폭발</span>
                         <span id="gate-volume" class="text-gray-600">--</span>
                     </div>
-                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                    <div
+                        class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">EMA20 이격도</span>
                         <span id="gate-disparity" class="text-gray-600">--</span>
                     </div>
-                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                    <div
+                        class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">MACD+RSI</span>
                         <span id="gate-macd-rsi" class="text-gray-600">--</span>
                     </div>
-                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                    <div
+                        class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">EMA200 거시추세</span>
                         <span id="gate-macro" class="text-gray-600">--</span>
                     </div>
@@ -424,7 +442,8 @@
 
             <!-- [B] 봇 혼잣말 라이브 피드 -->
             <div class="glass-panel p-5">
-                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between items-center">
+                <h3
+                    class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between items-center">
                     <span>🤖 Bot Monologue — 봇 혼잣말</span>
                     <span class="text-neon-green text-[10px] animate-pulse">● LIVE</span>
                 </h3>

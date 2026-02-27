@@ -416,6 +416,60 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     send_telegram_sync(_tg_manual_exit(symbol, prev_pos, avg_fill_price, total_gross, total_fee, pnl_amount, pnl_pct))
 
 
+async def execute_entry_order(engine_api, symbol: str, signal: str, trade_amount: int, order_type: str, current_price: float, ema_20_val: float = None):
+    """
+    [DRY] Market / Smart Limit 진입 주문 실행 헬퍼.
+    Returns (executed_price, pending_order_id)
+      - Market  → (current_price, None)
+      - Smart Limit → (limit_price, order_id)
+    3회 재시도(50013 방어) 포함. 실패 시 예외를 raise 한다.
+    """
+    if ema_20_val is None:
+        ema_20_val = current_price
+
+    order_success = False
+    last_error = None
+    executed_price = current_price
+    pending_order_id = None
+
+    for attempt in range(3):
+        try:
+            if order_type == 'Smart Limit':
+                ob = await asyncio.to_thread(engine_api.exchange.fetch_order_book, symbol, 5)
+                best_bid = ob['bids'][0][0] if ob['bids'] else current_price
+                best_ask = ob['asks'][0][0] if ob['asks'] else current_price
+
+                if signal == "LONG":
+                    limit_price = round(max(best_bid, ema_20_val), 2)
+                    order = await asyncio.to_thread(engine_api.exchange.create_limit_buy_order, symbol, trade_amount, limit_price)
+                else:
+                    limit_price = round(min(best_ask, ema_20_val), 2)
+                    order = await asyncio.to_thread(engine_api.exchange.create_limit_sell_order, symbol, trade_amount, limit_price)
+
+                pending_order_id = order.get('id')
+                executed_price = limit_price
+            else:
+                if signal == "LONG":
+                    order = await asyncio.to_thread(engine_api.exchange.create_market_buy_order, symbol, trade_amount)
+                else:
+                    order = await asyncio.to_thread(engine_api.exchange.create_market_sell_order, symbol, trade_amount)
+
+            order_success = True
+            break
+        except Exception as api_err:
+            last_error = api_err
+            if "50013" in str(api_err):
+                logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
+                await asyncio.sleep(0.5)
+            else:
+                raise api_err
+
+    if not order_success:
+        raise last_error
+
+    return executed_price, pending_order_id
+
+
 async def async_trading_loop():
     """다중 심볼 백그라운드 매매 루프"""
     global bot_global_state, ai_brain_state, _trading_task
@@ -936,57 +990,12 @@ async def async_trading_loop():
                                     logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
                                 # 진입 방식 (Market vs Smart Limit)
                                 order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')
+                                ema_20_val = float(df['ema_20'].iloc[-1]) if 'ema_20' in df.columns and not pd.isna(df['ema_20'].iloc[-1]) else current_price
 
-                                # 시장가 진입 (OKX Sandbox 50013 에러 방어를 위한 3회 재시도 로직)
-                                order_success = False
-                                last_error = None
-                                executed_price = current_price
-                                pending_order_id = None
-
-                                for attempt in range(3):
-                                    try:
-                                        if order_type == 'Smart Limit':
-                                            # 호가창 조회 (최우선 매수/매도 호가)
-                                            ob = await asyncio.to_thread(engine_api.exchange.fetch_order_book, symbol, 5)
-                                            best_bid = ob['bids'][0][0] if ob['bids'] else current_price
-                                            best_ask = ob['asks'][0][0] if ob['asks'] else current_price
-                                            ema_20_val = latest_ema_20 = bot_global_state["symbols"][symbol].get("ema_20", current_price)
-                                            if 'ema_20' in df.columns:
-                                                ema_20_val = float(df['ema_20'].iloc[-1])
-
-                                            if signal == "LONG":
-                                                # LONG: Best Bid와 EMA 20 중 더 높은 가격 (체결 확률 높이기 위함)
-                                                limit_price = max(best_bid, ema_20_val)
-                                                limit_price = round(limit_price, 2) # 소수점 정리
-                                                order = await asyncio.to_thread(engine_api.exchange.create_limit_buy_order, symbol, trade_amount, limit_price)
-                                                pending_order_id = order.get('id')
-                                                executed_price = limit_price
-                                            else:
-                                                # SHORT: Best Ask와 EMA 20 중 더 낮은 가격
-                                                limit_price = min(best_ask, ema_20_val)
-                                                limit_price = round(limit_price, 2)
-                                                order = await asyncio.to_thread(engine_api.exchange.create_limit_sell_order, symbol, trade_amount, limit_price)
-                                                pending_order_id = order.get('id')
-                                                executed_price = limit_price
-                                        else:
-                                            # 기본 Market 주문
-                                            if signal == "LONG":
-                                                order = await asyncio.to_thread(engine_api.exchange.create_market_buy_order, symbol, trade_amount)
-                                            else:
-                                                order = await asyncio.to_thread(engine_api.exchange.create_market_sell_order, symbol, trade_amount)
-                                                
-                                        order_success = True
-                                        break
-                                    except Exception as api_err:
-                                        last_error = api_err
-                                        if "50013" in str(api_err):
-                                            logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
-                                            await asyncio.sleep(0.5)
-                                        else:
-                                            raise api_err
-                                
-                                if not order_success:
-                                    raise last_error
+                                # [DRY] 단일 헬퍼로 주문 실행
+                                executed_price, pending_order_id = await execute_entry_order(
+                                    engine_api, symbol, signal, trade_amount, order_type, current_price, ema_20_val
+                                )
 
                                 # 포지션 상태 업데이트 (Smart Limit인 경우 PENDING 상태로 대기)
                                 if order_type == 'Smart Limit':
@@ -1058,9 +1067,13 @@ async def async_trading_loop():
 # ===== 기존 엔드포인트 (하위 호환) =====
 
 @app_server.post("/api/v1/test_order")
-async def execute_test_order():
-    """강제 테스트 매수 (Market Buy) 실행 엔드포인트"""
+async def execute_test_order(direction: str = "LONG"):
+    """강제 테스트 진입 (LONG/SHORT + Market/Smart Limit 지원) 엔드포인트"""
     try:
+        signal = direction.upper()
+        if signal not in ("LONG", "SHORT"):
+            return {"error": f"잘못된 direction 값: {direction}. LONG 또는 SHORT만 허용됩니다."}
+
         if not bot_global_state["is_running"]:
             return {"error": "시스템이 중지되어 있습니다. 먼저 가동해 주세요."}
             
@@ -1076,7 +1089,7 @@ async def execute_test_order():
 
         # 포지션이 이미 있을 경우 방어
         if bot_global_state["symbols"][symbol]["position"] != "NONE":
-            err_msg = "[오류] 이미 포지션을 보유 중이어서 테스트 매수를 진행할 수 없습니다."
+            err_msg = "[오류] 이미 포지션을 보유 중이어서 테스트 진입을 진행할 수 없습니다."
             bot_global_state["logs"].append(err_msg)
             return {"error": "이미 포지션이 존재합니다."}
 
@@ -1090,7 +1103,6 @@ async def execute_test_order():
             trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
             trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
         else:
-            # [DRY] 레거시 calculate_position_size 제거 → 메인루프와 동일한 ATR 기반 동적 사이징 사용
             trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
             current_price_now = (await asyncio.to_thread(engine_api.get_current_price, symbol)) or 1
             curr_bal_now = await asyncio.to_thread(engine_api.get_usdt_balance)
@@ -1098,7 +1110,6 @@ async def execute_test_order():
                 contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
             except Exception:
                 contract_size = 0.01
-            # ATR 조회 불가 시 현재가 1% fallback (test_order는 OKX 연결 상태 검증 목적)
             strategy_tmp = TradingStrategy(initial_seed=75.0)
             trade_amount = strategy_tmp.calculate_position_size_dynamic(
                 curr_bal_now, current_price_now * 0.01, trade_leverage, contract_size
@@ -1109,47 +1120,48 @@ async def execute_test_order():
         except Exception as lev_err:
             logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
 
+        # 진입 방식 (Market vs Smart Limit) — 설정 존중
+        order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')
+        current_price = (await asyncio.to_thread(engine_api.get_current_price, symbol)) or 0
+
         try:
-            # 시장가 매수 (OKX Sandbox 50013 에러 방어를 위한 3회 재시도 로직)
-            order_success = False
-            last_error = None
-            for attempt in range(3):
-                try:
-                    await asyncio.to_thread(engine_api.exchange.create_market_buy_order, symbol, trade_amount)
-                    order_success = True
-                    break
-                except Exception as api_err:
-                    last_error = api_err
-                    if "50013" in str(api_err):
-                        logger.warning(f"[{symbol}] OKX Sandbox 50013 에러(시스템 바쁨). 0.5초 후 재시도 ({attempt+1}/3)")
-                        await asyncio.sleep(0.5)
-                    else:
-                        raise api_err
-            
-            if not order_success:
-                raise last_error
-            
-            # 포지션 상태 억지로 반영 (다음 루프에서 동기화될 임시값)
-            ticker = await asyncio.to_thread(engine_api.exchange.fetch_ticker, symbol)
-            current_price = ticker['last']
-            
-            # 테스트 진입 로그 기록
-            test_msg = f"📈 [{symbol}] 테스트 매수(LONG) 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
+            # [DRY] 단일 헬퍼로 주문 실행
+            executed_price, pending_order_id = await execute_entry_order(
+                engine_api, symbol, signal, trade_amount, order_type, current_price
+            )
+
+            # 포지션 상태 갱신 (Smart Limit → PENDING, Market → 즉시 반영)
+            if order_type == 'Smart Limit' and pending_order_id:
+                import time
+                bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
+                bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
+                bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
+                bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
+                bot_global_state["symbols"][symbol]["pending_price"] = executed_price
+                bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+
+                entry_emoji = "⏳📈" if signal == "LONG" else "⏳📉"
+                test_msg = f"{entry_emoji} [{symbol}] 테스트 {signal} 스마트 지정가 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 | {trade_leverage}x"
+            else:
+                bot_global_state["symbols"][symbol]["position"] = signal
+                bot_global_state["symbols"][symbol]["entry_price"] = executed_price or current_price
+                bot_global_state["symbols"][symbol]["highest_price"] = executed_price or current_price
+                bot_global_state["symbols"][symbol]["lowest_price"] = executed_price or current_price
+                bot_global_state["symbols"][symbol]["contracts"] = trade_amount
+                bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+
+                entry_emoji = "📈" if signal == "LONG" else "📉"
+                test_msg = f"{entry_emoji} [{symbol}] 테스트 {signal} 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
+
             bot_global_state["logs"].append(test_msg)
             logger.info(test_msg)
-            send_telegram_sync(_tg_entry(symbol, "LONG", current_price, trade_amount, trade_leverage, is_test=True))
-            
-            bot_global_state["symbols"][symbol]["position"] = "LONG"
-            bot_global_state["symbols"][symbol]["entry_price"] = current_price
-            bot_global_state["symbols"][symbol]["highest_price"] = current_price
-            bot_global_state["symbols"][symbol]["lowest_price"] = current_price
-            bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 정확한 수량 사용
-            # TP/SL은 매매루프의 evaluate_risk_management(ATR 기반 동적 계산)에서 자동 설정됨
+            send_telegram_sync(_tg_entry(symbol, signal, executed_price or current_price, trade_amount, trade_leverage, is_test=True))
 
             return {"status": "success", "message": test_msg}
 
         except Exception as e:
-            error_msg = f"[{symbol}] 테스트 매수 주문 자체 실패: {str(e)}"
+            error_msg = f"[{symbol}] 테스트 {signal} 주문 실패: {str(e)}"
             bot_global_state["logs"].append(error_msg)
             logger.error(error_msg)
             return {"error": str(e)}
