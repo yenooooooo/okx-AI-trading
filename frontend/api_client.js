@@ -817,8 +817,10 @@ function applyShadowModeVisuals(enabled) {
     const watermark = document.getElementById('shadow-watermark');
     const header = document.querySelector('header');
     const status = document.getElementById('shadow-mode-status');
+    const closeBtn = document.getElementById('btn-close-paper');
     if (watermark) watermark.classList.toggle('active', enabled);
     if (header) header.classList.toggle('shadow-active-glow', enabled);
+    if (closeBtn) closeBtn.classList.toggle('hidden', !enabled);
     if (status) {
         status.textContent = enabled
             ? '활성 — 가상 매매 모드 (OKX API 미실행, PnL 시뮬레이션)'
@@ -838,6 +840,20 @@ async function toggleShadowMode() {
     } catch (error) {
         console.error('Shadow mode toggle failed:', error);
         if (toggle) toggle.checked = !enabled; // 롤백
+    }
+}
+
+async function closePaperPosition() {
+    if (!confirm('Paper 포지션을 현재가 기준으로 강제 청산하시겠습니까?')) return;
+    try {
+        const response = await fetch(`${API_URL}/close_paper`, { method: 'POST' });
+        const result = await response.json();
+        if (result.error) throw new Error(result.error);
+        alert('👻 Paper 포지션 청산 완료. 터미널 로그를 확인하세요.');
+        updateLogs();
+        syncBotStatus();
+    } catch (error) {
+        alert('Paper 청산 실패: ' + error.message);
     }
 }
 

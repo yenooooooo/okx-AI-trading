@@ -1215,6 +1215,74 @@ async def execute_test_order(direction: str = "LONG"):
     except Exception as e:
          return {"error": f"서버 오류: {str(e)}"}
 
+@app_server.post("/api/v1/close_paper")
+async def close_paper_position():
+    """[Shadow Mode] Paper 포지션 수동 강제 청산 엔드포인트"""
+    try:
+        symbol = list(bot_global_state["symbols"].keys())[0] if bot_global_state["symbols"] else None
+        if not symbol:
+            return {"error": "활성 심볼이 없습니다."}
+
+        sym_state = bot_global_state["symbols"].get(symbol, {})
+        position_side = sym_state.get("position", "NONE")
+
+        if position_side == "NONE":
+            return {"error": "청산할 포지션이 없습니다."}
+
+        if not sym_state.get("is_paper", False):
+            return {"error": "Paper 포지션이 아닙니다. 실전 포지션은 OKX에서 직접 청산하세요."}
+
+        # 현재가 조회
+        engine_api = _engine
+        if engine_api and engine_api.exchange:
+            current_price = (await asyncio.to_thread(engine_api.get_current_price, symbol)) or 0
+        else:
+            current_price = sym_state.get("current_price", 0)
+
+        entry = sym_state.get("entry_price", 0)
+        amount = int(sym_state.get("contracts", 1))
+        leverage = int(sym_state.get("leverage", 1))
+
+        # 가상 PnL 시뮬레이션 (매매루프 Paper 청산과 동일한 공식)
+        try:
+            contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01)) if engine_api else 0.01
+        except Exception:
+            contract_size = 0.01
+
+        position_value = entry * amount * contract_size
+        if position_side == "LONG":
+            total_gross = (current_price - entry) * amount * contract_size
+        else:
+            total_gross = (entry - current_price) * amount * contract_size
+        total_fee = -(position_value * 0.0005 * 2)
+        pnl_amount = total_gross + total_fee
+        pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
+
+        # DB 저장 차단 (Paper → save_trade 절대 호출 안함)
+
+        # 로깅
+        emoji = "✅" if pnl_percent >= 0 else "🔴"
+        msg = f"[👻 PAPER] {emoji} [{symbol}] {position_side} 수동 청산 | 체결가: ${current_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_percent:+.2f}%"
+        bot_global_state["logs"].append(msg)
+        logger.info(msg)
+        send_telegram_sync(f"[👻 PAPER] {emoji} 수동 청산\n코인: {symbol} {position_side}\n체결가: ${current_price:.2f}\n순수익: {pnl_amount:+.4f} USDT ({pnl_percent:+.2f}%)")
+
+        # 상태 초기화
+        sym_state["position"] = "NONE"
+        sym_state["entry_price"] = 0.0
+        sym_state["take_profit_price"] = 0.0
+        sym_state["stop_loss_price"] = 0.0
+        sym_state["real_sl"] = 0.0
+        sym_state["trailing_active"] = False
+        sym_state["trailing_target"] = 0.0
+        sym_state["partial_tp_executed"] = False
+        sym_state["is_paper"] = False
+
+        return {"status": "success", "message": msg}
+
+    except Exception as e:
+        return {"error": f"서버 오류: {str(e)}"}
+
 @app_server.get("/api/v1/status")
 async def fetch_current_status():
     """현재 봇 상태 반환 (OKX 실시간 데이터 강제 동기화)"""
