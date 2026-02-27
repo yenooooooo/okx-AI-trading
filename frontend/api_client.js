@@ -23,8 +23,8 @@ function showToast(title, message, type) {
 
     const themes = {
         SUCCESS: { border: '#00ff88', titleColor: '#00ff88', icon: '✅', bg: 'rgba(0,255,136,0.06)' },
-        ERROR:   { border: '#ff4d4d', titleColor: '#ff4d4d', icon: '🚨', bg: 'rgba(255,77,77,0.06)' },
-        INFO:    { border: '#60a5fa', titleColor: '#60a5fa', icon: '⚡', bg: 'rgba(96,165,250,0.06)' },
+        ERROR: { border: '#ff4d4d', titleColor: '#ff4d4d', icon: '🚨', bg: 'rgba(255,77,77,0.06)' },
+        INFO: { border: '#60a5fa', titleColor: '#60a5fa', icon: '⚡', bg: 'rgba(96,165,250,0.06)' },
     };
     const t = themes[type] || themes.INFO;
 
@@ -501,48 +501,48 @@ async function toggleBot() {
 const PRESET_CONFIGS = {
     sniper: {
         adx_threshold: 30.0, adx_max: 45.0, chop_threshold: 55.0,
-        volume_surge_multiplier: 2.0,  fee_margin: 0.002,
-        hard_stop_loss_rate: 0.008,    trailing_stop_activation: 0.005,
-        trailing_stop_rate: 0.003,     cooldown_losses_trigger: 2,  cooldown_duration_sec: 1800,
+        volume_surge_multiplier: 2.0, fee_margin: 0.002,
+        hard_stop_loss_rate: 0.008, trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.003, cooldown_losses_trigger: 2, cooldown_duration_sec: 1800,
     },
     trend_rider: {
         adx_threshold: 25.0, adx_max: 60.0, chop_threshold: 58.0,
-        volume_surge_multiplier: 1.3,  fee_margin: 0.001,
-        hard_stop_loss_rate: 0.010,    trailing_stop_activation: 0.005,
-        trailing_stop_rate: 0.004,     cooldown_losses_trigger: 4,  cooldown_duration_sec: 600,
+        volume_surge_multiplier: 1.3, fee_margin: 0.001,
+        hard_stop_loss_rate: 0.010, trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.004, cooldown_losses_trigger: 4, cooldown_duration_sec: 600,
     },
     scalper: {
         adx_threshold: 20.0, adx_max: 50.0, chop_threshold: 65.0,
-        volume_surge_multiplier: 1.2,  fee_margin: 0.002,
-        hard_stop_loss_rate: 0.003,    trailing_stop_activation: 0.002,
-        trailing_stop_rate: 0.001,     cooldown_losses_trigger: 5,  cooldown_duration_sec: 300,
+        volume_surge_multiplier: 1.2, fee_margin: 0.002,
+        hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.002,
+        trailing_stop_rate: 0.001, cooldown_losses_trigger: 5, cooldown_duration_sec: 300,
     },
     iron_dome: {
         adx_threshold: 28.0, adx_max: 42.0, chop_threshold: 50.0,
-        volume_surge_multiplier: 2.5,  fee_margin: 0.002,
-        hard_stop_loss_rate: 0.004,    trailing_stop_activation: 0.004,
-        trailing_stop_rate: 0.002,     cooldown_losses_trigger: 2,  cooldown_duration_sec: 3600,
+        volume_surge_multiplier: 2.5, fee_margin: 0.002,
+        hard_stop_loss_rate: 0.004, trailing_stop_activation: 0.004,
+        trailing_stop_rate: 0.002, cooldown_losses_trigger: 2, cooldown_duration_sec: 3600,
     },
     factory_reset: {
         adx_threshold: 25.0, adx_max: 40.0, chop_threshold: 61.8,
-        volume_surge_multiplier: 1.5,  fee_margin: 0.0015,
-        hard_stop_loss_rate: 0.005,    trailing_stop_activation: 0.003,
-        trailing_stop_rate: 0.002,     cooldown_losses_trigger: 3,  cooldown_duration_sec: 900,
+        volume_surge_multiplier: 1.5, fee_margin: 0.0015,
+        hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.003,
+        trailing_stop_rate: 0.002, cooldown_losses_trigger: 3, cooldown_duration_sec: 900,
     },
 };
 
 // 튜닝 파라미터 맵 — syncConfig() 와 saveTuningConfig() 공유 단일 진실 소스
 const TUNING_INPUT_MAP = {
-    'adx_threshold':            { id: 'tuning-adx-threshold',       parse: parseFloat },
-    'adx_max':                  { id: 'tuning-adx-max',             parse: parseFloat },
-    'chop_threshold':           { id: 'tuning-chop-threshold',      parse: parseFloat },
-    'volume_surge_multiplier':  { id: 'tuning-volume-surge',        parse: parseFloat },
-    'fee_margin':               { id: 'tuning-fee-margin',          parse: parseFloat },
-    'hard_stop_loss_rate':      { id: 'tuning-hard-stop-loss',      parse: parseFloat },
+    'adx_threshold': { id: 'tuning-adx-threshold', parse: parseFloat },
+    'adx_max': { id: 'tuning-adx-max', parse: parseFloat },
+    'chop_threshold': { id: 'tuning-chop-threshold', parse: parseFloat },
+    'volume_surge_multiplier': { id: 'tuning-volume-surge', parse: parseFloat },
+    'fee_margin': { id: 'tuning-fee-margin', parse: parseFloat },
+    'hard_stop_loss_rate': { id: 'tuning-hard-stop-loss', parse: parseFloat },
     'trailing_stop_activation': { id: 'tuning-trailing-activation', parse: parseFloat },
-    'trailing_stop_rate':       { id: 'tuning-trailing-rate',       parse: parseFloat },
-    'cooldown_losses_trigger':  { id: 'tuning-cooldown-losses',     parse: parseInt   },
-    'cooldown_duration_sec':    { id: 'tuning-cooldown-duration',   parse: parseInt   },
+    'trailing_stop_rate': { id: 'tuning-trailing-rate', parse: parseFloat },
+    'cooldown_losses_trigger': { id: 'tuning-cooldown-losses', parse: parseInt },
+    'cooldown_duration_sec': { id: 'tuning-cooldown-duration', parse: parseInt },
 };
 
 // --- Config Sync ---
@@ -631,10 +631,13 @@ async function applyPreset(presetName) {
     await saveTuningConfig();
 }
 
-function openTuningModal() {
+async function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
+    // 모달 오픈 시 서버에서 최신 설정값을 즉시 가져와 입력창 갱신
+    await syncConfig();
 }
+
 
 function closeTuningModal() {
     const modal = document.getElementById('tuning-modal');
@@ -848,11 +851,11 @@ async function syncChart() {
 
                         if (!isNaN(entryTs)) {
                             markers.push({
-                                time:     entryTs,
+                                time: entryTs,
                                 position: posType === 'LONG' ? 'belowBar' : 'aboveBar',
-                                color:    posType === 'LONG' ? '#00ff88' : '#ff4d4d',
-                                shape:    posType === 'LONG' ? 'arrowUp'  : 'arrowDown',
-                                text:     posType === 'LONG' ? '🟢 LONG 진입' : '🔴 SHORT 진입',
+                                color: posType === 'LONG' ? '#00ff88' : '#ff4d4d',
+                                shape: posType === 'LONG' ? 'arrowUp' : 'arrowDown',
+                                text: posType === 'LONG' ? '🟢 LONG 진입' : '🔴 SHORT 진입',
                             });
                         }
                     }
@@ -866,11 +869,11 @@ async function syncChart() {
                         if (!isNaN(exitTs)) {
                             const isProfit = pnl >= 0;
                             markers.push({
-                                time:     exitTs,
+                                time: exitTs,
                                 position: posType === 'LONG' ? 'aboveBar' : 'belowBar',
-                                color:    isProfit ? '#00ff88' : '#ff4d4d',
-                                shape:    'circle',
-                                text:     isProfit ? '✅ 익절' : '💀 손절',
+                                color: isProfit ? '#00ff88' : '#ff4d4d',
+                                shape: 'circle',
+                                text: isProfit ? '✅ 익절' : '💀 손절',
                             });
                         }
                     }
@@ -1062,11 +1065,11 @@ async function updateLogs() {
 
             // ── 토스트 트리거 (초기 로드 폭탄 방어: isInitialLogLoad가 false일 때만) ──
             if (!isInitialLogLoad) {
-                const isClear  = msg.includes('청산');
+                const isClear = msg.includes('청산');
                 const isProfit = msg.includes('+') || msg.includes('수익률: +');
-                const isLoss   = msg.includes('-');
-                const isEntry  = msg.includes('진입 성공');
-                const isAlert  = msg.includes('킬스위치') || msg.includes('쿨다운');
+                const isLoss = msg.includes('-');
+                const isEntry = msg.includes('진입 성공');
+                const isAlert = msg.includes('킬스위치') || msg.includes('쿨다운');
 
                 if (isClear && isProfit) {
                     showToast('TAKE PROFIT (익절)', msg, 'SUCCESS');
@@ -1642,9 +1645,9 @@ function renderHeatmap(dailyData) {
 
     // ── 색상 스케일 기준값 산출 (빈 배열 안전 처리) ──
     const profits = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v > 0);
-    const losses  = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v < 0);
+    const losses = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v < 0);
     const maxProfit = profits.length > 0 ? Math.max(...profits) : 1;
-    const maxLoss   = losses.length  > 0 ? Math.abs(Math.min(...losses)) : 1;
+    const maxLoss = losses.length > 0 ? Math.abs(Math.min(...losses)) : 1;
 
     function _cellColor(dateStr) {
         const d = pnlMap[dateStr];
@@ -1653,13 +1656,13 @@ function renderHeatmap(dailyData) {
         if (pnl > 0) {
             const r = Math.min(pnl / maxProfit, 1);
             if (r < 0.25) return '#0e4429';
-            if (r < 0.5)  return '#006d32';
+            if (r < 0.5) return '#006d32';
             if (r < 0.75) return '#26a641';
             return '#39d353';
         } else {
             const r = Math.min(Math.abs(pnl) / maxLoss, 1);
             if (r < 0.25) return '#3d0000';
-            if (r < 0.5)  return '#7a0000';
+            if (r < 0.5) return '#7a0000';
             if (r < 0.75) return '#b00020';
             return '#ff4d4d';
         }
@@ -1667,7 +1670,7 @@ function renderHeatmap(dailyData) {
 
     // ── 날짜 범위 생성: KST 기준 오늘부터 26주(182일) 전까지 ──
     // KST 오늘 날짜를 UTC Date 객체로 계산
-    const kstNow  = new Date(Date.now() + 9 * 3600 * 1000);
+    const kstNow = new Date(Date.now() + 9 * 3600 * 1000);
     const todayKst = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()));
     const todayStr = todayKst.toISOString().split('T')[0];
 
@@ -1700,8 +1703,8 @@ function renderHeatmap(dailyData) {
                 html += `<div style="width:11px;height:11px;border-radius:2px;background:transparent;"></div>`;
                 return;
             }
-            const color  = _cellColor(dateStr);
-            const d      = pnlMap[dateStr];
+            const color = _cellColor(dateStr);
+            const d = pnlMap[dateStr];
             const pnlVal = d ? d.net_pnl : 0;
             const pnlStr = pnlVal >= 0 ? `+${pnlVal.toFixed(2)}` : `${pnlVal.toFixed(2)}`;
             const trades = d ? d.total_trades : 0;
@@ -1726,7 +1729,7 @@ function renderHeatmap(dailyData) {
             tooltip.textContent = cell.dataset.label;
             tooltip.classList.remove('hidden');
             tooltip.style.left = (e.clientX + 14) + 'px';
-            tooltip.style.top  = (e.clientY - 32) + 'px';
+            tooltip.style.top = (e.clientY - 32) + 'px';
         });
         cell.addEventListener('mouseleave', () => {
             tooltip.classList.add('hidden');
@@ -1737,7 +1740,7 @@ function renderHeatmap(dailyData) {
 /** history_stats를 fetch 후 히트맵 렌더링 (페이지 로드 & 주기적 갱신용) */
 async function fetchAndRenderHeatmap() {
     try {
-        const res  = await fetch(`${API_URL}/history_stats`);
+        const res = await fetch(`${API_URL}/history_stats`);
         const data = await res.json();
         // 모달이 열려있을 경우 테이블도 함께 갱신 (데이터 일관성)
         if (_historyData === null) _historyData = data;
