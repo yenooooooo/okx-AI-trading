@@ -590,7 +590,10 @@ async def async_trading_loop():
                     bot_global_state["symbols"][symbol]["current_price"] = current_price
 
                     # ── 수동 청산 감지: 내부엔 포지션이 있는데 거래소엔 없으면 외부 청산 ──
+                    # [Shadow Mode] Paper 포지션은 거래소에 실제 포지션이 없으므로 감지 대상에서 제외
+                    _sym_is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
                     if (exchange_open_symbols is not None
+                            and not _sym_is_paper
                             and bot_global_state["symbols"][symbol]["position"] != "NONE"
                             and bot_global_state["symbols"][symbol]["entry_price"] > 0
                             and symbol not in exchange_open_symbols):
