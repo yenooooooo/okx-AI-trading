@@ -3,6 +3,7 @@ import json
 import hmac
 import hashlib
 import base64
+import os
 import time as _time
 import uvicorn
 import pandas as pd
