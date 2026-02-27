@@ -1384,8 +1384,8 @@ async def fetch_system_logs(limit: int = 50, after_id: int = 0):
 
 @app_server.get("/api/v1/system_health")
 async def fetch_system_health():
-    """시스템 헬스 체크: OKX API, 텔레그램, 엔진 상태 리턴"""
-    # 1. OKX API 연결 상태
+    """시스템 헬스 체크: OKX API, 텔레그램 실 통신, 엔진 상태 리턴"""
+    # 1. OKX API 연결 상태 — fetch_balance() 실 통신
     okx_connected = False
     try:
         if _engine and _engine.exchange:
@@ -1394,11 +1394,30 @@ async def fetch_system_health():
     except Exception:
         okx_connected = False
 
-    # 2. 텔레그램 보트 연결 상태
+    # 2. 텔레그램 실제 API 핑 — bot.get_me() 로 토큰 + 네트워크 양방향 검증
+    #    단순 객체 존재 여부(表面)가 아닌, Telegram 서버 응답 성공 여부(실질) 확인
     from notifier import _telegram_app, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-    telegram_connected = bool(_telegram_app and _telegram_app.bot and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+    telegram_connected = False
+    telegram_bot_name = ""
+    try:
+        if _telegram_app and _telegram_app.bot:
+            me = await _telegram_app.bot.get_me()
+            telegram_connected = True
+            telegram_bot_name = f"@{me.username}" if me else ""
+        elif TELEGRAM_BOT_TOKEN:
+            # _telegram_app 미초기화 시 httpx로 직접 핑
+            import httpx
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    telegram_connected = True
+                    telegram_bot_name = "@" + resp.json()["result"].get("username", "")
+    except Exception as tg_err:
+        logger.warning(f"Telegram 헬스 체크 실패: {tg_err}")
+        telegram_connected = False
 
-    # 3. 매매 엔진 동작 상태
+    # 3. AI 매매 엔진 동작 상태
     strategy_running = bool(
         bot_global_state.get("is_running", False) and
         _trading_task is not None and
@@ -1408,8 +1427,10 @@ async def fetch_system_health():
     return {
         "okx_connected": okx_connected,
         "telegram_connected": telegram_connected,
+        "telegram_bot_name": telegram_bot_name,
         "strategy_engine_running": strategy_running
     }
+
 
 if __name__ == "__main__":
     uvicorn.run("api_server:app_server", host="0.0.0.0", port=8000, reload=False)

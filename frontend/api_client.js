@@ -790,20 +790,20 @@ function initPriceWebSocket() {
 
 
 
-// --- System Health Check ---
+// --- System Health Check (실제 API 핑 기반 — 표면 체크 아님) ---
 async function syncSystemHealth() {
     try {
         const res = await fetch(`${API_URL}/system_health`);
         if (!res.ok) return;
         const data = await res.json();
 
-        function applyBadge(dotId, textId, connected, label) {
+        function applyBadge(dotId, textId, connected, connectedLabel) {
             const dot = document.getElementById(dotId);
             const text = document.getElementById(textId);
             if (!dot || !text) return;
             if (connected) {
                 dot.className = 'w-2 h-2 rounded-full bg-neon-green animate-pulse transition-colors duration-500';
-                text.textContent = 'Connected';
+                text.textContent = connectedLabel || 'Connected';
                 text.className = 'text-[10px] font-mono text-neon-green';
             } else {
                 dot.className = 'w-2 h-2 rounded-full bg-red-500 transition-colors duration-500';
@@ -812,9 +812,13 @@ async function syncSystemHealth() {
             }
         }
 
-        applyBadge('badge-okx-dot', 'badge-okx-text', data.okx_connected, 'OKX API');
-        applyBadge('badge-tg-dot', 'badge-tg-text', data.telegram_connected, 'Telegram');
-        applyBadge('badge-engine-dot', 'badge-engine-text', data.strategy_engine_running, 'AI Engine');
+        applyBadge('badge-okx-dot', 'badge-okx-text', data.okx_connected, 'Connected');
+        // Telegram: 실제 봇 이름도 표시 (빈 문자열이면 그냥 Connected)
+        const tgLabel = data.telegram_connected
+            ? (data.telegram_bot_name ? data.telegram_bot_name : 'Connected')
+            : 'Disconnected';
+        applyBadge('badge-tg-dot', 'badge-tg-text', data.telegram_connected, tgLabel);
+        applyBadge('badge-engine-dot', 'badge-engine-text', data.strategy_engine_running, 'Running');
 
         const ts = document.getElementById('health-last-checked');
         if (ts) ts.textContent = `Last checked: ${new Date().toLocaleTimeString('ko-KR')}`;
