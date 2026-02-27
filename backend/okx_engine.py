@@ -111,6 +111,19 @@ class OKXEngine:
             
         return order.get('id')
 
+    def cancel_order(self, order_id: str, symbol: str):
+        """
+        주어진 order_id와 symbol을 사용하여 기존 (대기) 주문을 취소합니다.
+        """
+        if not self.exchange:
+            raise Exception("OKX 거래소가 연결되지 않았습니다.")
+            
+        try:
+            return self.exchange.cancel_order(order_id, symbol)
+        except Exception as e:
+            print(f"[주문 취소 실패] {symbol} (Order ID: {order_id}): {e}")
+            raise e
+
     def get_recent_trade_receipts(self, symbol: str, limit: int = 20):
         """지정된 심볼의 최근 체결 영수증(Trades) 원본 배열 반환"""
         if not self.exchange:

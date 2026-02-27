@@ -340,6 +340,18 @@ async function syncConfig() {
                 const input = document.getElementById('config-symbols');
                 if (input && Array.isArray(val)) input.value = val.join(' | ');
                 if (Array.isArray(val) && val.length > 0) currentSymbol = val[0]; // 차트용 심볼 갱신
+            } else if (key === 'ENTRY_ORDER_TYPE') {
+                const btnMarket = document.getElementById('btn-market-type');
+                const btnLimit = document.getElementById('btn-limit-type');
+                if (btnMarket && btnLimit) {
+                    if (val === 'Smart Limit') {
+                        btnLimit.className = 'flex-1 py-1.5 rounded transition bg-neon-green text-navy-900 font-bold';
+                        btnMarket.className = 'flex-1 py-1.5 rounded transition text-gray-400 hover:text-white';
+                    } else {
+                        btnMarket.className = 'flex-1 py-1.5 rounded transition bg-neon-green text-navy-900 font-bold';
+                        btnLimit.className = 'flex-1 py-1.5 rounded transition text-gray-400 hover:text-white';
+                    }
+                }
             } else if (key === 'manual_override_enabled') {
                 const toggle = document.getElementById('manual-override-toggle');
                 const panel = document.getElementById('manual-override-panel');
@@ -416,6 +428,27 @@ async function updateConfigSymbols() {
         flashBtn(btn, true);
     } catch (error) {
         flashBtn(btn, false);
+    }
+}
+
+async function updateOrderType(typeStr) {
+    try {
+        const response = await fetch(`${API_URL}/config?key=ENTRY_ORDER_TYPE&value=${encodeURIComponent(typeStr)}`, { method: 'POST' });
+        await response.json();
+
+        const btnMarket = document.getElementById('btn-market-type');
+        const btnLimit = document.getElementById('btn-limit-type');
+        if (btnMarket && btnLimit) {
+            if (typeStr === 'Smart Limit') {
+                btnLimit.className = 'flex-1 py-1.5 rounded transition bg-neon-green text-navy-900 font-bold';
+                btnMarket.className = 'flex-1 py-1.5 rounded transition text-gray-400 hover:text-white';
+            } else {
+                btnMarket.className = 'flex-1 py-1.5 rounded transition bg-neon-green text-navy-900 font-bold';
+                btnLimit.className = 'flex-1 py-1.5 rounded transition text-gray-400 hover:text-white';
+            }
+        }
+    } catch (error) {
+        console.warn("Update Order Type Failed:", error);
     }
 }
 

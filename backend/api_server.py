@@ -571,127 +571,188 @@ async def async_trading_loop():
 
                             bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = round(pnl, 2)
 
-                            # 리스크 관리 체크
-                            # LONG: highest_price(고점) 추적 / SHORT: lowest_price(저점) 추적
-                            if position_side == "SHORT":
-                                extreme_price = bot_global_state["symbols"][symbol].get("lowest_price", entry)
-                            else:
-                                extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
-
-                            current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
-                            if pd.isna(current_atr) or current_atr <= 0:
-                                current_atr = float(entry * 0.01)
+                            # --- NEW: PENDING 상태(스마트 지정가)에서 체결 여부 및 시간 초과 확인 ---
+                            if position_side in ["PENDING_LONG", "PENDING_SHORT"]:
+                                pending_time = bot_global_state["symbols"][symbol].get("pending_order_time", 0)
+                                pending_id = bot_global_state["symbols"][symbol].get("pending_order_id")
                                 
-                            # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
-                            # [Step 2] strategy.py evaluate_risk_management 로직과 완전 동기화
-                            if position_side == "LONG":
-                                profit_usdt = float(current_price - entry)
-                                _real_sl = float(entry - (current_atr * 2.5))
-                            else:
-                                profit_usdt = float(entry - current_price)
-                                _real_sl = float(entry + (current_atr * 2.5))
-
-                            _fee_cover_threshold = float((entry * strategy_instance.fee_margin) + (current_atr * 0.5))
-                            _trailing_active = bool(profit_usdt >= _fee_cover_threshold)
-                            _trailing_target = 0.0
-
-                            if _trailing_active:
-                                if position_side == "LONG":
-                                    _trailing_target = float(extreme_price - (current_atr * 1.0))
-                                else:
-                                    _trailing_target = float(extreme_price + (current_atr * 1.0))
-                            bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
-                            bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
-                            bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
-
-                            risk_action = strategy_instance.evaluate_risk_management(
-                                entry, current_price, extreme_price, position_side, current_atr, symbol
-                            )
-
-                            if risk_action != "KEEP":
-                                # 1. 실제 거래소 청산 API 호출 (트랜잭션 무결성 방어)
+                                # OKX에서 실제 주문 상태 조회
                                 try:
-                                    # 진입 시 저장한 실제 계약수 사용 (없으면 1 fallback)
-                                    amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                    order_status = engine_api.exchange.fetch_order(pending_id, symbol)
+                                    status = order_status.get('status')
+                                    filled = order_status.get('filled', 0)
                                     
-                                    # 1. 실제 거래소 청산 API 호출 (엔진 분리)
-                                    order_id = engine_api.close_position(symbol, position_side, amount)
-                                    
-                                    # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 대기
-                                    import time as _t
-                                    net_pnl = 0.0
-                                    total_gross_pnl = 0.0
-                                    total_fee = 0.0
-                                    avg_fill_price = current_price
-                                    receipt_found = False
-                                    
-                                    for _attempt in range(5):
-                                        _t.sleep(1.0)
-                                        try:
-                                            trades = engine_api.get_recent_trade_receipts(symbol, limit=20)
-                                            matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
-                                            if matching_trades:
-                                                net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
-                                                receipt_found = True
-                                                break
-                                        except Exception as receipt_err:
-                                            logger.warning(f"[{symbol}] 청산 체결 영수증 파싱 오류 시도 {_attempt+1}: {receipt_err}")
-                                            
-                                    if not receipt_found:
-                                        raise Exception("청산 주문은 들어갔으나 영수증(실현PnL) 파싱에 실패했습니다.")
+                                    if status == 'closed' or filled > 0:
+                                        # 체결 성공 -> 실제 포지션으로 전환
+                                        real_side = "LONG" if position_side == "PENDING_LONG" else "SHORT"
+                                        executed_price = order_status.get('average') or order_status.get('price') or bot_global_state["symbols"][symbol]["pending_price"]
+                                        trade_amount = bot_global_state["symbols"][symbol]["pending_amount"]
+                                        trade_leverage = bot_global_state["symbols"][symbol].get("leverage", 1)
                                         
-                                    pnl_amount = net_pnl
+                                        bot_global_state["symbols"][symbol]["position"] = real_side
+                                        bot_global_state["symbols"][symbol]["entry_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["highest_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
+                                        
+                                        del bot_global_state["symbols"][symbol]["pending_order_id"]
+                                        del bot_global_state["symbols"][symbol]["pending_order_time"]
+                                        del bot_global_state["symbols"][symbol]["pending_amount"]
+                                        del bot_global_state["symbols"][symbol]["pending_price"]
+                                        
+                                        entry_emoji = "🎯📈" if real_side == "LONG" else "🎯📉"
+                                        entry_msg = f"{entry_emoji} [{symbol}] {real_side} 스마트 지정가 체결 완료! | 체결가: ${executed_price:.2f} | {trade_amount}계약"
+                                        bot_global_state["logs"].append(entry_msg)
+                                        logger.info(entry_msg)
+                                        send_telegram_sync(_tg_entry(symbol, real_side, executed_price, trade_amount, trade_leverage, payload=None))
+                                        
+                                    elif status in ['canceled', 'rejected'] or (time.time() - pending_time > 300):
+                                        # 취소되었거나 5분 초과 시 -> 주문 취소 및 PENDING 해제 (고스트 오더 방지)
+                                        if status not in ['canceled', 'rejected']:
+                                            try:
+                                                engine_api.exchange.cancel_order(pending_id, symbol)
+                                            except Exception as cancel_err:
+                                                logger.warning(f"[{symbol}] 미체결 주문 취소 실패 (이미 취소되었을 수 있음): {cancel_err}")
+                                                
+                                        bot_global_state["symbols"][symbol]["position"] = "NONE"
+                                        
+                                        cancel_msg = f"⏱️ [{symbol}] 스마트 지정가 5분 미체결 -> 🚀 주문 자동 취소 및 진입 대기"
+                                        bot_global_state["logs"].append(cancel_msg)
+                                        logger.info(cancel_msg)
+                                        
+                                except Exception as order_err:
+                                    logger.error(f"[{symbol}] 스마트 지정가 체결 상태 조회 실패: {order_err}")
+                            # --- End of PENDING 상태 체크 ---
+
+                            # 익절/손절 체크 (PENDING이 아닐 때만)
+                            if position_side in ["LONG", "SHORT"]:
+                                action, reason, exit_pnl = strategy_instance.evaluate_risk_management(
+                                    symbol=symbol,
+                                    current_price=current_price,
+                                    entry_price=entry,
+                                    position_side=position_side,
+                                    df=df,
+                                    highest_price=bot_global_state["symbols"][symbol].get("highest_price"),
+                                    lowest_price=bot_global_state["symbols"][symbol].get("lowest_price")
+                                )
+
+                                # 리스크 관리 체크
+                                # LONG: highest_price(고점) 추적 / SHORT: lowest_price(저점) 추적
+                                if position_side == "SHORT":
+                                    extreme_price = bot_global_state["symbols"][symbol].get("lowest_price", entry)
+                                else:
+                                    extreme_price = bot_global_state["symbols"][symbol].get("highest_price", entry)
+
+                                current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
+                                if pd.isna(current_atr) or current_atr <= 0:
+                                    current_atr = float(entry * 0.01)
                                     
-                                    # 물리적 원금 = (진입가 * 계약수 * 계약단위) / 레버리지
+                                # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
+                                # [Step 2] strategy.py evaluate_risk_management 로직과 완전 동기화
+                                if position_side == "LONG":
+                                    profit_usdt = float(current_price - entry)
+                                    _real_sl = float(entry - (current_atr * 2.5))
+                                else:
+                                    profit_usdt = float(entry - current_price)
+                                    _real_sl = float(entry + (current_atr * 2.5))
+
+                                _fee_cover_threshold = float((entry * strategy_instance.fee_margin) + (current_atr * 0.5))
+                                _trailing_active = bool(profit_usdt >= _fee_cover_threshold)
+                                _trailing_target = 0.0
+
+                                if _trailing_active:
+                                    if position_side == "LONG":
+                                        _trailing_target = float(extreme_price - (current_atr * 1.0))
+                                    else:
+                                        _trailing_target = float(extreme_price + (current_atr * 1.0))
+                                bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
+                                bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
+                                bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
+
+                                if action != "KEEP":
+                                    # 1. 실제 거래소 청산 API 호출 (트랜잭션 무결성 방어)
                                     try:
-                                        contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
-                                    except:
-                                        contract_size = 0.01
-                                    position_value = entry * amount * contract_size
-                                    pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
-
-                                    save_trade(
-                                        symbol=symbol,
-                                        position_type=position_side,
-                                        entry_price=entry,
-                                        exit_price=avg_fill_price,
-                                        pnl=round(pnl_amount, 4),
-                                        pnl_percent=round(pnl_percent, 4),
-                                        fee=round(total_fee, 4),
-                                        gross_pnl=round(total_gross_pnl, 4),
-                                        amount=amount,
-                                        exit_reason=risk_action,
-                                        leverage=leverage
-                                    )
-
-                                    # 3. 청산 알림 (사유 한글 변환) - 영수증 기반 확정 로깅만 사용
-                                    _exit_reason_ko = {
-                                        "STOP_LOSS": "🛑 손절",
-                                        "TRAILING_STOP_EXIT": "✅ 트레일링 익절",
-                                    }
-                                    reason_ko = _exit_reason_ko.get(risk_action, risk_action)
-                                    emoji = "✅" if pnl_percent >= 0 else "🔴"
-                                    
-                                    msg = f"{emoji} [{symbol}] {position_side} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross_pnl:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
+                                        # 진입 시 저장한 실제 계약수 사용 (없으면 1 fallback)
+                                        amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                         
-                                    bot_global_state["logs"].append(msg)
-                                    logger.info(msg)
-                                    send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, risk_action))
+                                        # 1. 실제 거래소 청산 API 호출 (엔진 분리)
+                                        order_id = engine_api.close_position(symbol, position_side, amount)
+                                        
+                                        # 2. 거래소 API 체결 완벽 성공 및 영수증 확보 대기
+                                        import time as _t
+                                        net_pnl = 0.0
+                                        total_gross_pnl = 0.0
+                                        total_fee = 0.0
+                                        avg_fill_price = current_price
+                                        receipt_found = False
+                                        
+                                        for _attempt in range(5):
+                                            _t.sleep(1.0)
+                                            try:
+                                                trades = engine_api.get_recent_trade_receipts(symbol, limit=20)
+                                                matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
+                                                if matching_trades:
+                                                    net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
+                                                    receipt_found = True
+                                                    break
+                                            except Exception as receipt_err:
+                                                logger.warning(f"[{symbol}] 청산 체결 영수증 파싱 오류 시도 {_attempt+1}: {receipt_err}")
+                                                
+                                        if not receipt_found:
+                                            raise Exception("청산 주문은 들어갔으나 영수증(실현PnL) 파싱에 실패했습니다.")
+                                            
+                                        pnl_amount = net_pnl
+                                        
+                                        # 물리적 원금 = (진입가 * 계약수 * 계약단위) / 레버리지
+                                        try:
+                                            contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                        except:
+                                            contract_size = 0.01
+                                        position_value = entry * amount * contract_size
+                                        pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
 
-                                    # 4. 프론트엔드 포지션 초기화
-                                    bot_global_state["symbols"][symbol]["position"] = "NONE"
-                                    bot_global_state["symbols"][symbol]["entry_price"] = 0.0
-                                    bot_global_state["symbols"][symbol]["take_profit_price"] = 0.0
-                                    bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
-                                    bot_global_state["symbols"][symbol]["real_sl"] = 0.0
-                                    bot_global_state["symbols"][symbol]["trailing_active"] = False
-                                    bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
+                                        save_trade(
+                                            symbol=symbol,
+                                            position_type=position_side,
+                                            entry_price=entry,
+                                            exit_price=avg_fill_price,
+                                            pnl=round(pnl_amount, 4),
+                                            pnl_percent=round(pnl_percent, 4),
+                                            fee=round(total_fee, 4),
+                                            gross_pnl=round(total_gross_pnl, 4),
+                                            amount=amount,
+                                            exit_reason=action,
+                                            leverage=leverage
+                                        )
 
-                                except Exception as e:
-                                    # API 호출 실패 시 에러만 기록하고 포지션을 유지 (DB 업데이트 안함)
-                                    err_msg = f"[{symbol}] 청산 체결 실패 (망 오류 등): {str(e)} - 다음 루프 재시도"
-                                    bot_global_state["logs"].append(err_msg)
-                                    logger.error(err_msg)
+                                        # 3. 청산 알림 (사유 한글 변환) - 영수증 기반 확정 로깅만 사용
+                                        _exit_reason_ko = {
+                                            "STOP_LOSS": "🛑 손절",
+                                            "TRAILING_STOP_EXIT": "✅ 트레일링 익절",
+                                        }
+                                        reason_ko = _exit_reason_ko.get(action, action)
+                                        emoji = "✅" if pnl_percent >= 0 else "🔴"
+                                        
+                                        msg = f"{emoji} [{symbol}] {position_side} 청산 | 확정 체결가: ${avg_fill_price:.2f} | 순수익(Net): {pnl_amount:+.4f} USDT (Gross: {total_gross_pnl:+.4f}, Fee: {total_fee:.4f}) | 수익률: {pnl_percent:+.2f}% | {reason_ko}"
+                                            
+                                        bot_global_state["logs"].append(msg)
+                                        logger.info(msg)
+                                        send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, action))
+
+                                        # 4. 프론트엔드 포지션 초기화
+                                        bot_global_state["symbols"][symbol]["position"] = "NONE"
+                                        bot_global_state["symbols"][symbol]["entry_price"] = 0.0
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = 0.0
+                                        bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
+                                        bot_global_state["symbols"][symbol]["real_sl"] = 0.0
+                                        bot_global_state["symbols"][symbol]["trailing_active"] = False
+                                        bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
+
+                                    except Exception as e:
+                                        error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
+                                        bot_global_state["logs"].append(error_msg)
+                                        logger.error(error_msg)
+                                        send_telegram_sync(_tg_exit(symbol, position_side, current_price, exit_pnl, reason, None))
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
@@ -741,15 +802,47 @@ async def async_trading_loop():
                                     engine_api.exchange.set_leverage(trade_leverage, symbol)
                                 except Exception as lev_err:
                                     logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
+                                # 진입 방식 (Market vs Smart Limit)
+                                order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')
+                                
                                 # 시장가 진입 (OKX Sandbox 50013 에러 방어를 위한 3회 재시도 로직)
                                 order_success = False
                                 last_error = None
+                                executed_price = current_price
+                                pending_order_id = None
+                                
                                 for attempt in range(3):
                                     try:
-                                        if signal == "LONG":
-                                            engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                                        if order_type == 'Smart Limit':
+                                            # 호가창 조회 (최우선 매수/매도 호가)
+                                            ob = engine_api.exchange.fetch_order_book(symbol, limit=5)
+                                            best_bid = ob['bids'][0][0] if ob['bids'] else current_price
+                                            best_ask = ob['asks'][0][0] if ob['asks'] else current_price
+                                            ema_20_val = latest_ema_20 = bot_global_state["symbols"][symbol].get("ema_20", current_price)
+                                            if 'ema_20' in df.columns:
+                                                ema_20_val = float(df['ema_20'].iloc[-1])
+                                                
+                                            if signal == "LONG":
+                                                # LONG: Best Bid와 EMA 20 중 더 높은 가격 (체결 확률 높이기 위함)
+                                                limit_price = max(best_bid, ema_20_val)
+                                                limit_price = round(limit_price, 2) # 소수점 정리
+                                                order = engine_api.exchange.create_limit_buy_order(symbol, trade_amount, limit_price)
+                                                pending_order_id = order.get('id')
+                                                executed_price = limit_price
+                                            else:
+                                                # SHORT: Best Ask와 EMA 20 중 더 낮은 가격
+                                                limit_price = min(best_ask, ema_20_val)
+                                                limit_price = round(limit_price, 2)
+                                                order = engine_api.exchange.create_limit_sell_order(symbol, trade_amount, limit_price)
+                                                pending_order_id = order.get('id')
+                                                executed_price = limit_price
                                         else:
-                                            engine_api.exchange.create_market_sell_order(symbol, trade_amount)
+                                            # 기본 Market 주문
+                                            if signal == "LONG":
+                                                order = engine_api.exchange.create_market_buy_order(symbol, trade_amount)
+                                            else:
+                                                order = engine_api.exchange.create_market_sell_order(symbol, trade_amount)
+                                                
                                         order_success = True
                                         break
                                     except Exception as api_err:
@@ -763,19 +856,31 @@ async def async_trading_loop():
                                 if not order_success:
                                     raise last_error
 
-                                # 포지션 상태 업데이트
-                                bot_global_state["symbols"][symbol]["position"] = signal
-                                bot_global_state["symbols"][symbol]["entry_price"] = current_price
-                                bot_global_state["symbols"][symbol]["highest_price"] = current_price
-                                bot_global_state["symbols"][symbol]["lowest_price"] = current_price
-                                bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
-                                bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
+                                # 포지션 상태 업데이트 (Smart Limit인 경우 PENDING 상태로 대기)
+                                if order_type == 'Smart Limit':
+                                    bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
+                                    bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
+                                    bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
+                                    bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
+                                    bot_global_state["symbols"][symbol]["pending_price"] = executed_price
+                                    
+                                    entry_emoji = "⏳"
+                                    entry_msg = f"{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
+                                    bot_global_state["logs"].append(entry_msg)
+                                    logger.info(entry_msg)
+                                else:
+                                    bot_global_state["symbols"][symbol]["position"] = signal
+                                    bot_global_state["symbols"][symbol]["entry_price"] = executed_price
+                                    bot_global_state["symbols"][symbol]["highest_price"] = executed_price
+                                    bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
+                                    bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                                    bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
 
-                                entry_emoji = "📈" if signal == "LONG" else "📉"
-                                entry_msg = f"{entry_emoji} [{symbol}] {signal} 진입 성공! | 가격: ${current_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
-                                bot_global_state["logs"].append(entry_msg)
-                                logger.info(entry_msg)
-                                send_telegram_sync(_tg_entry(symbol, signal, current_price, trade_amount, trade_leverage, payload=payload))
+                                    entry_emoji = "📈" if signal == "LONG" else "📉"
+                                    entry_msg = f"{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
+                                    bot_global_state["logs"].append(entry_msg)
+                                    logger.info(entry_msg)
+                                    send_telegram_sync(_tg_entry(symbol, signal, executed_price, trade_amount, trade_leverage, payload=payload))
 
                             except Exception as e:
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
