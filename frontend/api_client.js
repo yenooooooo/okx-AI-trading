@@ -636,8 +636,10 @@ async function syncChart() {
 
         if (!candleSeries) return;
 
+        const KST_OFFSET_SEC = 9 * 3600; // KST = UTC+9 (초 단위)
+
         const data = ohlcv.map(candle => ({
-            time: Math.floor(candle.timestamp / 1000) + (9 * 60 * 60), // KST (+9h) 물리적 시프팅
+            time: Math.floor(candle.timestamp / 1000) + KST_OFFSET_SEC, // KST (+9h) 물리적 시프팅
             open: parseFloat(candle.open),
             high: parseFloat(candle.high),
             low: parseFloat(candle.low),
@@ -646,6 +648,71 @@ async function syncChart() {
 
         candleSeries.setData(data);
         lastCandleData = data[data.length - 1]; // 마지막 캔들 저장
+
+        // ── 온차트 매매 타점 마커 렌더링 ──────────────────────────────────────
+        try {
+            const tradesRes = await fetch(`${API_URL}/trades`);
+            const allTrades = await tradesRes.json();
+
+            if (Array.isArray(allTrades) && allTrades.length > 0) {
+                // 현재 차트 심볼과 일치하는 거래만 필터링
+                const symbolTrades = allTrades.filter(t => t.symbol === currentSymbol);
+                const markers = [];
+
+                symbolTrades.forEach(trade => {
+                    const posType = (trade.position_type || '').toUpperCase();
+                    const pnl = parseFloat(trade.pnl ?? 0);
+
+                    // ── 진입(Entry) 마커 ──
+                    if (trade.entry_time) {
+                        // DB 저장값은 UTC naive("YYYY-MM-DD HH:MM:SS") → 'Z' 접미사로 UTC 강제 파싱
+                        const entryTs = Math.floor(
+                            new Date(String(trade.entry_time).replace(' ', 'T') + 'Z').getTime() / 1000
+                        ) + KST_OFFSET_SEC;
+
+                        if (!isNaN(entryTs)) {
+                            markers.push({
+                                time:     entryTs,
+                                position: posType === 'LONG' ? 'belowBar' : 'aboveBar',
+                                color:    posType === 'LONG' ? '#00ff88' : '#ff4d4d',
+                                shape:    posType === 'LONG' ? 'arrowUp'  : 'arrowDown',
+                                text:     posType === 'LONG' ? '🟢 LONG 진입' : '🔴 SHORT 진입',
+                            });
+                        }
+                    }
+
+                    // ── 청산(Exit) 마커 (exit_time 존재 시만) ──
+                    if (trade.exit_time) {
+                        const exitTs = Math.floor(
+                            new Date(String(trade.exit_time).replace(' ', 'T') + 'Z').getTime() / 1000
+                        ) + KST_OFFSET_SEC;
+
+                        if (!isNaN(exitTs)) {
+                            const isProfit = pnl >= 0;
+                            markers.push({
+                                time:     exitTs,
+                                position: posType === 'LONG' ? 'aboveBar' : 'belowBar',
+                                color:    isProfit ? '#00ff88' : '#ff4d4d',
+                                shape:    'circle',
+                                text:     isProfit ? '✅ 익절' : '💀 손절',
+                            });
+                        }
+                    }
+                });
+
+                // Lightweight Charts 필수: time 오름차순 정렬 (미정렬 시 내부 에러 발생)
+                markers.sort((a, b) => a.time - b.time);
+                candleSeries.setMarkers(markers);
+            } else {
+                // 거래 없음 → 마커 초기화
+                candleSeries.setMarkers([]);
+            }
+        } catch (markerErr) {
+            // 마커 오류는 차트 캔들 자체를 훼손하지 않음 — warn 후 무시
+            console.warn("Marker Sync Failed:", markerErr);
+        }
+        // ──────────────────────────────────────────────────────────────────────
+
     } catch (error) {
         const overlay = document.getElementById('chart-overlay');
         if (overlay) overlay.classList.remove('hidden');
