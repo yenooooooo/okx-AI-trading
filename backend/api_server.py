@@ -1298,7 +1298,9 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
         
         # 샌드박스 환경 등에서 데이터가 아예 안 들어올 경우를 대비한 가상 데이터 생성 로직
         if not ohlcv or len(ohlcv) == 0:
-            logger.warning(f"[{symbol}] OHLCV 데이터가 비어 있습니다. 임시 차트 데이터를 생성합니다.")
+            warn_msg = f"[차트 경고 🟡] [{symbol}] OKX 샘드박스가 OHLCV 데이터를 제공하지 않습니다. 가짜(Mock) 차트 데이터를 사용합니다."
+            logger.warning(warn_msg)
+            bot_global_state["logs"].append(warn_msg)
             import time
             import random
             current_time = int(time.time() * 1000)

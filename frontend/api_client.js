@@ -232,7 +232,7 @@ async function syncBotStatus() {
         }
 
     } catch (error) {
-        console.warn("Status Sync Failed:", error);
+        console.error("[ANTIGRAVITY 디버그] syncBotStatus 실패 (엔드포인트: /api/v1/status):", error);
     }
 }
 
@@ -307,7 +307,7 @@ async function syncBrain() {
             }
         }
     } catch (error) {
-        console.warn("Brain Sync Failed:", error);
+        console.error("[ANTIGRAVITY 디버그] syncBrain 실패 (엔드포인트: /api/v1/brain):", error);
     }
 }
 
@@ -373,7 +373,7 @@ async function syncConfig() {
             }
         }
     } catch (error) {
-        console.warn("Config sync failed:", error);
+        console.error("[ANTIGRAVITY 디버그] syncConfig 실패 (엔드포인트: /api/v1/config GET):", error);
     }
 }
 
@@ -410,6 +410,7 @@ async function updateConfigValue(key) {
         await response.json();
         flashBtn(btn, true);
     } catch (error) {
+        console.error(`[ANTIGRAVITY 디버그] updateConfigValue('${key}') 실패 (엔드포인트: /api/v1/config POST):`, error);
         flashBtn(btn, false);
     }
 }
@@ -427,6 +428,7 @@ async function updateConfigSymbols() {
         syncChart();
         flashBtn(btn, true);
     } catch (error) {
+        console.error("[ANTIGRAVITY 디버그] updateConfigSymbols 실패 (엔드포인트: /api/v1/config POST):", error);
         flashBtn(btn, false);
     }
 }
@@ -448,7 +450,7 @@ async function updateOrderType(typeStr) {
             }
         }
     } catch (error) {
-        console.warn("Update Order Type Failed:", error);
+        console.error("[ANTIGRAVITY 디버그] updateOrderType 실패 (엔드포인트: /api/v1/config POST, key=ENTRY_ORDER_TYPE):", error);
     }
 }
 
