@@ -201,6 +201,7 @@ ai_brain_state = {
 
 trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
+_broadcast_task = None  # /ws/dashboard 브로드캐스트 태스크 (클라이언트 연결 시 on-demand 시작)
 _engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
 
 def _generate_ws_sign(secret_key: str, timestamp: str) -> str:
@@ -434,11 +435,18 @@ async def async_trading_loop():
     last_log_time = 0
     last_scan_time = 0  # 스캐너 마지막 작동 시간
     _circuit_breaker_last_warn = {}  # 서킷 브레이커 로그 쓰로틀 (심볼별 마지막 경고 시각)
+    _config_sync_counter = 0  # DB 설정 실시간 동기화 카운터 (20회 × 3초 = 60초마다 갱신)
 
     while bot_global_state["is_running"]:
         try:
             current_time = time.time()
-            
+
+            # ── [실시간 설정 동기화] 60초마다 DB에서 핵심 설정값 갱신 (UI 변경 즉시 반영) ──
+            _config_sync_counter += 1
+            if _config_sync_counter >= 20:
+                strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
+                _config_sync_counter = 0
+
             # ── 15분 주기 다이내믹 볼륨 스캐너 가동 ──
             if current_time - last_scan_time >= 900:
                 try:
@@ -1089,41 +1097,46 @@ async def fetch_current_status():
 
             # 2. OKX 포지션 Hydration - CCXT ROE(percentage) 직접 바이패스
             # [DRY] 수동청산 감지는 매매루프(trading loop) 및 Private WS에서 단일 처리
-            # /api/v1/status는 포지션 표시 동기화 전용 — 중복 감지 제거
+            # [Race Condition Fix] position/entry_price는 매매루프가 단독 관리 — 표시 전용 필드(PnL/markPrice)만 갱신
             try:
                 positions = await asyncio.to_thread(engine.exchange.fetch_positions)
-                # fetch_positions() 성공한 경우에만 NONE 리셋 (실패 시 기존 포지션 유지)
-                for sym in bot_global_state["symbols"]:
-                    bot_global_state["symbols"][sym]["position"] = "NONE"
-                    bot_global_state["symbols"][sym]["unrealized_pnl_percent"] = 0.0
 
+                # 거래소에서 현재 활성 포지션 심볼 목록 추출
+                exchange_active = {}
                 for pos in positions:
                     contracts = float(pos.get('contracts', 0) or 0)
                     if contracts > 0:
                         symbol = pos.get('symbol')
-                        if symbol in bot_global_state["symbols"]:
-                            side = pos.get('side', '').upper()
-                            if side in ['LONG', 'SHORT']:
-                                # OKX가 계산한 ROE(%) 직접 사용
-                                roe = float(pos.get('percentage', 0) or 0)
-                                unrealized = float(pos.get('unrealizedPnl', 0) or 0)
-                                leverage = float(pos.get('leverage', 1) or 1)
-                                mark = float(pos.get('markPrice', 0) or 0)
-                                entry = float(pos.get('entryPrice', 0) or 0)
+                        side = pos.get('side', '').upper()
+                        if symbol and side in ['LONG', 'SHORT']:
+                            exchange_active[symbol] = pos
 
-                                # OKX percentage가 0이면 선물 공식으로 Fallback
-                                # 공식: ((Mark - Entry) / Entry) * 100 * Leverage
-                                if roe == 0.0 and entry > 0 and mark > 0:
-                                    diff = (mark - entry) / entry if side == 'LONG' else (entry - mark) / entry
-                                    roe = round(diff * 100 * leverage, 2)
+                # 봇 상태 업데이트: position/entry_price 건드리지 않고 표시 전용 필드만 갱신
+                for symbol, sym_state in bot_global_state["symbols"].items():
+                    if symbol in exchange_active:
+                        pos = exchange_active[symbol]
+                        roe = float(pos.get('percentage', 0) or 0)
+                        unrealized = float(pos.get('unrealizedPnl', 0) or 0)
+                        leverage = float(pos.get('leverage', 1) or 1)
+                        mark = float(pos.get('markPrice', 0) or 0)
+                        entry = float(pos.get('entryPrice', 0) or 0)
+                        side = pos.get('side', '').upper()
 
-                                bot_global_state["symbols"][symbol]["position"] = side
-                                bot_global_state["symbols"][symbol]["entry_price"] = entry
-                                bot_global_state["symbols"][symbol]["current_price"] = mark
-                                bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = roe
-                                bot_global_state["symbols"][symbol]["unrealized_pnl"] = unrealized
-                                bot_global_state["symbols"][symbol]["leverage"] = leverage
-                                bot_global_state["symbols"][symbol]["contracts"] = contracts
+                        # OKX percentage가 0이면 선물 공식으로 Fallback
+                        if roe == 0.0 and entry > 0 and mark > 0:
+                            diff = (mark - entry) / entry if side == 'LONG' else (entry - mark) / entry
+                            roe = round(diff * 100 * leverage, 2)
+
+                        # 표시 전용 필드만 갱신 (position/entry_price는 매매루프 전용)
+                        sym_state["unrealized_pnl_percent"] = roe
+                        sym_state["unrealized_pnl"] = unrealized
+                        sym_state["leverage"] = leverage
+                        if mark > 0:
+                            sym_state["current_price"] = mark
+                        # entry_price가 아직 없을 때만 최초 1회 동기화 (매매루프 진입 전 초기화용)
+                        if entry > 0 and sym_state.get("entry_price", 0) == 0:
+                            sym_state["entry_price"] = entry
+                            sym_state["position"] = side
 
             except Exception as pe:
                 logger.warning(f"포지션 데이터 스캔 실패: {pe}")
@@ -1174,7 +1187,11 @@ async def toggle_bot_action():
 # --- 신규 WebSocket 엔드포인트 ---
 @app_server.websocket("/ws/dashboard")
 async def websocket_endpoint(websocket: WebSocket):
+    global _broadcast_task
     await manager.connect(websocket)
+    # 첫 번째 클라이언트 연결 시 브로드캐스트 루프 on-demand 가동 (공회전 방지)
+    if _broadcast_task is None or _broadcast_task.done():
+        _broadcast_task = asyncio.create_task(broadcast_dashboard_state())
     try:
         while True:
             # 클라이언트로부터의 메시지 수신 대기 (연결 유지용)

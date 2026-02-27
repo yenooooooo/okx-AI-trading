@@ -262,9 +262,16 @@ async function syncBrain() {
             const marker = document.getElementById('rsi-marker');
             if (marker) marker.style.left = `${Math.max(0, Math.min(100, rsi))}%`;
 
-            // --- NEW: AI Confidence Matrix ---
-            const longProb = Math.max(0, Math.min(100, Math.round(100 - rsi)));
-            const shortProb = Math.max(0, Math.min(100, Math.round(rsi)));
+            // --- AI Confidence Matrix (RSI 50% + MACD 50% 복합 지표) ---
+            // RSI 컴포넌트: 낮을수록 LONG 신호 (과매도 = 반등 압력)
+            const rsiLongScore = Math.max(0, Math.min(100, 100 - rsi));
+            // MACD 컴포넌트: 양수면 LONG 신호, 음수면 SHORT 신호 (±100 정규화)
+            const macdRaw = parseFloat(brainState.macd) || 0;
+            const macdAbs = Math.max(Math.abs(macdRaw), 0.0001);
+            const macdLongScore = Math.max(0, Math.min(100, 50 + (macdRaw / macdAbs) * 50));
+            // RSI 50% + MACD 50% 가중 합산
+            const longProb = Math.round(rsiLongScore * 0.5 + macdLongScore * 0.5);
+            const shortProb = 100 - longProb;
 
             const longProbEl = document.getElementById('ai-long-prob');
             const longBarEl = document.getElementById('ai-long-bar');
@@ -282,6 +289,44 @@ async function syncBrain() {
                 shortProbEl.className = shortProb >= 50 ? 'text-neon-red font-bold text-[10px]' : 'text-gray-500 font-bold text-[10px]';
             }
         }
+        // --- CHOP Index 렌더링 (횡보장 탐지) ---
+        if (brainState.chop !== undefined) {
+            const chop = parseFloat(brainState.chop) || 0;
+            const chopEl = document.getElementById('brain-chop');
+            const chopBar = document.getElementById('chop-bar');
+            const chopStatus = document.getElementById('chop-status');
+            if (chopEl) chopEl.textContent = chop.toFixed(1);
+            if (chopBar) {
+                const pct = Math.max(0, Math.min(100, chop));
+                chopBar.style.width = `${pct}%`;
+                if (chop >= 61.8) {
+                    // 횡보장 — 빨간색
+                    chopBar.style.background = '#ff4d4d';
+                    chopBar.style.boxShadow = '0 0 8px rgba(255,77,77,0.7)';
+                } else if (chop <= 38.2) {
+                    // 추세장 — 녹색
+                    chopBar.style.background = '#00ff88';
+                    chopBar.style.boxShadow = '0 0 8px rgba(0,255,136,0.7)';
+                } else {
+                    // 중립
+                    chopBar.style.background = '#aaa';
+                    chopBar.style.boxShadow = '0 0 4px #aaa';
+                }
+            }
+            if (chopStatus) {
+                if (chop >= 61.8) {
+                    chopStatus.textContent = '🔴 횡보장 (진입 차단)';
+                    chopStatus.className = 'font-bold text-neon-red text-[10px]';
+                } else if (chop <= 38.2) {
+                    chopStatus.textContent = '🟢 추세장 (진입 가능)';
+                    chopStatus.className = 'font-bold text-neon-green text-[10px]';
+                } else {
+                    chopStatus.textContent = '🟡 중립';
+                    chopStatus.className = 'font-bold text-yellow-400 text-[10px]';
+                }
+            }
+        }
+
         if (brainState.macd !== undefined) {
             const macd = parseFloat(brainState.macd);
             updateNumberText('brain-macd', macd);

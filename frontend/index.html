@@ -356,6 +356,24 @@
                 </div>
             </div>
 
+            <!-- Choppiness Index (횡보 탐지) -->
+            <div class="glass-panel p-5 relative overflow-hidden">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-3 flex justify-between">
+                    <span>Choppiness Index (횡보 탐지)</span>
+                    <span id="brain-chop" class="font-mono text-text-main flash-target font-bold">0.0</span>
+                </h3>
+                <div class="w-full bg-navy-900 h-3 rounded-full overflow-hidden relative border border-navy-border shadow-inner">
+                    <!-- 위험 구간 배경 (61.8 이상) -->
+                    <div class="absolute inset-0" style="background: linear-gradient(to right, rgba(0,255,136,0.15) 0%, rgba(0,255,136,0.15) 61.8%, rgba(255,77,77,0.25) 61.8%, rgba(255,77,77,0.25) 100%);"></div>
+                    <div id="chop-bar" class="absolute top-0 bottom-0 transition-all duration-500 rounded-full" style="width: 50%; background: #aaa; box-shadow: 0 0 6px #aaa;"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
+                    <span>Trending (추세장 &lt; 38.2)</span>
+                    <span id="chop-status" class="font-bold">대기 중</span>
+                    <span>Choppy (횡보장 &gt; 61.8)</span>
+                </div>
+            </div>
+
             <div
                 class="glass-panel p-4 flex justify-between items-center text-sm font-mono border-l-4 border-l-neon-green">
                 <span class="text-gray-400 uppercase text-xs">AI 종합 판단 결과</span>
