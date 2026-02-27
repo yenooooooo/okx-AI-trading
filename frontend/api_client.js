@@ -493,6 +493,20 @@ async function toggleBot() {
     }
 }
 
+// 튜닝 파라미터 맵 — syncConfig() 와 saveTuningConfig() 공유 단일 진실 소스
+const TUNING_INPUT_MAP = {
+    'adx_threshold':            { id: 'tuning-adx-threshold',       parse: parseFloat },
+    'adx_max':                  { id: 'tuning-adx-max',             parse: parseFloat },
+    'chop_threshold':           { id: 'tuning-chop-threshold',      parse: parseFloat },
+    'volume_surge_multiplier':  { id: 'tuning-volume-surge',        parse: parseFloat },
+    'fee_margin':               { id: 'tuning-fee-margin',          parse: parseFloat },
+    'hard_stop_loss_rate':      { id: 'tuning-hard-stop-loss',      parse: parseFloat },
+    'trailing_stop_activation': { id: 'tuning-trailing-activation', parse: parseFloat },
+    'trailing_stop_rate':       { id: 'tuning-trailing-rate',       parse: parseFloat },
+    'cooldown_losses_trigger':  { id: 'tuning-cooldown-losses',     parse: parseInt   },
+    'cooldown_duration_sec':    { id: 'tuning-cooldown-duration',   parse: parseInt   },
+};
+
 // --- Config Sync ---
 async function syncConfig() {
     try {
@@ -547,21 +561,10 @@ async function syncConfig() {
                 const enabled = val === true || val === 'true';
                 if (toggle) toggle.checked = enabled;
                 applyShadowModeVisuals(enabled);
-            } else if (key === 'adx_threshold') {
-                const input = document.getElementById('tuning-adx-threshold');
-                if (input) input.value = parseFloat(val);
-            } else if (key === 'adx_max') {
-                const input = document.getElementById('tuning-adx-max');
-                if (input) input.value = parseFloat(val);
-            } else if (key === 'chop_threshold') {
-                const input = document.getElementById('tuning-chop-threshold');
-                if (input) input.value = parseFloat(val);
-            } else if (key === 'volume_surge_multiplier') {
-                const input = document.getElementById('tuning-volume-surge');
-                if (input) input.value = parseFloat(val);
-            } else if (key === 'fee_margin') {
-                const input = document.getElementById('tuning-fee-margin');
-                if (input) input.value = parseFloat(val);
+            } else if (key in TUNING_INPUT_MAP) {
+                const { id, parse } = TUNING_INPUT_MAP[key];
+                const input = document.getElementById(id);
+                if (input) input.value = parse(val);
             }
         }
     } catch (error) {
@@ -581,27 +584,26 @@ function closeTuningModal() {
 }
 
 async function saveTuningConfig() {
-    const fields = [
-        { key: 'adx_threshold',           id: 'tuning-adx-threshold',  parse: parseFloat },
-        { key: 'adx_max',                  id: 'tuning-adx-max',         parse: parseFloat },
-        { key: 'chop_threshold',           id: 'tuning-chop-threshold',  parse: parseFloat },
-        { key: 'volume_surge_multiplier',  id: 'tuning-volume-surge',    parse: parseFloat },
-        { key: 'fee_margin',               id: 'tuning-fee-margin',      parse: parseFloat },
-    ];
-
     const btn = document.querySelector('#tuning-modal button[onclick="saveTuningConfig()"]');
     try {
-        for (const { key, id, parse } of fields) {
+        // 1. 유효성 검사 & payload 조립 (TUNING_INPUT_MAP 단일 진실 소스 활용)
+        const payloads = [];
+        for (const [key, { id, parse }] of Object.entries(TUNING_INPUT_MAP)) {
             const input = document.getElementById(id);
             if (!input) continue;
             const value = parse(input.value);
-            if (isNaN(value)) { showToast('입력 오류', `${key}: 유효하지 않은 숫자입니다.`, 'ERROR'); return; }
-            await fetch(`${API_URL}/config`, {
+            if (isNaN(value)) throw new Error(`${key}: 유효하지 않은 숫자입니다.`);
+            payloads.push({ key, value: String(value) });
+        }
+        // 2. 10개 키 병렬 POST
+        await Promise.all(payloads.map(payload =>
+            fetch(`${API_URL}/config`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key, value: String(value) })
-            });
-        }
+                body: JSON.stringify(payload)
+            })
+        ));
+        // 3. 버튼 플래시 피드백
         if (btn) {
             const origText = btn.textContent;
             btn.textContent = '✓ APPLIED';
@@ -613,10 +615,10 @@ async function saveTuningConfig() {
                 btn.classList.add('border-purple-500', 'text-purple-300', 'bg-purple-500/20');
             }, 2000);
         }
-        showToast('엔진 튜닝 적용', '파라미터가 저장되었습니다. 최대 60초 내 반영됩니다.', 'SUCCESS');
+        showToast('엔진 튜닝 적용', '10개 파라미터 저장 완료. 최대 60초 내 반영됩니다.', 'SUCCESS');
     } catch (error) {
         console.error('[ANTIGRAVITY 디버그] saveTuningConfig 실패:', error);
-        showToast('저장 실패', '서버 통신 오류가 발생했습니다.', 'ERROR');
+        showToast('저장 실패', error.message || '서버 통신 오류가 발생했습니다.', 'ERROR');
     }
 }
 

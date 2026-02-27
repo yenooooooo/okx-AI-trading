@@ -527,6 +527,11 @@ async def async_trading_loop():
                 strategy_instance.chop_threshold = float(get_config('chop_threshold') or 61.8)
                 strategy_instance.volume_surge_multiplier = float(get_config('volume_surge_multiplier') or 1.5)
                 strategy_instance.fee_margin = float(get_config('fee_margin') or 0.0015)
+                strategy_instance.hard_stop_loss_rate = float(get_config('hard_stop_loss_rate') or 0.005)
+                strategy_instance.trailing_stop_activation = float(get_config('trailing_stop_activation') or 0.003)
+                strategy_instance.trailing_stop_rate = float(get_config('trailing_stop_rate') or 0.002)
+                strategy_instance.cooldown_losses_trigger = int(get_config('cooldown_losses_trigger') or 3)
+                strategy_instance.cooldown_duration_sec = int(get_config('cooldown_duration_sec') or 900)
                 _config_sync_counter = 0
 
             # ── 15분 주기 다이내믹 볼륨 스캐너 가동 ──

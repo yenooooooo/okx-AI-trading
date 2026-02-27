@@ -74,9 +74,9 @@ def init_db():
     default_config = {
         'symbols': json.dumps(['BTC/USDT:USDT']),
         'risk_per_trade': '0.01',
-        'hard_stop_loss_rate': '0.02',
-        'trailing_stop_activation': '0.03',
-        'trailing_stop_rate': '0.01',
+        'hard_stop_loss_rate': '0.005',
+        'trailing_stop_activation': '0.003',
+        'trailing_stop_rate': '0.002',
         'daily_max_loss_rate': '0.05',
         'timeframe': '1m',
         'leverage': '1',
@@ -90,6 +90,8 @@ def init_db():
         'chop_threshold': '61.8',
         'volume_surge_multiplier': '1.5',
         'fee_margin': '0.0015',
+        'cooldown_losses_trigger': '3',
+        'cooldown_duration_sec': '900',
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))
