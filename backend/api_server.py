@@ -585,6 +585,16 @@ async def async_trading_loop():
                     bot_global_state["logs"].append(drill_msg)
                     logger.warning(drill_msg)
                     send_telegram_sync(f"🚨 [소방훈련] {strategy_instance.cooldown_losses_trigger}연패 쿨다운 발동\n15분 진입 차단 | 해제: {_cd_end} KST")
+                elif _stress_type == "RESET":
+                    strategy_instance.kill_switch_active = False
+                    strategy_instance.kill_switch_until = 0
+                    strategy_instance.daily_pnl_accumulated = 0.0
+                    strategy_instance.consecutive_loss_count = 0
+                    strategy_instance.loss_cooldown_until = 0
+                    reset_msg = "✅ [소방훈련 해제 완료] 킬스위치 OFF + 쿨다운 OFF + 일일 PnL 리셋"
+                    bot_global_state["logs"].append(reset_msg)
+                    logger.info(reset_msg)
+                    send_telegram_sync("✅ [소방훈련 해제] 킬스위치·쿨다운 전부 해제 완료")
 
             # 각 심볼에 대해 거래 루프 실행
             for i, symbol in enumerate(symbols):
@@ -1320,6 +1330,14 @@ async def inject_stress(type: str):
         return {"error": "시스템이 중지되어 있습니다. 먼저 가동해 주세요."}
     bot_global_state["stress_inject"] = stress_type
     return {"status": "success", "message": f"스트레스 주입 예약 완료: {stress_type} (다음 매매루프 사이클에서 발동)"}
+
+@app_server.post("/api/v1/reset_stress")
+async def reset_stress():
+    """[Phase 3] 킬스위치/쿨다운 강제 해제"""
+    bot_global_state["stress_inject"] = "RESET"
+    reset_msg = "✅ [소방훈련 해제] 킬스위치 + 쿨다운 리셋 예약 완료 (다음 사이클에서 적용)"
+    bot_global_state["logs"].append(reset_msg)
+    return {"status": "success", "message": reset_msg}
 
 @app_server.get("/api/v1/status")
 async def fetch_current_status():

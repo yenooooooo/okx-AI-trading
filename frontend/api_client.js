@@ -858,6 +858,18 @@ async function injectStress(type) {
     }
 }
 
+async function resetStress() {
+    try {
+        const response = await fetch(`${API_URL}/reset_stress`, { method: 'POST' });
+        const result = await response.json();
+        if (result.error) throw new Error(result.error);
+        alert(result.message);
+        updateLogs();
+    } catch (error) {
+        alert('해제 실패: ' + error.message);
+    }
+}
+
 async function closePaperPosition() {
     if (!confirm('Paper 포지션을 현재가 기준으로 강제 청산하시겠습니까?')) return;
     try {
