@@ -557,6 +557,31 @@
             </div>
         </div>
 
+        <!-- SYSTEM HEALTH BADGES -->
+        <div class="col-span-12 flex items-center gap-3 px-1 mb-1 mt-2" id="system-health-bar">
+            <span class="text-[10px] text-gray-500 font-mono uppercase tracking-widest">시스템 관제</span>
+            <!-- OKX API -->
+            <div class="flex items-center gap-1.5 bg-navy-900 border border-navy-border rounded-full px-3 py-1">
+                <div id="badge-okx-dot" class="w-2 h-2 rounded-full bg-gray-600 transition-colors duration-500"></div>
+                <span class="text-[10px] font-mono text-gray-400">OKX API</span>
+                <span id="badge-okx-text" class="text-[10px] font-mono text-gray-500">--</span>
+            </div>
+            <!-- Telegram -->
+            <div class="flex items-center gap-1.5 bg-navy-900 border border-navy-border rounded-full px-3 py-1">
+                <div id="badge-tg-dot" class="w-2 h-2 rounded-full bg-gray-600 transition-colors duration-500"></div>
+                <span class="text-[10px] font-mono text-gray-400">Telegram</span>
+                <span id="badge-tg-text" class="text-[10px] font-mono text-gray-500">--</span>
+            </div>
+            <!-- AI Engine -->
+            <div class="flex items-center gap-1.5 bg-navy-900 border border-navy-border rounded-full px-3 py-1">
+                <div id="badge-engine-dot" class="w-2 h-2 rounded-full bg-gray-600 transition-colors duration-500">
+                </div>
+                <span class="text-[10px] font-mono text-gray-400">AI Engine</span>
+                <span id="badge-engine-text" class="text-[10px] font-mono text-gray-500">--</span>
+            </div>
+            <span class="ml-auto text-[9px] text-gray-600 font-mono" id="health-last-checked"></span>
+        </div>
+
         <!-- BOTTOM: Terminal Module (12 cols) -->
         <div class="col-span-12 glass-panel flex flex-col h-56 mt-2 mb-4 relative z-0">
             <div

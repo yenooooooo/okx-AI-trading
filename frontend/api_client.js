@@ -789,6 +789,40 @@ function initPriceWebSocket() {
 }
 
 
+
+// --- System Health Check ---
+async function syncSystemHealth() {
+    try {
+        const res = await fetch(`${API_URL}/system_health`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        function applyBadge(dotId, textId, connected, label) {
+            const dot = document.getElementById(dotId);
+            const text = document.getElementById(textId);
+            if (!dot || !text) return;
+            if (connected) {
+                dot.className = 'w-2 h-2 rounded-full bg-neon-green animate-pulse transition-colors duration-500';
+                text.textContent = 'Connected';
+                text.className = 'text-[10px] font-mono text-neon-green';
+            } else {
+                dot.className = 'w-2 h-2 rounded-full bg-red-500 transition-colors duration-500';
+                text.textContent = 'Disconnected';
+                text.className = 'text-[10px] font-mono text-red-400';
+            }
+        }
+
+        applyBadge('badge-okx-dot', 'badge-okx-text', data.okx_connected, 'OKX API');
+        applyBadge('badge-tg-dot', 'badge-tg-text', data.telegram_connected, 'Telegram');
+        applyBadge('badge-engine-dot', 'badge-engine-text', data.strategy_engine_running, 'AI Engine');
+
+        const ts = document.getElementById('health-last-checked');
+        if (ts) ts.textContent = `Last checked: ${new Date().toLocaleTimeString('ko-KR')}`;
+    } catch (e) {
+        console.warn('System health check failed:', e);
+    }
+}
+
 // --- Init & Intervals (Parallel Optimization) ---
 async function initializeApp() {
     // 순차적 페칭 대신 Promise.all을 활용해 병렬 스레드로 대기 시간 단축
@@ -800,7 +834,8 @@ async function initializeApp() {
         syncBrain(),
         syncStats(),
         syncChart(),
-        updateLogs()
+        updateLogs(),
+        syncSystemHealth()
     ]);
 
     // 초기 렌더링 후 타이머 설정
@@ -810,6 +845,7 @@ async function initializeApp() {
     setInterval(syncStats, 5000);
     setInterval(updateLogs, 3000);
     setInterval(syncConfig, 30000);     // 외부 설정 변경 자동 반영
+    setInterval(syncSystemHealth, 5000); // 헬스 체크 (5초 — 매매 뇌 부하 최소화)
 }
 
 // Start

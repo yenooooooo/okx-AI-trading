@@ -1273,13 +1273,17 @@ async def fetch_config():
 
 @app_server.post("/api/v1/config")
 async def update_config(key: str, value: str):
-    """봇 설정 변경 (실시간 적용)"""
+    """봇 설정 변경 (실시간 적용) — UI 연동 컨퍼메이션 로깅 포함"""
     try:
         set_config(key, value)
-        logger.info(f"설정 변경: {key} = {value}")
+        log_msg = f"[UI 연동 성공 \U0001f7e2] '{key}' 설정이 '{value}'(으)로 뇌 구조에 완벽히 적용되었습니다."
+        bot_global_state["logs"].append(log_msg)
+        logger.info(log_msg)
         return {"success": True, "message": f"{key} 업데이트 완료"}
     except Exception as e:
-        logger.error(f"설정 변경 실패: {e}")
+        log_msg = f"[UI 연동 실패 \U0001f534] '{key}' 설정 적용 중 코드 연결 오류가 발생했습니다."
+        bot_global_state["logs"].append(log_msg)
+        logger.error(log_msg)
         return {"success": False, "message": str(e)}
 
 @app_server.get("/api/v1/ohlcv")
@@ -1377,6 +1381,35 @@ async def fetch_system_logs(limit: int = 50, after_id: int = 0):
         }
         for log in logs
     ]
+
+@app_server.get("/api/v1/system_health")
+async def fetch_system_health():
+    """시스템 헬스 체크: OKX API, 텔레그램, 엔진 상태 리턴"""
+    # 1. OKX API 연결 상태
+    okx_connected = False
+    try:
+        if _engine and _engine.exchange:
+            _engine.exchange.fetch_balance()
+            okx_connected = True
+    except Exception:
+        okx_connected = False
+
+    # 2. 텔레그램 보트 연결 상태
+    from notifier import _telegram_app, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    telegram_connected = bool(_telegram_app and _telegram_app.bot and TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+    # 3. 매매 엔진 동작 상태
+    strategy_running = bool(
+        bot_global_state.get("is_running", False) and
+        _trading_task is not None and
+        not _trading_task.done()
+    )
+
+    return {
+        "okx_connected": okx_connected,
+        "telegram_connected": telegram_connected,
+        "strategy_engine_running": strategy_running
+    }
 
 if __name__ == "__main__":
     uvicorn.run("api_server:app_server", host="0.0.0.0", port=8000, reload=False)
