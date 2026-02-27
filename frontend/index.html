@@ -380,6 +380,60 @@
                 <span id="brain-decision" class="text-neon-green tracking-widest font-bold">데이터 수신 대기 중...</span>
             </div>
 
+            <!-- [A] 진입 관문 실시간 체크리스트 -->
+            <div class="glass-panel p-5">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between items-center">
+                    <span>⚡ Entry Readiness — 진입 관문</span>
+                    <span class="font-mono text-xs">
+                        <span id="gates-passed" class="text-neon-green font-bold">0</span>
+                        <span class="text-gray-600">/6 충족</span>
+                    </span>
+                </h3>
+                <!-- 준비도 바 -->
+                <div class="w-full bg-navy-900 h-2 rounded-full overflow-hidden border border-navy-border mb-3">
+                    <div id="gates-bar" class="h-full bg-neon-green transition-all duration-700 rounded-full" style="width:0%;box-shadow:0 0 6px rgba(0,255,136,0.5);"></div>
+                </div>
+                <!-- 관문 목록 -->
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1.5" id="gates-list">
+                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                        <span class="text-gray-400">ADX 추세강도</span>
+                        <span id="gate-adx" class="text-gray-600">--</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                        <span class="text-gray-400">CHOP 횡보탐지</span>
+                        <span id="gate-chop" class="text-gray-600">--</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                        <span class="text-gray-400">거래량 폭발</span>
+                        <span id="gate-volume" class="text-gray-600">--</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                        <span class="text-gray-400">EMA20 이격도</span>
+                        <span id="gate-disparity" class="text-gray-600">--</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                        <span class="text-gray-400">MACD+RSI</span>
+                        <span id="gate-macd-rsi" class="text-gray-600">--</span>
+                    </div>
+                    <div class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
+                        <span class="text-gray-400">EMA200 거시추세</span>
+                        <span id="gate-macro" class="text-gray-600">--</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- [B] 봇 혼잣말 라이브 피드 -->
+            <div class="glass-panel p-5">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-3 flex justify-between items-center">
+                    <span>🤖 Bot Monologue — 봇 혼잣말</span>
+                    <span class="text-neon-green text-[10px] animate-pulse">● LIVE</span>
+                </h3>
+                <div id="monologue-feed" class="flex flex-col-reverse gap-1 overflow-y-auto max-h-36 pr-1"
+                    style="scrollbar-width:thin;scrollbar-color:#1e2a3a transparent;">
+                    <div class="text-[11px] font-mono text-gray-600 italic">봇이 시장을 분석하는 중입니다...</div>
+                </div>
+            </div>
+
             <!-- Extended Intelligence Panel (Market Radar & Recent Executions) -->
             <div class="glass-panel p-4 flex gap-6">
                 <!-- Market Radar (Left 50%) -->

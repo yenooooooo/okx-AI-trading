@@ -559,6 +559,78 @@ async def async_trading_loop():
                         "decision": analysis_msg
                     })
 
+                    # ── [UI A+B] 실시간 진입 관문 체크리스트 + 봇 혼잣말 생성 ──
+                    import datetime as _dt
+                    _row       = df.iloc[-1]
+                    _rsi_v     = float(latest_rsi)  if not pd.isna(latest_rsi)  else 50.0
+                    _adx_v     = float(latest_adx)  if not pd.isna(latest_adx)  else 0.0
+                    _macd_v    = float(latest_macd) if not pd.isna(latest_macd) else 0.0
+                    _msig_v    = float(_row['macd_signal']) if 'macd_signal' in _row.index and not pd.isna(_row['macd_signal']) else 0.0
+                    _chop_v    = float(_row['chop'])     if 'chop'     in _row.index and not pd.isna(_row['chop'])     else 50.0
+                    _vol_v     = float(_row['volume'])   if not pd.isna(_row['volume'])   else 0.0
+                    _vsma_v    = float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0
+                    _ema20_v   = float(_row['ema_20'])   if 'ema_20'   in _row.index and not pd.isna(_row['ema_20'])   else (current_price or 1)
+
+                    _vol_ratio  = _vol_v / _vsma_v if _vsma_v > 0 else 0.0
+                    _disparity  = abs((current_price - _ema20_v) / _ema20_v) * 100 if current_price and _ema20_v else 0.0
+                    _long_macd  = _macd_v > _msig_v
+                    _short_macd = _macd_v < _msig_v
+                    _long_rsi   = 30 <= _rsi_v <= 55
+                    _short_rsi  = 45 <= _rsi_v <= 70
+                    _mr_ok      = (_long_macd and _long_rsi) or (_short_macd and _short_rsi)
+                    _macro_ok   = True
+                    _macro_lbl  = "N/A"
+                    if macro_ema_200 is not None and current_price is not None:
+                        _macro_ok  = current_price > macro_ema_200
+                        _macro_lbl = f"상승추세 ↑" if _macro_ok else f"하락추세 ↓"
+
+                    _gates = {
+                        "adx":       {"pass": 25 <= _adx_v <= 40,  "value": f"{_adx_v:.1f}",      "target": "25~40"},
+                        "chop":      {"pass": _chop_v < 61.8,       "value": f"{_chop_v:.1f}",     "target": "< 61.8"},
+                        "volume":    {"pass": _vol_ratio >= 1.5,    "value": f"{_vol_ratio:.2f}x", "target": "≥ 1.5x"},
+                        "disparity": {"pass": _disparity < 0.8,     "value": f"{_disparity:.2f}%", "target": "< 0.8%"},
+                        "macd_rsi":  {"pass": _mr_ok,               "value": f"RSI {_rsi_v:.1f}",  "target": "크로스+구간"},
+                        "macro":     {"pass": _macro_ok,            "value": _macro_lbl,           "target": "EMA200"},
+                    }
+                    _passed = sum(1 for g in _gates.values() if g["pass"])
+                    ai_brain_state["symbols"][symbol]["gates"]        = _gates
+                    ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
+
+                    # 봇 혼잣말 — 지금 무엇을 기다리는지 한 줄 생성
+                    _ts = _dt.datetime.now().strftime("%H:%M:%S")
+                    if signal == "LONG":
+                        _mono = f"[{_ts}] 🟢 LONG 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
+                    elif signal == "SHORT":
+                        _mono = f"[{_ts}] 🔴 SHORT 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
+                    elif not (25 <= _adx_v <= 40):
+                        if _adx_v < 25:
+                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 방향성 없는 시장이야. 25 이상으로 올라올 때까지 기다리는 중... ({_passed}/6)"
+                        else:
+                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. 과열 식을 때까지 관망 중... ({_passed}/6)"
+                    elif _chop_v >= 61.8:
+                        _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. 61.8 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
+                    elif _disparity >= 0.8:
+                        _mono = f"[{_ts}] 이격도 {_disparity:.2f}% — 이미 너무 달렸어. EMA20에 붙을 때까지 기다리는 중... ({_passed}/6)"
+                    elif _vol_ratio < 1.5:
+                        _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. 1.5x 이상 폭발 대기 중... ({_passed}/6)"
+                    elif not _macro_ok:
+                        _mono = f"[{_ts}] EMA200 역방향({_macro_lbl}) — 큰 흐름 거슬러 들어가면 안 돼. 추세 전환 대기 중... ({_passed}/6)"
+                    elif not _mr_ok:
+                        if _long_macd and not _long_rsi:
+                            _mono = f"[{_ts}] MACD 상향 ✓, RSI {_rsi_v:.1f} — LONG 진입 구간(30~55)으로 내려올 때까지 대기... ({_passed}/6)"
+                        elif _short_macd and not _short_rsi:
+                            _mono = f"[{_ts}] MACD 하향 ✓, RSI {_rsi_v:.1f} — SHORT 진입 구간(45~70)으로 올라올 때까지 대기... ({_passed}/6)"
+                        else:
+                            _mono = f"[{_ts}] RSI {_rsi_v:.1f}, MACD {_macd_v:.4f} vs Signal {_msig_v:.4f} — 크로스 신호 계산 중... ({_passed}/6)"
+                    else:
+                        _mono = f"[{_ts}] {_passed}/6 조건 충족 — RSI {_rsi_v:.1f} / MACD {_macd_v:.4f} 타점 탐색 중..."
+
+                    _ml = ai_brain_state["symbols"][symbol].get("monologue", [])
+                    _ml.append(_mono)
+                    if len(_ml) > 30:
+                        _ml = _ml[-30:]
+                    ai_brain_state["symbols"][symbol]["monologue"] = _ml
+
                     # 포지션 상태 체크 및 리스크 관리
                     if bot_global_state["symbols"][symbol]["position"] != "NONE":
                         entry = bot_global_state["symbols"][symbol]["entry_price"]

@@ -247,6 +247,15 @@ async function syncBrain() {
 
         if (!brainState) return;
 
+        // [A] 진입 관문 체크리스트
+        if (brainState.gates) {
+            renderGates(brainState.gates, brainState.gates_passed || 0);
+        }
+        // [B] 봇 혼잣말 피드
+        if (brainState.monologue) {
+            renderMonologue(brainState.monologue);
+        }
+
         // WebSocket 연결 중엔 REST가 hero-price를 덮어쓰지 않음 (실시간 보호)
         if (brainState.price && (!priceWs || priceWs.readyState !== WebSocket.OPEN)) {
             updateNumberText('hero-price', brainState.price);
@@ -354,6 +363,73 @@ async function syncBrain() {
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncBrain 실패 (엔드포인트: /api/v1/brain):", error);
     }
+}
+
+// --- [A] 진입 관문 체크리스트 렌더링 ---
+function renderGates(gates, passed) {
+    const passedEl = document.getElementById('gates-passed');
+    const barEl    = document.getElementById('gates-bar');
+    if (!gates || !passedEl || !barEl) return;
+
+    passedEl.textContent = passed;
+    const pct = Math.round((passed / 6) * 100);
+    barEl.style.width = `${pct}%`;
+    // 0~3: 빨강, 4~5: 노랑, 6: 초록
+    if (passed <= 3) {
+        barEl.style.background = '#ff4d4d';
+        barEl.style.boxShadow  = '0 0 6px rgba(255,77,77,0.5)';
+        passedEl.className = 'text-neon-red font-bold';
+    } else if (passed <= 5) {
+        barEl.style.background = '#facc15';
+        barEl.style.boxShadow  = '0 0 6px rgba(250,204,21,0.5)';
+        passedEl.className = 'text-yellow-400 font-bold';
+    } else {
+        barEl.style.background = '#00ff88';
+        barEl.style.boxShadow  = '0 0 6px rgba(0,255,136,0.5)';
+        passedEl.className = 'text-neon-green font-bold';
+    }
+
+    const gateMap = {
+        adx:       'gate-adx',
+        chop:      'gate-chop',
+        volume:    'gate-volume',
+        disparity: 'gate-disparity',
+        macd_rsi:  'gate-macd-rsi',
+        macro:     'gate-macro',
+    };
+    for (const [key, elId] of Object.entries(gateMap)) {
+        const el = document.getElementById(elId);
+        if (!el || !gates[key]) continue;
+        const g = gates[key];
+        if (g.pass) {
+            el.innerHTML = `<span class="text-neon-green">✅</span> <span class="text-neon-green">${g.value}</span>`;
+        } else {
+            el.innerHTML = `<span class="text-neon-red">❌</span> <span class="text-gray-500">${g.value}</span>`;
+        }
+    }
+}
+
+// --- [B] 봇 혼잣말 피드 렌더링 ---
+let _lastMonologueLen = 0;
+function renderMonologue(lines) {
+    if (!lines || lines.length === 0) return;
+    if (lines.length === _lastMonologueLen) return; // 변화 없으면 스킵
+    _lastMonologueLen = lines.length;
+
+    const feed = document.getElementById('monologue-feed');
+    if (!feed) return;
+
+    // 최신 10개만 표시 (위에서 아래로 최신 → 오래된 순)
+    const recent = lines.slice(-10).reverse();
+    feed.innerHTML = recent.map((line, i) => {
+        const isLatest = i === 0;
+        const isEntry  = line.includes('🟢') || line.includes('🔴');
+        let cls = 'text-[11px] font-mono py-0.5 px-1 rounded transition-all';
+        if (isEntry)       cls += ' text-neon-green bg-neon-green/10 font-bold animate-pulse';
+        else if (isLatest) cls += ' text-gray-300';
+        else               cls += ' text-gray-600';
+        return `<div class="${cls}">${line}</div>`;
+    }).join('');
 }
 
 async function toggleBot() {
