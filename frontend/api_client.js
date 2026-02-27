@@ -833,11 +833,7 @@ async function toggleShadowMode() {
     const toggle = document.getElementById('shadow-mode-toggle');
     const enabled = toggle ? toggle.checked : false;
     try {
-        await fetch(`${API_URL}/config`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: 'SHADOW_MODE_ENABLED', value: enabled ? 'true' : 'false' })
-        });
+        await fetch(`${API_URL}/config?key=SHADOW_MODE_ENABLED&value=${encodeURIComponent(enabled ? 'true' : 'false')}`, { method: 'POST' });
         applyShadowModeVisuals(enabled);
     } catch (error) {
         console.error('Shadow mode toggle failed:', error);
