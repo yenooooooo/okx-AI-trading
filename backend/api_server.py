@@ -479,6 +479,9 @@ async def async_trading_loop():
                 logger.warning(f"거래소 포지션 조회 실패 (수동청산 감지 스킵): {_pos_err}")
                 exchange_open_symbols = None
 
+            # [v2.2] 일일 리셋 체크 (UTC 자정 기준)
+            strategy_instance.check_daily_reset(curr_bal)
+
             # 각 심볼에 대해 거래 루프 실행
             for i, symbol in enumerate(symbols):
                 # 멀티 타겟팅 API Rate Limit 우회를 위한 물리적 딜레이 추가
@@ -544,7 +547,8 @@ async def async_trading_loop():
                         "bb_upper": round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0,
                         "bb_lower": round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0,
                         "adx": round(latest_adx, 2) if not pd.isna(latest_adx) else 0.0,
-                        "decision": analysis_msg  # 프론트엔드 출력을 위해 추가
+                        "chop": round(float(df['chop'].iloc[-1]), 1) if 'chop' in df.columns and not pd.isna(df['chop'].iloc[-1]) else 0.0,
+                        "decision": analysis_msg
                     })
 
                     # 포지션 상태 체크 및 리스크 관리
@@ -646,20 +650,20 @@ async def async_trading_loop():
                                 # [Step 2] strategy.py evaluate_risk_management 로직과 완전 동기화
                                 if position_side == "LONG":
                                     profit_usdt = float(current_price - entry)
-                                    _real_sl = float(entry - (current_atr * 2.5))
+                                    _real_sl = float(entry - (current_atr * 1.5))  # [v2.1] ATR*2.5 → 1.5
                                 else:
                                     profit_usdt = float(entry - current_price)
-                                    _real_sl = float(entry + (current_atr * 2.5))
+                                    _real_sl = float(entry + (current_atr * 1.5))  # [v2.1] ATR*2.5 → 1.5
 
-                                _fee_cover_threshold = float((entry * strategy_instance.fee_margin) + (current_atr * 0.5))
+                                _fee_cover_threshold = float((entry * strategy_instance.fee_margin) + (current_atr * 0.3))  # [v2.1] ATR*0.5 → 0.3
                                 _trailing_active = bool(profit_usdt >= _fee_cover_threshold)
                                 _trailing_target = 0.0
 
                                 if _trailing_active:
                                     if position_side == "LONG":
-                                        _trailing_target = float(extreme_price - (current_atr * 1.0))
+                                        _trailing_target = float(extreme_price - (current_atr * 0.8))  # [v2.1] ATR*1.0 → 0.8
                                     else:
-                                        _trailing_target = float(extreme_price + (current_atr * 1.0))
+                                        _trailing_target = float(extreme_price + (current_atr * 0.8))  # [v2.1] ATR*1.0 → 0.8
                                 bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                                 bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                                 bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
@@ -671,8 +675,8 @@ async def async_trading_loop():
 
                                 # --- [Step 2] 50% 분할 익절 (Partial TP) 조건 체크 ---
                                 if not partial_tp_executed:
-                                    # 발동 조건: 수수료 마진 0.3% + ATR*1.5 이상 수익 구간
-                                    partial_tp_threshold = (entry * 0.003) + (current_atr * 1.5)
+                                    # [v2.1] 발동 조건: 수수료 마진 0.15% + ATR*0.5 이상 수익 구간
+                                    partial_tp_threshold = (entry * 0.0015) + (current_atr * 0.5)
                                     if position_side == "LONG":
                                         partial_profit = current_price - entry
                                     else:
@@ -807,6 +811,18 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
                                         bot_global_state["symbols"][symbol]["partial_tp_executed"] = False  # [Partial TP] 전량 청산 후 다음 진입을 위해 리셋
 
+                                        # [v2.1] 연패 쿨다운 카운터 업데이트
+                                        is_loss = (pnl_amount < 0)
+                                        strategy_instance.record_trade_result(is_loss)
+
+                                        # [v2.2] 일일 누적 PnL 반영 + 킬스위치 체크
+                                        kill_triggered = strategy_instance.record_daily_pnl(pnl_amount)
+                                        if kill_triggered:
+                                            kill_msg = f"🚨 [킬스위치 발동] 일일 최대 손실({strategy_instance.daily_max_loss_pct*100:.0f}%) 도달. 24시간 동안 매매 엔진 셋다운."
+                                            bot_global_state["logs"].append(kill_msg)
+                                            logger.warning(kill_msg)
+                                            send_telegram_sync(f"🚨 킬스위치 발동\n일일 누적 손실: {strategy_instance.daily_pnl_accumulated:+.2f} USDT\n24시간 거래 중단")
+
                                     except Exception as e:
                                         error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
                                         bot_global_state["logs"].append(error_msg)
@@ -842,20 +858,22 @@ async def async_trading_loop():
                             logger.info(msg)
 
                             try:
-                                # 수동 오버라이드 or 동적 포지션 사이징
+                                # 수동 오버라이드 or [v2.2] ATR 기반 동적 포지션 사이징
                                 manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
                                 if manual_override:
                                     trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
                                     trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
                                 else:
-                                    risk_rate = float(get_config('risk_per_trade') or 0.01)
                                     trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
-                                    size_btc = strategy_instance.calculate_position_size(curr_bal, risk_rate, current_price, trade_leverage)
+                                    # [v2.2] ATR 기반 동적 사이징: Risk 2% / (ATR * 1.5)
+                                    current_atr_for_sizing = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else current_price * 0.01
                                     try:
                                         contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
                                     except Exception:
                                         contract_size = 0.01
-                                    trade_amount = max(1, round(size_btc / contract_size))
+                                    trade_amount = strategy_instance.calculate_position_size_dynamic(
+                                        curr_bal, current_atr_for_sizing, trade_leverage, contract_size
+                                    )
                                 # 레버리지 거래소 적용
                                 try:
                                     engine_api.exchange.set_leverage(trade_leverage, symbol)

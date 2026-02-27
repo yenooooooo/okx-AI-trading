@@ -1,21 +1,39 @@
 import pandas as pd
+import time as _time
 
 class TradingStrategy:
     def __init__(self, initial_seed=100000):
         """
         매매 전략 및 시드 보호를 위한 핵심 파라미터 세팅
-        기본 시드: 100,000원 (환율에 맞춰 USDT로 변환하여 관리될 예정)
+        [v2.1] 손익비 정상화 + 거시 추세 필터 + 연패 쿨다운 적용
         """
         self.initial_seed = initial_seed
-        self.max_daily_loss_rate = 0.50       # [테스트] 원본: 0.05 (5%) → 사실상 서킷 브레이커 해제
-        self.hard_stop_loss_rate = 0.005      # [테스트] 원본: 0.02 (2%) → 0.5% 빠른 손절
-        self.trailing_stop_activation = 0.003 # [테스트] 원본: 0.03 (3%) → 0.3% 수익 시 트레일링 활성화
-        self.trailing_stop_rate = 0.002       # [테스트] 원본: 0.01 (1%) → 0.2% 하락 시 익절
-        self.volume_surge_multiplier = 1.5    # [Phase 2] 거래량 폭발 기준 배수 (원본 0.5 -> 1.5 상향)
-        self.fee_margin = 0.003               # [Step 2] 수수료 방어 마진: 왕복 수수료 + 슬리피지 0.3%
-        self.adx_threshold = 25.0            # [Step 1] ADX 추세 강도 필터 하한 (25 이상)
-        self.adx_max = 40.0                  # [Step 2] ADX 과열 필터 상한 (40 초과 시 진입 차단)
+        self.max_daily_loss_rate = 0.50       # 서킷 브레이커 (50%)
+        self.hard_stop_loss_rate = 0.005      # 레거시 호환성 유지 (ATR 기반으로 덡어씨워짐)
+        self.trailing_stop_activation = 0.003 # 레거시 호환성 유지
+        self.trailing_stop_rate = 0.002       # 레거시 호환성 유지
+        self.volume_surge_multiplier = 1.5    # 거래량 폭발 기준 배수
+        self.fee_margin = 0.0015              # [v2.1] 수수료 방어 마진: 0.3% → 0.15% (OKX maker 실제 수수료 수준)
+        self.adx_threshold = 25.0             # ADX 추세 강도 필터 하한
+        self.adx_max = 40.0                   # ADX 과열 필터 상한
         self.macro_cache = {}                 # 1시간봉 거시적 추세 데이터 캐싱
+
+        # [v2.1] 연패 쿨다운 메커니즘 (3연패 시 15분 진입 차단)
+        self.consecutive_loss_count = 0
+        self.loss_cooldown_until = 0
+        self.cooldown_losses_trigger = 3
+        self.cooldown_duration_sec = 900
+
+        # [v2.2] Choppiness Index 횡보 필터
+        self.chop_threshold = 61.8            # CHOP ≥ 61.8 시 횡보장 판정, 진입 차단
+
+        # [v2.2] 일일 킬스위치 (Daily Drawdown Limit)
+        self.daily_max_loss_pct = 0.07        # 일일 최대 손실 7%
+        self.daily_pnl_accumulated = 0.0      # 오늘 누적 순손익 (USDT)
+        self.daily_start_balance = 0.0        # 오늘 시작 잔고 (UTC 자정 기준)
+        self.daily_reset_date = ""            # 마지막 리셋 날짜 (YYYY-MM-DD)
+        self.kill_switch_active = False       # 킬스위치 발동 여부
+        self.kill_switch_until = 0            # 킬스위치 해제 타임스탬프
 
     async def get_macro_ema_200(self, engine_api, symbol):
         """
@@ -107,16 +125,29 @@ class TradingStrategy:
         dx = 100 * (plus_di - minus_di).abs() / di_sum
         df['adx'] = dx.ewm(alpha=alpha_wilder, adjust=False).mean()
 
+        # 7. [v2.2] Choppiness Index 계산 (14주기)
+        # CHOP = 100 * LOG10(SUM(ATR, 14) / (Highest_High_14 - Lowest_Low_14)) / LOG10(14)
+        import numpy as np
+        atr_sum_14 = true_range.rolling(window=14).sum()
+        highest_14 = df['high'].rolling(window=14).max()
+        lowest_14 = df['low'].rolling(window=14).min()
+        hl_range_14 = (highest_14 - lowest_14).replace(0, float('nan'))
+        df['chop'] = 100 * np.log10(atr_sum_14 / hl_range_14) / np.log10(14)
+
         return df
 
     def check_entry_signal(self, df, current_price=None, macro_ema_200=None):
         """
         가장 최근 캔들을 분석하여 매수/매도 진입 시그널 판단
-        [Step 1] ADX >= 25 횡보장 필터 추가 (5분봉 기준)
-        반환값: (진입신호, 상태메세지, 페이로드) 형태의 튜플
+        [v2.1] 거시 추세 강제 필터 + RSI 구간 강화 + 연패 쿨다운
         """
         if len(df) < 2:
             return "HOLD", "데이터 부족 대기", None
+
+        # [v2.1] 연패 쿨다운 체크 — 3연패 후 15분간 진입 차단
+        if _time.time() < self.loss_cooldown_until:
+            remaining = int(self.loss_cooldown_until - _time.time())
+            return "HOLD", f"연패 쿨다운 — {remaining}초 후 진입 재개 ({self.consecutive_loss_count}연패 방어)", None
 
         latest = df.iloc[-1]
         previous = df.iloc[-2]
@@ -127,23 +158,36 @@ class TradingStrategy:
         vol_sma_20 = latest['vol_sma_20']
         adx_val = latest['adx'] if 'adx' in latest and not pd.isna(latest['adx']) else 0.0
 
-        # [Step 1,2] ADX 횡보장 및 과열장 필터 (25 <= ADX <= 40)
+        # ADX 횡보장 및 과열장 필터 (25 <= ADX <= 40)
         if adx_val < self.adx_threshold:
             return "HOLD", f"횡보장 차단 — ADX {adx_val:.1f} < {self.adx_threshold:.0f} (추세 없음, 관망)", None
         if adx_val > self.adx_max:
             return "HOLD", f"과열장 차단 — ADX {adx_val:.1f} > {self.adx_max:.0f} (추세 끝물, 추격매수 방지)", None
 
-        # [Phase 2] 거래량 폭발 필터링
+        # [v2.2] Choppiness Index 횡보 필터: CHOP >= 61.8 시 횡보장으로 판단, 진입 차단
+        chop_val = latest['chop'] if 'chop' in latest and not pd.isna(latest['chop']) else 50.0
+        if chop_val >= self.chop_threshold:
+            return "HOLD", f"횡보장(CHOP) 차단 — CHOP {chop_val:.1f} ≥ {self.chop_threshold} (톱니바퀴 시장, 관망)", None
+
+        # [v2.2] 일일 킬스위치 체크
+        if self.kill_switch_active and _time.time() < self.kill_switch_until:
+            remaining_h = (self.kill_switch_until - _time.time()) / 3600
+            return "HOLD", f"🚨 킬스위치 발동 중 — {remaining_h:.1f}시간 후 해제 (일일 최대 손실 도달)", None
+        elif self.kill_switch_active and _time.time() >= self.kill_switch_until:
+            self.kill_switch_active = False
+            self.daily_pnl_accumulated = 0.0
+
+        # 거래량 폭발 필터링
         volume_verified = vol_val > (vol_sma_20 * self.volume_surge_multiplier) if not pd.isna(vol_sma_20) else True
-        
-        # [Step 3] 단기 5m EMA 20 이격도(Disparity) 필터: 0.8% 이상 벌어지면 진입 금지 (가짜 상승/하락 추격 방지)
+
+        # 단기 5m EMA 20 이격도 필터: 0.8% 이상 벨어지면 진입 금지
         ema_20_val = latest['ema_20'] if 'ema_20' in latest and not pd.isna(latest['ema_20']) else current_price
         disparity_pct = abs((current_price - ema_20_val) / ema_20_val) * 100 if current_price and ema_20_val else 0.0
-        
+
         if disparity_pct >= 0.8:
             return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 이격 (안전 이격거리 0.8% 초과)", None
 
-        # [Telegram/Logging Payload Packaging]
+        # Payload 패키징
         payload = {
             "ema_status": (
                 f"Uptrend (Price > EMA)" if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200
@@ -151,27 +195,38 @@ class TradingStrategy:
             ),
             "vol_multiplier": f"{vol_val / vol_sma_20:.2f}x" if not pd.isna(vol_sma_20) and vol_sma_20 > 0 else "N/A",
             "atr_sl_margin": (
-                f"ATR(14): {latest['atr']:.2f} -> SL Margin: {latest['atr'] * 2.5:.2f}"
+                f"ATR(14): {latest['atr']:.2f} -> SL Margin: {latest['atr'] * 1.5:.2f}"
                 if 'atr' in latest and not pd.isna(latest['atr']) else "N/A"
             ),
             "adx": f"{adx_val:.1f}",
             "disparity": f"{disparity_pct:.2f}%",
         }
 
+        # [v2.1] MACD 크로스오버 + RSI 구간 복합 조건
+        # LONG: MACD > Signal AND RSI 30~55 (과매도 반등 구간)
+        # SHORT: MACD < Signal AND RSI 45~70 (과매수 하락 구간)
         long_macd = (latest['macd'] > latest['macd_signal'])
-        long_rsi = latest['rsi'] <= 70
+        long_rsi = (30 <= latest['rsi'] <= 55)
 
+        short_macd = (latest['macd'] < latest['macd_signal'])
+        short_rsi = (45 <= latest['rsi'] <= 70)
+
+        # LONG 신호 판단
         if long_macd and long_rsi:
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
+            # [v2.1] 거시 추세 강제 필터: 1h EMA200 아래에서 LONG 절대 차단
+            if macro_ema_200 is not None and current_price is not None and current_price < macro_ema_200:
+                return "HOLD", f"거시 추세 역행 차단 — 1h EMA200(${macro_ema_200:.2f}) 아래에서 LONG 금지", None
             return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향, ADX {adx_val:.1f}, 거래량 충족)", payload
 
-        short_macd = (latest['macd'] < latest['macd_signal'])
-        short_rsi = latest['rsi'] >= 30
-
+        # SHORT 신호 판단
         if short_macd and short_rsi:
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
+            # [v2.1] 거시 추세 강제 필터: 1h EMA200 위에서 SHORT 절대 차단
+            if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200:
+                return "HOLD", f"거시 추세 역행 차단 — 1h EMA200(${macro_ema_200:.2f}) 위에서 SHORT 금지", None
             return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향, ADX {adx_val:.1f}, 거래량 충족)", payload
 
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} / ADX {adx_val:.1f} - 타점 탐색 중", None
@@ -179,48 +234,59 @@ class TradingStrategy:
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False):
         """
         파산 방지 핵심 모듈: 현재 진행 중인 포지션의 강제 청산(손절/익절) 여부 반환
-        [Step 2] 수수료 방어선 적용:
-          - 하드 SL: ATR * 2.5 (5분봉 꼬리 길이 대비 여유 확보)
-          - 트레일링 발동: entry_price * fee_margin + ATR * 0.5
-            → 왕복 수수료 완전 회수 후 추가 순익이 발생한 구간에서만 발동
-          - 트레일링 간격: ATR * 1.0 (작은 파동 휩쏘 방지, 기존 0.5에서 상향)
+        [v2.1] 손익비 정상화:
+          - 하드 SL: ATR * 1.5 (기존 2.5에서 축소 — 잘못된 진입을 빨리 끊음)
+          - 트레일링 발동: fee_margin(0.15%) + ATR * 0.3 (기존 0.5에서 조기화)
+          - 트레일링 간격: ATR * 0.8 (기존 1.0에서 축소 — 수익 보호 강화)
         """
         if current_atr <= 0 or pd.isna(current_atr):
-            current_atr = entry_price * 0.01  # ATR 계산 불가시 진입가의 1%로 임시대체
+            current_atr = entry_price * 0.01
 
         if position_side == "LONG":
             profit_usdt = current_price - entry_price
             drawdown_usdt = highest_price - current_price
             if partial_tp_executed:
-                hard_sl_price = entry_price + (entry_price * 0.001)  # 1차 익절 후 본전 방어선 (+수수료 마진)
+                hard_sl_price = entry_price + (entry_price * 0.001)
             else:
-                hard_sl_price = entry_price - (current_atr * 2.5)
+                hard_sl_price = entry_price - (current_atr * 1.5)  # [v2.1] 2.5 → 1.5
         elif position_side == "SHORT":
             profit_usdt = entry_price - current_price
             drawdown_usdt = current_price - highest_price
             if partial_tp_executed:
-                hard_sl_price = entry_price - (entry_price * 0.001)  # 1차 익절 후 본전 방어선 (-수수료 마진)
+                hard_sl_price = entry_price - (entry_price * 0.001)
             else:
-                hard_sl_price = entry_price + (current_atr * 2.5)
+                hard_sl_price = entry_price + (current_atr * 1.5)  # [v2.1] 2.5 → 1.5
         else:
             return "KEEP"
 
-        # 1. 하드 스탑로스 (Hard Stop-loss) — ATR * 2.5 (5분봉 꼬리 대비 상향)
+        # 1. 하드 스탑로스 — ATR * 1.5
         if position_side == "LONG" and current_price <= hard_sl_price:
             return "STOP_LOSS"
         if position_side == "SHORT" and current_price >= hard_sl_price:
             return "STOP_LOSS"
 
-        # 2. 트레일링 스탑 (Trailing Stop)
-        # 발동 조건: 수수료 방어 마진(0.3%) + ATR*0.5 만큼의 수익이 확보된 이후에만 활성화
-        # 즉, 왕복 수수료를 완전히 회수하고 추가 수익이 생긴 시점부터 추적 시작
-        fee_cover_threshold = (entry_price * self.fee_margin) + (current_atr * 0.5)
+        # 2. 트레일링 스탑
+        # [v2.1] 발동 조건: fee_margin(0.15%) + ATR*0.3 (기존: fee_margin(0.3%) + ATR*0.5)
+        fee_cover_threshold = (entry_price * self.fee_margin) + (current_atr * 0.3)
         if profit_usdt >= fee_cover_threshold:
-            # 추적 간격: 최고점/최저점 대비 ATR * 1.0 이상 꺾일 때 청산 (작은 파동에 털리지 않음)
-            if drawdown_usdt >= (current_atr * 1.0):
+            # [v2.1] 추적 간격: ATR * 0.8 (기존 1.0)
+            if drawdown_usdt >= (current_atr * 0.8):
                 return "TRAILING_STOP_EXIT"
 
         return "KEEP"
+
+    def record_trade_result(self, is_loss):
+        """
+        [v2.1] 청산 결과를 연패 카운터에 반영
+        api_server.py 청산 블록에서 호출
+        """
+        if is_loss:
+            self.consecutive_loss_count += 1
+            if self.consecutive_loss_count >= self.cooldown_losses_trigger:
+                self.loss_cooldown_until = _time.time() + self.cooldown_duration_sec
+        else:
+            self.consecutive_loss_count = 0
+            self.loss_cooldown_until = 0
 
     def is_daily_drawdown_exceeded(self, current_balance):
         """일일 누적 손실 한도 초과 여부 확인 (뇌동매매 방지용)"""
@@ -229,20 +295,72 @@ class TradingStrategy:
             return True
         return False
 
+    def calculate_position_size_dynamic(self, equity, current_atr, leverage=1, contract_size=0.01):
+        """
+        [v2.2] 변동성 기반 동적 포지션 사이징
+        공식: Risk Per Trade = Equity * 2%
+              Stop Distance = ATR * 1.5 (하드 SL 폭)
+              Position Size = Risk Per Trade / Stop Distance
+        ATR이 넓으면 수량을 줄이고, 좁으면 수량을 늘림
+        """
+        if equity <= 0 or current_atr <= 0:
+            return 1  # 최소 1계약
+
+        risk_per_trade = equity * 0.02                # 전체 자본의 2%
+        stop_distance = current_atr * 1.5             # 하드 SL 폭 (ATR * 1.5)
+        position_size_raw = risk_per_trade / stop_distance
+
+        # 계약 단위로 변환
+        if contract_size > 0:
+            contracts = max(1, round(position_size_raw / contract_size))
+        else:
+            contracts = max(1, round(position_size_raw))
+
+        return int(contracts)
+
     def calculate_position_size(self, balance, risk_rate, entry_price, leverage=1, contract_size=0.01):
         """
-        동적 포지션 사이즈 계산
-        공식: size = (balance × risk_rate × leverage) / entry_price
-        최소값: 지정된 계약 크기(contract_size) 에 맞춰 반올림 처리
+        레거시 호환용 포지션 사이즈 계산 (수동 오버라이드 모드에서 사용)
         """
         if balance <= 0 or entry_price <= 0:
             return float(contract_size)
 
         size = (balance * risk_rate * leverage) / entry_price
 
-        # 계약 단위에 맞춘 소수점/정량 정리
         if contract_size > 0:
             contracts = max(1.0, round(size / contract_size))
             return contracts * contract_size
 
         return max(size, 0.001)
+
+    def check_daily_reset(self, current_balance):
+        """
+        [v2.2] UTC 자정 기준 일일 리셋 및 킬스위치 체크
+        매 루프 시작 시 호출하여 날짜가 바뀌면 누적 PnL 초기화
+        """
+        from datetime import datetime, timezone
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        if today_str != self.daily_reset_date:
+            self.daily_reset_date = today_str
+            self.daily_start_balance = current_balance
+            self.daily_pnl_accumulated = 0.0
+            if self.kill_switch_active and _time.time() >= self.kill_switch_until:
+                self.kill_switch_active = False
+
+    def record_daily_pnl(self, pnl_usdt):
+        """
+        [v2.2] 청산 마다 일일 누적 PnL에 반영
+        킬스위치 발동 여부 리턴
+        """
+        self.daily_pnl_accumulated += pnl_usdt
+
+        # 킬스위치 체크: 누적 손실이 시작 잔고의 7%를 초과하면 발동
+        if self.daily_start_balance > 0:
+            loss_pct = abs(self.daily_pnl_accumulated) / self.daily_start_balance
+            if self.daily_pnl_accumulated < 0 and loss_pct >= self.daily_max_loss_pct:
+                self.kill_switch_active = True
+                self.kill_switch_until = _time.time() + 86400  # 24시간 락
+                return True  # 킬스위치 발동!
+
+        return False
