@@ -621,7 +621,7 @@ async def async_trading_loop():
                                                 
                                         bot_global_state["symbols"][symbol]["position"] = "NONE"
                                         
-                                        cancel_msg = f"⏱️ [{symbol}] 스마트 지정가 5분 미체결 -> 🚀 주문 자동 취소 및 진입 대기"
+                                        cancel_msg = f"⏱️ [{symbol}] 지정가 5분 미체결 취소 완료 → 봇이 새로운 최적의 타점을 즉시 재탐색합니다."
                                         bot_global_state["logs"].append(cancel_msg)
                                         logger.info(cancel_msg)
                                         
@@ -642,36 +642,16 @@ async def async_trading_loop():
                                 if pd.isna(current_atr) or current_atr <= 0:
                                     current_atr = float(entry * 0.01)
 
-                                current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
-                                if pd.isna(current_atr) or current_atr <= 0:
-                                    current_atr = float(entry * 0.01)
-                                    
-                                # --- 동적 TP/SL 상태 계산 (프론트엔드 실시간 표시용) ---
-                                # [Step 2] strategy.py evaluate_risk_management 로직과 완전 동기화
-                                if position_side == "LONG":
-                                    profit_usdt = float(current_price - entry)
-                                    _real_sl = float(entry - (current_atr * 1.5))  # [v2.1] ATR*2.5 → 1.5
-                                else:
-                                    profit_usdt = float(entry - current_price)
-                                    _real_sl = float(entry + (current_atr * 1.5))  # [v2.1] ATR*2.5 → 1.5
+                                # [v2.2 DRY] evaluate_risk_management Tuple 언패킹 — 이중 계산 완전 제거
+                                # (action, real_sl, trailing_active, trailing_target)를 단일 소스(strategy.py)에서만 계산
+                                partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
+                                action, _real_sl, _trailing_active, _trailing_target = strategy_instance.evaluate_risk_management(
+                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed
+                                )
 
-                                _fee_cover_threshold = float((entry * strategy_instance.fee_margin) + (current_atr * 0.3))  # [v2.1] ATR*0.5 → 0.3
-                                _trailing_active = bool(profit_usdt >= _fee_cover_threshold)
-                                _trailing_target = 0.0
-
-                                if _trailing_active:
-                                    if position_side == "LONG":
-                                        _trailing_target = float(extreme_price - (current_atr * 0.8))  # [v2.1] ATR*1.0 → 0.8
-                                    else:
-                                        _trailing_target = float(extreme_price + (current_atr * 0.8))  # [v2.1] ATR*1.0 → 0.8
                                 bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                                 bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                                 bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
-
-                                partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
-                                action = strategy_instance.evaluate_risk_management(
-                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed
-                                )
 
                                 # --- [Step 2] 50% 분할 익절 (Partial TP) 조건 체크 ---
                                 if not partial_tp_executed:
@@ -839,16 +819,9 @@ async def async_trading_loop():
                         )
                         if any_other_position_open:
                             continue
-                            
-                        # 서킷 브레이커: 일일 손실 한도 초과 시 신규 진입 차단 (60초에 1회만 로그)
-                        if strategy_instance.is_daily_drawdown_exceeded(curr_bal):
-                            now = time.time()
-                            if now - _circuit_breaker_last_warn.get(symbol, 0) >= 60:
-                                cb_msg = f"⚠️ [{symbol}] 일일 손실 한도 초과 - 신규 진입 차단 (잔고: {curr_bal:.2f} USDT)"
-                                bot_global_state["logs"].append(cb_msg)
-                                logger.warning(cb_msg)
-                                send_telegram_sync(_tg_circuit_breaker(symbol, curr_bal))
-                                _circuit_breaker_last_warn[symbol] = now
+
+                        # [v2.2] 일일 킬스위치 단일 게이트 — 시스템 전체에서 쿨스위치 플래그 하나만 참조
+                        if strategy_instance.kill_switch_active and _time.time() < strategy_instance.kill_switch_until:
                             continue
 
                         # signal, analysis_msg는 위에서 이미 평가됨

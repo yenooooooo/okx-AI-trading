@@ -7,13 +7,11 @@ class TradingStrategy:
         매매 전략 및 시드 보호를 위한 핵심 파라미터 세팅
         [v2.1] 손익비 정상화 + 거시 추세 필터 + 연패 쿨다운 적용
         """
-        self.initial_seed = initial_seed
-        self.max_daily_loss_rate = 0.50       # 서킷 브레이커 (50%)
-        self.hard_stop_loss_rate = 0.005      # 레거시 호환성 유지 (ATR 기반으로 덡어씨워짐)
+        self.hard_stop_loss_rate = 0.005      # 레거시 호환성 유지
         self.trailing_stop_activation = 0.003 # 레거시 호환성 유지
         self.trailing_stop_rate = 0.002       # 레거시 호환성 유지
         self.volume_surge_multiplier = 1.5    # 거래량 폭발 기준 배수
-        self.fee_margin = 0.0015              # [v2.1] 수수료 방어 마진: 0.3% → 0.15% (OKX maker 실제 수수료 수준)
+        self.fee_margin = 0.0015              # [v2.1] 수수료 방어 마진: 0.15% (OKX maker 실제 수수료 수준)
         self.adx_threshold = 25.0             # ADX 추세 강도 필터 하한
         self.adx_max = 40.0                   # ADX 과열 필터 상한
         self.macro_cache = {}                 # 1시간봉 거시적 추세 데이터 캐싱
@@ -233,47 +231,51 @@ class TradingStrategy:
 
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False):
         """
-        파산 방지 핵심 모듈: 현재 진행 중인 포지션의 강제 청산(손절/익절) 여부 반환
-        [v2.1] 손익비 정상화:
-          - 하드 SL: ATR * 1.5 (기존 2.5에서 축소 — 잘못된 진입을 빨리 끊음)
-          - 트레일링 발동: fee_margin(0.15%) + ATR * 0.3 (기존 0.5에서 조기화)
-          - 트레일링 간격: ATR * 0.8 (기존 1.0에서 축소 — 수익 보호 강화)
+        파산 방지 핵심 모듈 — 포지션의 청산(손절/익절) 여부 + UI 표시값을 단일 반환
+        [v2.2 DRY] Tuple 반환으로 api_server.py 이중 계산 완전 제거
+        반환값: (action: str, real_sl: float, trailing_active: bool, trailing_target: float)
+          - action: 'STOP_LOSS' | 'TRAILING_STOP_EXIT' | 'KEEP'
+          - real_sl: 현재 하드 손절가 (프론트엔드 표시용)
+          - trailing_active: 트레일링 스탑 활성 여부
+          - trailing_target: 트레일링 청산 기준가 (활성 시)
         """
         if current_atr <= 0 or pd.isna(current_atr):
             current_atr = entry_price * 0.01
 
+        # ── 손절가 및 수익/낙폭 계산 ──
         if position_side == "LONG":
             profit_usdt = current_price - entry_price
             drawdown_usdt = highest_price - current_price
-            if partial_tp_executed:
-                hard_sl_price = entry_price + (entry_price * 0.001)
-            else:
-                hard_sl_price = entry_price - (current_atr * 1.5)  # [v2.1] 2.5 → 1.5
+            hard_sl_price = (entry_price + (entry_price * 0.001)) if partial_tp_executed else (entry_price - (current_atr * 1.5))
         elif position_side == "SHORT":
             profit_usdt = entry_price - current_price
             drawdown_usdt = current_price - highest_price
-            if partial_tp_executed:
-                hard_sl_price = entry_price - (entry_price * 0.001)
-            else:
-                hard_sl_price = entry_price + (current_atr * 1.5)  # [v2.1] 2.5 → 1.5
+            hard_sl_price = (entry_price - (entry_price * 0.001)) if partial_tp_executed else (entry_price + (current_atr * 1.5))
         else:
-            return "KEEP"
+            return "KEEP", 0.0, False, 0.0
 
-        # 1. 하드 스탑로스 — ATR * 1.5
+        # ── 1. 하드 스탑로스 (ATR * 1.5) ──
         if position_side == "LONG" and current_price <= hard_sl_price:
-            return "STOP_LOSS"
+            return "STOP_LOSS", hard_sl_price, False, 0.0
         if position_side == "SHORT" and current_price >= hard_sl_price:
-            return "STOP_LOSS"
+            return "STOP_LOSS", hard_sl_price, False, 0.0
 
-        # 2. 트레일링 스탑
-        # [v2.1] 발동 조건: fee_margin(0.15%) + ATR*0.3 (기존: fee_margin(0.3%) + ATR*0.5)
+        # ── 2. 트레일링 스탑 ──
+        # 발동: fee_margin(0.15%) + ATR*0.3 이상 수익 구간
         fee_cover_threshold = (entry_price * self.fee_margin) + (current_atr * 0.3)
-        if profit_usdt >= fee_cover_threshold:
-            # [v2.1] 추적 간격: ATR * 0.8 (기존 1.0)
-            if drawdown_usdt >= (current_atr * 0.8):
-                return "TRAILING_STOP_EXIT"
+        trailing_active = profit_usdt >= fee_cover_threshold
+        trailing_target = 0.0
 
-        return "KEEP"
+        if trailing_active:
+            if position_side == "LONG":
+                trailing_target = highest_price - (current_atr * 0.8)
+            else:
+                trailing_target = highest_price + (current_atr * 0.8)
+
+            if drawdown_usdt >= (current_atr * 0.8):
+                return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
+
+        return "KEEP", hard_sl_price, trailing_active, trailing_target
 
     def record_trade_result(self, is_loss):
         """
@@ -288,12 +290,6 @@ class TradingStrategy:
             self.consecutive_loss_count = 0
             self.loss_cooldown_until = 0
 
-    def is_daily_drawdown_exceeded(self, current_balance):
-        """일일 누적 손실 한도 초과 여부 확인 (뇌동매매 방지용)"""
-        loss_rate = (self.initial_seed - current_balance) / self.initial_seed
-        if loss_rate >= self.max_daily_loss_rate:
-            return True
-        return False
 
     def calculate_position_size_dynamic(self, equity, current_atr, leverage=1, contract_size=0.01):
         """
