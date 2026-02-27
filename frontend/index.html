@@ -985,53 +985,53 @@
                             <div class="grid grid-cols-2 gap-4">
                                 <!-- ADX 하한선 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">ADX 하한선</span>
-                                        <span class="text-[10px] font-mono text-gray-400">adx_threshold</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-purple-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">adx_threshold</span>
                                     </div>
                                     <input type="number" id="tuning-adx-threshold" min="0" max="100" step="0.1" value="25.0"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">진입 허용 최소 ADX (추세 강도 하한)</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">진입 허용 최소 ADX (추세 강도 하한)</p>
                                 </div>
                                 <!-- ADX 상한선 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">ADX 상한선</span>
-                                        <span class="text-[10px] font-mono text-gray-400">adx_max</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-purple-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">adx_max</span>
                                     </div>
                                     <input type="number" id="tuning-adx-max" min="0" max="100" step="0.1" value="40.0"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">과열 구간 차단 ADX 상한</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">과열 구간 차단 ADX 상한</p>
                                 </div>
                                 <!-- CHOP 상한선 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">CHOP 상한선</span>
-                                        <span class="text-[10px] font-mono text-gray-400">chop_threshold</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-purple-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">chop_threshold</span>
                                     </div>
                                     <input type="number" id="tuning-chop-threshold" min="0" max="100" step="0.1" value="61.8"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">이상 시 횡보 판정 → 진입 차단. 권장: 61.8</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">이상 시 횡보 판정 → 진입 차단. 권장: 61.8</p>
                                 </div>
                                 <!-- 거래량 서지 배율 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">거래량 서지 배율</span>
-                                        <span class="text-[10px] font-mono text-gray-400">volume_surge_multiplier</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-purple-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">volume_surge_multiplier</span>
                                     </div>
                                     <input type="number" id="tuning-volume-surge" min="1.0" max="10.0" step="0.1" value="1.5"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">평균 대비 N배 이상 거래량 서지 조건</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">평균 대비 N배 이상 거래량 서지 조건</p>
                                 </div>
                                 <!-- 수수료 마진 (full-width) -->
                                 <div class="col-span-2">
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">수수료 마진</span>
-                                        <span class="text-[10px] font-mono text-gray-400">fee_margin</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-purple-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">fee_margin</span>
                                     </div>
                                     <input type="number" id="tuning-fee-margin" min="0" max="0.01" step="0.0001" value="0.0015"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-purple-300 text-sm font-mono focus:outline-none focus:border-purple-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">수수료 버퍼 — 진입 실질 손익 보정값 (예: 0.0015 = 0.15%)</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">수수료 버퍼 — 진입 실질 손익 보정값 (예: 0.0015 = 0.15%)</p>
                                 </div>
                             </div>
                         </div>
@@ -1046,53 +1046,53 @@
                             <div class="grid grid-cols-2 gap-4">
                                 <!-- 하드 손절 비율 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">하드 손절 비율</span>
-                                        <span class="text-[10px] font-mono text-gray-400">hard_stop_loss_rate</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-red-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">hard_stop_loss_rate</span>
                                     </div>
                                     <input type="number" id="tuning-hard-stop-loss" min="0.001" max="0.1" step="0.001" value="0.005"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-red-300 text-sm font-mono focus:outline-none focus:border-red-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">강제 손절 발동 임계값 (예: 0.005 = 0.5%)</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">강제 손절 발동 임계값 (예: 0.005 = 0.5%)</p>
                                 </div>
                                 <!-- 트레일링 발동 수익 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">트레일링 발동 수익</span>
-                                        <span class="text-[10px] font-mono text-gray-400">trailing_stop_activation</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-red-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">trailing_stop_activation</span>
                                     </div>
                                     <input type="number" id="tuning-trailing-activation" min="0.001" max="0.1" step="0.001" value="0.003"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-red-300 text-sm font-mono focus:outline-none focus:border-red-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">트레일링 스탑 발동 최소 수익률</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">트레일링 스탑 발동 최소 수익률</p>
                                 </div>
                                 <!-- 트레일링 추적 거리 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">트레일링 추적 거리</span>
-                                        <span class="text-[10px] font-mono text-gray-400">trailing_stop_rate</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-red-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">trailing_stop_rate</span>
                                     </div>
                                     <input type="number" id="tuning-trailing-rate" min="0.001" max="0.1" step="0.001" value="0.002"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-red-300 text-sm font-mono focus:outline-none focus:border-red-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">고점/저점 대비 추적 허용 낙폭 거리</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">고점/저점 대비 추적 허용 낙폭 거리</p>
                                 </div>
                                 <!-- 연패 쿨다운 횟수 -->
                                 <div>
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">연패 쿨다운 횟수</span>
-                                        <span class="text-[10px] font-mono text-gray-400">cooldown_losses_trigger</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-red-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">cooldown_losses_trigger</span>
                                     </div>
                                     <input type="number" id="tuning-cooldown-losses" min="1" max="20" step="1" value="3"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-red-300 text-sm font-mono focus:outline-none focus:border-red-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">쿨다운 발동 연속 손실 횟수 임계값</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">쿨다운 발동 연속 손실 횟수 임계값</p>
                                 </div>
                                 <!-- 쿨다운 차단 시간 (full-width) -->
                                 <div class="col-span-2">
-                                    <div class="flex justify-between items-baseline mb-1.5">
+                                    <div class="flex justify-between items-center mb-1.5">
                                         <span class="text-xs font-mono font-bold text-gray-200">쿨다운 차단 시간 (초)</span>
-                                        <span class="text-[10px] font-mono text-gray-400">cooldown_duration_sec</span>
+                                        <span class="bg-navy-800/80 px-2 py-0.5 rounded text-red-300/80 font-mono text-[9px] tracking-wider border border-navy-border/50">cooldown_duration_sec</span>
                                     </div>
                                     <input type="number" id="tuning-cooldown-duration" min="60" max="86400" step="60" value="900"
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-red-300 text-sm font-mono focus:outline-none focus:border-red-500 text-center">
-                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5">연패 쿨다운 발동 후 신규 진입 차단 시간 (예: 900 = 15분)</p>
+                                    <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">연패 쿨다운 발동 후 신규 진입 차단 시간 (예: 900 = 15분)</p>
                                 </div>
                             </div>
                         </div>
@@ -1115,47 +1115,47 @@
                             <h4 class="text-xs font-mono font-bold text-yellow-400 tracking-widest uppercase mb-1 flex items-center gap-2">
                                 ⚡ 원클릭 전술 프리셋
                             </h4>
-                            <p class="text-[10px] font-mono text-gray-500 mb-4">클릭 즉시 10개 파라미터 일괄 적용 및 서버 저장</p>
+                            <p class="text-[10px] font-mono text-gray-400 mb-4 leading-relaxed">클릭 즉시 10개 파라미터 일괄 적용 및 서버 저장</p>
                             <div class="flex flex-col gap-2.5">
                                 <button onclick="applyPreset('sniper')"
                                     class="w-full text-left px-3 py-2.5 rounded border border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/15 hover:border-yellow-400 transition-all group">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-mono font-bold text-yellow-300">🎯 스나이퍼</span>
-                                        <span class="text-[9px] font-mono text-gray-500 group-hover:text-gray-300 transition-colors">보수적 · 고정밀</span>
+                                        <span class="text-[9px] font-mono text-gray-400 group-hover:text-white transition-colors">보수적 · 고정밀</span>
                                     </div>
-                                    <p class="text-[10px] font-mono text-gray-500 mt-1">ADX 30~45 · CHOP 55 · 빡빡한 손절 · 2연패 쿨다운 30분</p>
+                                    <p class="text-gray-400 font-mono text-[9.5px] mt-1">ADX 30~45 · CHOP 55 · 빡빡한 손절 · 2연패 쿨다운 30분</p>
                                 </button>
                                 <button onclick="applyPreset('trend_rider')"
                                     class="w-full text-left px-3 py-2.5 rounded border border-blue-500/30 bg-blue-500/5 hover:bg-blue-500/15 hover:border-blue-400 transition-all group">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-mono font-bold text-blue-300">🌊 트렌드 라이더</span>
-                                        <span class="text-[9px] font-mono text-gray-500 group-hover:text-gray-300 transition-colors">추세추종 · 이익극대</span>
+                                        <span class="text-[9px] font-mono text-gray-400 group-hover:text-white transition-colors">추세추종 · 이익극대</span>
                                     </div>
-                                    <p class="text-[10px] font-mono text-gray-500 mt-1">ADX 25~60 · 긴 트레일링 · 넓은 스탑 · 4연패 10분</p>
+                                    <p class="text-gray-400 font-mono text-[9.5px] mt-1">ADX 25~60 · 긴 트레일링 · 넓은 스탑 · 4연패 10분</p>
                                 </button>
                                 <button onclick="applyPreset('scalper')"
                                     class="w-full text-left px-3 py-2.5 rounded border border-neon-green/30 bg-neon-green/5 hover:bg-neon-green/10 hover:border-neon-green transition-all group">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-mono font-bold text-neon-green">⚡ 스캘퍼</span>
-                                        <span class="text-[9px] font-mono text-gray-500 group-hover:text-gray-300 transition-colors">고빈도 · 단타</span>
+                                        <span class="text-[9px] font-mono text-gray-400 group-hover:text-white transition-colors">고빈도 · 단타</span>
                                     </div>
-                                    <p class="text-[10px] font-mono text-gray-500 mt-1">ADX 20~50 · 좁은 손절·익절 · 5연패 5분 쿨다운</p>
+                                    <p class="text-gray-400 font-mono text-[9.5px] mt-1">ADX 20~50 · 좁은 손절·익절 · 5연패 5분 쿨다운</p>
                                 </button>
                                 <button onclick="applyPreset('iron_dome')"
                                     class="w-full text-left px-3 py-2.5 rounded border border-orange-500/30 bg-orange-500/5 hover:bg-orange-500/15 hover:border-orange-400 transition-all group">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-mono font-bold text-orange-300">🛡️ 아이언 돔</span>
-                                        <span class="text-[9px] font-mono text-gray-500 group-hover:text-gray-300 transition-colors">철벽방어 · 휩쏘</span>
+                                        <span class="text-[9px] font-mono text-gray-400 group-hover:text-white transition-colors">철벽방어 · 휩쏘</span>
                                     </div>
-                                    <p class="text-[10px] font-mono text-gray-500 mt-1">ADX 28~42 · CHOP 50 · 2연패 즉시 1시간 차단</p>
+                                    <p class="text-gray-400 font-mono text-[9.5px] mt-1">ADX 28~42 · CHOP 50 · 2연패 즉시 1시간 차단</p>
                                 </button>
                                 <button onclick="applyPreset('factory_reset')"
                                     class="w-full text-left px-3 py-2.5 rounded border border-navy-border bg-navy-800/50 hover:bg-navy-700 hover:border-gray-500 transition-all group">
                                     <div class="flex items-center justify-between">
                                         <span class="text-xs font-mono font-bold text-gray-300">🔄 팩토리 리셋</span>
-                                        <span class="text-[9px] font-mono text-gray-500 group-hover:text-gray-300 transition-colors">초기 기본값 복원</span>
+                                        <span class="text-[9px] font-mono text-gray-400 group-hover:text-white transition-colors">초기 기본값 복원</span>
                                     </div>
-                                    <p class="text-[10px] font-mono text-gray-500 mt-1">모든 파라미터를 초기 권장값으로 완전 초기화</p>
+                                    <p class="text-gray-400 font-mono text-[9.5px] mt-1">모든 파라미터를 초기 권장값으로 완전 초기화</p>
                                 </button>
                             </div>
                         </div>
@@ -1170,19 +1170,19 @@
                             <div class="space-y-3">
                                 <div class="p-3 rounded bg-navy-900/60 border border-navy-border/50">
                                     <p class="text-[11px] font-mono font-bold text-purple-300 mb-1.5">ADX — 추세 강도 지수 (Average Directional Index)</p>
-                                    <p class="text-[10px] font-mono text-gray-300 leading-relaxed">추세가 얼마나 강한지를 측정합니다. <span class="text-white font-bold">25 이하</span>는 방향성 없는 횡보장, <span class="text-white font-bold">40 이상</span>은 과열 구간입니다. 하한~상한 사이의 건강한 추세에서만 진입을 허용합니다.</p>
+                                    <p class="text-[11px] font-mono text-gray-300 leading-relaxed">추세가 얼마나 강한지를 측정합니다. <strong class="text-white font-bold border-b border-gray-500">25 이하</strong>는 방향성 없는 횡보장, <strong class="text-neon-red font-bold">40 이상</strong>은 과열 구간입니다. 하한~상한 사이의 건강한 추세에서만 진입을 허용합니다.</p>
                                 </div>
                                 <div class="p-3 rounded bg-navy-900/60 border border-navy-border/50">
                                     <p class="text-[11px] font-mono font-bold text-purple-300 mb-1.5">CHOP — 횡보 탐지 지수 (Choppiness Index)</p>
-                                    <p class="text-[10px] font-mono text-gray-300 leading-relaxed"><span class="text-white font-bold">61.8 이상</span>이면 가격이 톱니바퀴처럼 무작위로 움직이는 위험 구간입니다. 이 구간에서의 진입은 휩쏘(Whipsaw)에 의한 연속 손절의 주요 원인이므로 강제 차단합니다.</p>
+                                    <p class="text-[11px] font-mono text-gray-300 leading-relaxed"><strong class="text-neon-red font-bold">61.8 이상</strong>이면 가격이 톱니바퀴처럼 무작위로 움직이는 위험 구간입니다. 이 구간에서의 진입은 <span class="text-purple-400 font-mono">Whipsaw(휩쏘)</span>에 의한 연속 손절의 주요 원인이므로 강제 차단합니다.</p>
                                 </div>
                                 <div class="p-3 rounded bg-navy-900/60 border border-navy-border/50">
                                     <p class="text-[11px] font-mono font-bold text-red-300 mb-1.5">Trailing Stop — 이익 추적 청산</p>
-                                    <p class="text-[10px] font-mono text-gray-300 leading-relaxed"><span class="text-white font-bold">발동 수익률</span> 이상 수익 시 활성화됩니다. 이후 고점(롱)/저점(숏) 대비 <span class="text-white font-bold">추적 거리</span>만큼 역방향 이동 시 청산합니다. 이익을 보호하면서 추세를 최대한 탑승합니다.</p>
+                                    <p class="text-[11px] font-mono text-gray-300 leading-relaxed"><span class="text-white font-bold">발동 수익률</span> 이상 수익 시 활성화됩니다. 이후 고점(롱)/저점(숏) 대비 <strong class="text-neon-green font-bold">추적 거리</strong>만큼 역방향 이동 시 청산합니다. 이익을 보호하면서 추세를 최대한 탑승합니다.</p>
                                 </div>
                                 <div class="p-3 rounded bg-navy-900/60 border border-navy-border/50">
                                     <p class="text-[11px] font-mono font-bold text-red-300 mb-1.5">Cooldown — 뇌동매매 방지 회로차단기</p>
-                                    <p class="text-[10px] font-mono text-gray-300 leading-relaxed"><span class="text-white font-bold">N연패</span> 시 감정적 재진입을 막기 위해 설정된 시간(초) 동안 신규 진입을 완전 차단합니다. 손실 구간에서의 무모한 추격매수를 막는 심리적 Circuit Breaker입니다.</p>
+                                    <p class="text-[11px] font-mono text-gray-300 leading-relaxed"><strong class="text-red-400 font-bold">N연패</strong> 시 감정적 재진입을 막기 위해 설정된 시간(초) 동안 신규 진입을 <strong class="text-white font-bold underline decoration-red-500 underline-offset-2">완전 차단</strong>합니다. 손실 구간에서의 무모한 추격매수를 막는 심리적 Circuit Breaker입니다.</p>
                                 </div>
                             </div>
                         </div>
