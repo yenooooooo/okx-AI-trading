@@ -894,6 +894,64 @@ async function syncChart() {
     }
 }
 
+// --- Terminal Syntax Highlighter ---
+/**
+ * formatTerminalMsg(rawMsg)
+ * 원시 로그 문자열을 Cyberpunk 구문 강조 HTML로 변환.
+ * 처리 순서: ① 뱃지 치환 → ② 가격 → ③ 수익률 → ④ 방향성
+ * 각 단계의 치환 결과가 다음 단계의 패턴과 충돌하지 않도록 순서를 고정.
+ */
+function formatTerminalMsg(rawMsg) {
+    let html = rawMsg;
+
+    // ── ① 뱃지 치환 (bracket tag → colored badge span) ──
+    // [시스템 뱃지] 파란색
+    html = html.replace(/\[엔진\]/g,
+        '<span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">ENGINE</span>');
+    html = html.replace(/\[시스템\]/g,
+        '<span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">SYS</span>');
+    html = html.replace(/\[스캐너 가동\]/g,
+        '<span class="inline-block bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">SCANNER</span>');
+
+    // [상태 뱃지] 회색
+    html = html.replace(/\[감시\]/g,
+        '<span class="inline-block bg-gray-500/10 text-gray-400 border border-gray-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">WATCH</span>');
+    html = html.replace(/\[봇\]/g,
+        '<span class="inline-block bg-gray-500/10 text-gray-400 border border-gray-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">BOT</span>');
+
+    // [경고 뱃지] 빨간색 — 더 구체적인 패턴을 먼저 처리해 충돌 방지
+    html = html.replace(/\[킬스위치 발동\]/g,
+        '<span class="inline-block bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1 font-bold">KILL·SWITCH</span>');
+    html = html.replace(/\[소방훈련\]/g,
+        '<span class="inline-block bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1 font-bold">FIRE·DRILL</span>');
+    html = html.replace(/\[긴급\]/g,
+        '<span class="inline-block bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1 font-bold">CRITICAL</span>');
+    html = html.replace(/\[오류\]/g,
+        '<span class="inline-block bg-red-500/10 text-red-400 border border-red-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1 font-bold">ALERT</span>');
+
+    // [PAPER 모드 뱃지] 보라색
+    html = html.replace(/\[👻 PAPER\]/g,
+        '<span class="inline-block bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">PAPER</span>');
+
+    // ── ② 가격 ($N,NNN.NN) 하이라이팅 — 흰색 굵게 ──
+    html = html.replace(/(\$\d{1,3}(?:,\d{3})*(?:\.\d+)?)/g,
+        '<strong class="text-white font-bold tracking-wider">$1</strong>');
+
+    // ── ③ 수익률 (+/-N.NN%) 하이라이팅 — + 초록 / - 빨간 ──
+    html = html.replace(/(\+\d+(?:\.\d+)?%)/g,
+        '<strong class="text-neon-green font-bold">$1</strong>');
+    html = html.replace(/(-\d+(?:\.\d+)?%)/g,
+        '<strong class="text-neon-red font-bold">$1</strong>');
+
+    // ── ④ 방향성 (LONG / SHORT) 하이라이팅 — 단어 경계 `\b` 로 부분 매치 차단 ──
+    html = html.replace(/\bLONG\b/g,
+        '<span class="text-neon-green font-bold border-b border-neon-green/30">LONG</span>');
+    html = html.replace(/\bSHORT\b/g,
+        '<span class="text-neon-red font-bold border-b border-neon-red/30">SHORT</span>');
+
+    return html;
+}
+
 // --- Terminal Logs ---
 async function updateLogs() {
     try {
@@ -916,6 +974,7 @@ async function updateLogs() {
             if (log.id && processedLogIds.has(log.id)) return;
 
             const msg = log.message || '';
+            const formattedMsg = formatTerminalMsg(msg);
 
             // ── [카테고리 분류 알고리즘] ALERT > TRADE > SYSTEM 우선순위 ──
             const isAlertLevel = log.level === 'ERROR'
@@ -954,7 +1013,7 @@ async function updateLogs() {
             const logDiv = document.createElement('div');
             logDiv.className = colorClass + ' break-words';
             logDiv.dataset.category = category;
-            logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${msg}`;
+            logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${formattedMsg}`;
 
             // ── 현재 필터와 불일치 시 처음부터 숨김 상태로 append ──
             if (currentLogFilter !== 'ALL' && category !== currentLogFilter) {
