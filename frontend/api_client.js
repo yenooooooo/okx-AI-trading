@@ -2,10 +2,60 @@ const API_URL = `/api/v1`;
 let chart = null;
 let candleSeries = null;
 let lastLogId = 0;
-let lastCandleData = null; // WebSocket 실시간 캔들 업데이트용
+let lastCandleData = null;   // WebSocket 실시간 캔들 업데이트용
 let currentSymbol = 'BTC/USDT:USDT'; // 현재 감시 심볼 캐시 (syncConfig에서 갱신)
+let isInitialLogLoad = true; // 초기 로드 폭탄 방어: false 전환 후부터 토스트 발생
 
 // --- UI Utilities ---
+
+/**
+ * showToast(title, message, type)
+ * type: 'SUCCESS' | 'ERROR' | 'INFO'
+ * 4초 후 fade-out 후 DOM 자동 제거 (메모리 누수 없음)
+ */
+function showToast(title, message, type) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const themes = {
+        SUCCESS: { border: '#00ff88', titleColor: '#00ff88', icon: '✅', bg: 'rgba(0,255,136,0.06)' },
+        ERROR:   { border: '#ff4d4d', titleColor: '#ff4d4d', icon: '🚨', bg: 'rgba(255,77,77,0.06)' },
+        INFO:    { border: '#60a5fa', titleColor: '#60a5fa', icon: '⚡', bg: 'rgba(96,165,250,0.06)' },
+    };
+    const t = themes[type] || themes.INFO;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast-enter pointer-events-auto';
+    toast.style.cssText = `
+        min-width:280px; max-width:360px;
+        background:rgba(22,27,34,0.92);
+        backdrop-filter:blur(12px);
+        border:1px solid ${t.border};
+        border-left:3px solid ${t.border};
+        border-radius:0.625rem;
+        padding:10px 14px;
+        box-shadow:0 4px 24px rgba(0,0,0,0.4);
+        background-color:${t.bg};
+    `;
+    toast.innerHTML = `
+        <div style="display:flex;align-items:center;gap:7px;margin-bottom:3px;">
+            <span style="font-size:13px;">${t.icon}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:${t.titleColor};letter-spacing:0.05em;">${title}</span>
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#8b949e;line-height:1.5;word-break:break-word;max-height:54px;overflow:hidden;">${message}</div>
+    `;
+
+    container.appendChild(toast);
+
+    // 4초 후 fade-out → 애니메이션 종료 시 DOM 제거
+    const DISPLAY_MS = 4000;
+    const ANIM_MS = 350;
+    setTimeout(() => {
+        toast.classList.remove('toast-enter');
+        toast.classList.add('toast-leave');
+        setTimeout(() => toast.remove(), ANIM_MS);
+    }, DISPLAY_MS);
+}
 
 // CountUp animation utility
 function updateNumberText(elementId, newValue, formatCb) {
@@ -757,10 +807,34 @@ async function updateLogs() {
             fragment.appendChild(logDiv);
 
             if (log.id && log.id > lastLogId) lastLogId = log.id;
+
+            // ── 토스트 트리거 (초기 로드 폭탄 방어: isInitialLogLoad가 false일 때만) ──
+            if (!isInitialLogLoad) {
+                const isClear    = msg.includes('청산');
+                const isProfit   = msg.includes('+') || msg.includes('수익률: +');
+                const isLoss     = msg.includes('-');
+                const isEntry    = msg.includes('진입 성공');
+                const isAlert    = msg.includes('킬스위치') || msg.includes('쿨다운');
+
+                if (isClear && isProfit) {
+                    showToast('TAKE PROFIT (익절)', msg, 'SUCCESS');
+                } else if (isClear && isLoss) {
+                    showToast('STOP LOSS (손절)', msg, 'ERROR');
+                } else if (isEntry) {
+                    showToast('POSITION ENTRY (진입)', msg, 'INFO');
+                } else if (isAlert) {
+                    showToast('SYSTEM ALERT (경고)', msg, 'ERROR');
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
         });
 
         logContainer.appendChild(fragment);
         logContainer.scrollTop = logContainer.scrollHeight;
+
+        // 첫 번째 폴링 완료 후 플래그 해제 → 이후 신규 로그만 토스트 발생
+        isInitialLogLoad = false;
+
     } catch (error) {
         console.warn("Log Sync Failed:", error);
     }

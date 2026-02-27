@@ -156,10 +156,28 @@
             box-shadow: 0 0 30px rgba(168, 85, 247, 0.25) !important;
             border-color: rgba(168, 85, 247, 0.5) !important;
         }
+        /* ── Toast Notification ── */
+        @keyframes slide-in-right {
+            from { opacity: 0; transform: translateX(110%); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes fade-out-right {
+            from { opacity: 1; transform: translateX(0); }
+            to   { opacity: 0; transform: translateX(110%); }
+        }
+        .toast-enter {
+            animation: slide-in-right 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+        }
+        .toast-leave {
+            animation: fade-out-right 0.35s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+        }
     </style>
 </head>
 
 <body class="min-h-screen flex flex-col p-4 gap-4 font-sans">
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-[9999] flex flex-col gap-3 pointer-events-none"></div>
+
     <!-- Shadow Mode Watermark Overlay -->
     <div id="shadow-watermark" class="shadow-watermark"></div>
     <!-- Header -->
