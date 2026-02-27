@@ -869,10 +869,23 @@
         <div class="col-span-12 glass-panel flex flex-col h-56 mt-2 mb-4 relative z-0">
             <div
                 class="flex justify-between items-center px-4 py-2 border-b border-navy-border bg-navy-900/80 rounded-t-xl z-20">
-                <span class="text-[11px] font-mono text-gray-400 flex items-center gap-2">
-                    <div class="w-2 h-2 rounded-full bg-neon-green animate-pulse"></div>
-                    root@antigravity:~# tail -f /var/log/trading.core
-                </span>
+                <div class="flex items-center gap-3">
+                    <span class="text-[11px] font-mono text-gray-400 flex items-center gap-2">
+                        <div class="w-2 h-2 rounded-full bg-neon-green animate-pulse"></div>
+                        root@antigravity:~#
+                    </span>
+                    <!-- Log Category Filter Tabs -->
+                    <div class="flex items-center gap-1">
+                        <button onclick="setLogFilter('ALL')" data-filter="ALL"
+                            class="log-filter-btn text-[9px] font-mono px-2 py-0.5 rounded border border-neon-green text-neon-green bg-neon-green/5 transition">ALL</button>
+                        <button onclick="setLogFilter('TRADE')" data-filter="TRADE"
+                            class="log-filter-btn text-[9px] font-mono px-2 py-0.5 rounded border border-navy-border/50 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition">🎯 TRADE</button>
+                        <button onclick="setLogFilter('SYSTEM')" data-filter="SYSTEM"
+                            class="log-filter-btn text-[9px] font-mono px-2 py-0.5 rounded border border-navy-border/50 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition">⚙️ SYSTEM</button>
+                        <button onclick="setLogFilter('ALERT')" data-filter="ALERT"
+                            class="log-filter-btn text-[9px] font-mono px-2 py-0.5 rounded border border-navy-border/50 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition">🚨 ALERT</button>
+                    </div>
+                </div>
                 <button onclick="clearLogs()"
                     class="text-[10px] font-mono text-gray-500 hover:text-text-main transition uppercase border border-navy-border px-2 py-0.5 rounded hover:bg-navy-800">Clear_Buffer</button>
             </div>

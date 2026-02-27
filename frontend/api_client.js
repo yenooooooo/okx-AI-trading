@@ -5,6 +5,8 @@ let lastLogId = 0;
 let lastCandleData = null;   // WebSocket 실시간 캔들 업데이트용
 let currentSymbol = 'BTC/USDT:USDT'; // 현재 감시 심볼 캐시 (syncConfig에서 갱신)
 let isInitialLogLoad = true; // 초기 로드 폭탄 방어: false 전환 후부터 토스트 발생
+const processedLogIds = new Set(); // Race condition 방어: 이미 렌더링된 로그 ID 기록
+let currentLogFilter = 'ALL';      // 터미널 카테고리 필터 현재 상태
 
 // --- UI Utilities ---
 
@@ -904,13 +906,39 @@ async function updateLogs() {
         const logContainer = document.getElementById('system-log-terminal');
         if (!logContainer || !logs.length) return;
 
+        // Set 메모리 누수 방지: 1000개 초과 시 초기화 (lastLogId가 서버 페이지네이션 담당)
+        if (processedLogIds.size > 1000) processedLogIds.clear();
+
         const fragment = document.createDocumentFragment();
 
         logs.forEach(log => {
+            // ── [Race Condition 방어] 이미 렌더링된 ID는 즉시 skip ──
+            if (log.id && processedLogIds.has(log.id)) return;
+
             const msg = log.message || '';
 
+            // ── [카테고리 분류 알고리즘] ALERT > TRADE > SYSTEM 우선순위 ──
+            const isAlertLevel = log.level === 'ERROR'
+                || msg.includes('[오류]') || msg.includes('[긴급]')
+                || msg.includes('킬스위치') || msg.includes('쿨다운')
+                || msg.includes('💀') || msg.includes('🚨');
+            const isTradeKeyword = (msg.includes('진입') || msg.includes('청산')
+                || msg.includes('체결') || msg.includes('LONG') || msg.includes('SHORT')
+                || msg.includes('PAPER') || msg.includes('TEST')
+                || msg.includes('🎯') || msg.includes('💰')
+                || msg.includes('📈') || msg.includes('📉'))
+                && !msg.includes('타점 탐색 중'); // 반복성 탐색 로그는 SYSTEM 분류
+
+            let category = 'SYSTEM';
+            if (isAlertLevel) {
+                category = 'ALERT';
+            } else if (isTradeKeyword) {
+                category = 'TRADE';
+            }
+
+            // ── 색상 클래스 (기존 로직 100% 보존) ──
             let colorClass = 'text-gray-400';
-            if (log.level === 'ERROR' || msg.includes('[오류]') || msg.includes('[긴급]')) {
+            if (isAlertLevel) {
                 colorClass = 'text-neon-red drop-shadow-[0_0_5px_rgba(255,77,77,0.8)]';
             } else if (msg.includes('[봇]') || msg.includes('진입 성공') || msg.includes('청산') || msg.includes('[엔진]') || msg.includes('[스캐너 가동]')) {
                 colorClass = 'text-neon-green drop-shadow-[0_0_5px_rgba(0,255,136,0.8)]';
@@ -925,18 +953,29 @@ async function updateLogs() {
 
             const logDiv = document.createElement('div');
             logDiv.className = colorClass + ' break-words';
+            logDiv.dataset.category = category;
             logDiv.innerHTML = `<span class="text-gray-600 mr-2">[${timeStr}]</span><span class="text-gray-500 mr-2">[system@antigravity ~]$</span>${msg}`;
+
+            // ── 현재 필터와 불일치 시 처음부터 숨김 상태로 append ──
+            if (currentLogFilter !== 'ALL' && category !== currentLogFilter) {
+                logDiv.style.display = 'none';
+            }
+
             fragment.appendChild(logDiv);
 
-            if (log.id && log.id > lastLogId) lastLogId = log.id;
+            // ── ID 갱신 및 렌더링 확정 기록 ──
+            if (log.id) {
+                if (log.id > lastLogId) lastLogId = log.id;
+                processedLogIds.add(log.id);
+            }
 
             // ── 토스트 트리거 (초기 로드 폭탄 방어: isInitialLogLoad가 false일 때만) ──
             if (!isInitialLogLoad) {
-                const isClear    = msg.includes('청산');
-                const isProfit   = msg.includes('+') || msg.includes('수익률: +');
-                const isLoss     = msg.includes('-');
-                const isEntry    = msg.includes('진입 성공');
-                const isAlert    = msg.includes('킬스위치') || msg.includes('쿨다운');
+                const isClear  = msg.includes('청산');
+                const isProfit = msg.includes('+') || msg.includes('수익률: +');
+                const isLoss   = msg.includes('-');
+                const isEntry  = msg.includes('진입 성공');
+                const isAlert  = msg.includes('킬스위치') || msg.includes('쿨다운');
 
                 if (isClear && isProfit) {
                     showToast('TAKE PROFIT (익절)', msg, 'SUCCESS');
@@ -948,7 +987,6 @@ async function updateLogs() {
                     showToast('SYSTEM ALERT (경고)', msg, 'ERROR');
                 }
             }
-            // ─────────────────────────────────────────────────────────────────
         });
 
         logContainer.appendChild(fragment);
@@ -966,8 +1004,28 @@ function clearLogs() {
     const logContainer = document.getElementById('system-log-terminal');
     if (logContainer) {
         logContainer.innerHTML = '<div class="text-gray-500">[system@antigravity ~]$ Buffer cleared.</div>';
-        // lastLogId는 유지 — 화면만 지우고 이미 본 로그는 재표시하지 않음
+        // lastLogId / processedLogIds 유지 — 화면만 지우고 이미 본 로그는 재표시하지 않음
     }
+}
+
+function setLogFilter(filterType) {
+    currentLogFilter = filterType;
+
+    // ── 버튼 활성 스타일 갱신 ──
+    document.querySelectorAll('.log-filter-btn').forEach(btn => {
+        if (btn.dataset.filter === filterType) {
+            btn.className = 'log-filter-btn text-[9px] font-mono px-2 py-0.5 rounded border border-neon-green text-neon-green bg-neon-green/5 transition';
+        } else {
+            btn.className = 'log-filter-btn text-[9px] font-mono px-2 py-0.5 rounded border border-navy-border/50 text-gray-500 hover:text-gray-300 hover:border-gray-500 transition';
+        }
+    });
+
+    // ── 기존 로그 div 표시/숨김 토글 ──
+    const logContainer = document.getElementById('system-log-terminal');
+    if (!logContainer) return;
+    logContainer.querySelectorAll('[data-category]').forEach(div => {
+        div.style.display = (filterType === 'ALL' || div.dataset.category === filterType) ? '' : 'none';
+    });
 }
 
 // --- Stats Tracker ---
