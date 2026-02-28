@@ -375,7 +375,11 @@
                         잔고 비율 자동 계산</p>
 
                     <div id="manual-override-panel"
-                        class="hidden mt-3 p-4 bg-navy-900/40 rounded-lg border border-navy-border/50 space-y-4">
+                        class="hidden mt-3 p-4 bg-navy-900/40 rounded-lg border border-navy-border/50 space-y-4 relative transition-all duration-300">
+                        <!-- 경고 뱃지: 오버라이드 ON 시 toggleOverrideVisuals()가 hidden 제거 -->
+                        <div id="override-warning-badge" class="hidden absolute -top-3 right-4 bg-orange-500 text-black text-[9px] font-extrabold px-2 py-0.5 rounded shadow-[0_0_8px_rgba(249,115,22,0.6)] animate-pulse pointer-events-none z-10">
+                            ⚠️ AI OVERRIDDEN
+                        </div>
                         <div class="mb-4">
                             <div class="flex justify-between text-xs mb-2">
                                 <span class="text-gray-400">타격 규모 (Target Size)</span>

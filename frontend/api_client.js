@@ -692,6 +692,8 @@ async function syncConfig() {
                 if (toggle) toggle.checked = enabled;
                 if (panel) panel.classList.toggle('hidden', !enabled);
                 if (status) status.textContent = enabled ? '활성 — 아래 설정값으로 자동매매' : '해제 — 잔고 비율 자동 계산';
+                // 서버 상태와 시각적 경계 모드를 항상 일치시킴 (페이지 로드/30초 주기 동기화)
+                toggleOverrideVisuals(enabled);
             } else if (key === 'manual_amount') {
                 const input = document.getElementById('manual-amount');
                 const display = document.getElementById('manual-amount-display');
@@ -1431,6 +1433,23 @@ function updateOrderPreview() {
     }
 }
 
+// --- Override Visual Alert: 수동 오버라이드 ON/OFF 경계 모드 동기화 ---
+function toggleOverrideVisuals(isActive) {
+    const panel = document.getElementById('manual-override-panel');
+    const badge = document.getElementById('override-warning-badge');
+    if (!panel || !badge) return;
+
+    if (isActive) {
+        panel.classList.remove('border-navy-border/50');
+        panel.classList.add('border-orange-500/80', 'shadow-[0_0_15px_rgba(249,115,22,0.15)]');
+        badge.classList.remove('hidden');
+    } else {
+        panel.classList.remove('border-orange-500/80', 'shadow-[0_0_15px_rgba(249,115,22,0.15)]');
+        panel.classList.add('border-navy-border/50');
+        badge.classList.add('hidden');
+    }
+}
+
 async function toggleManualOverride() {
     const enabled = document.getElementById('manual-override-toggle').checked;
     const status = document.getElementById('override-status');
@@ -1445,6 +1464,9 @@ async function toggleManualOverride() {
             status.classList.remove('text-neon-green');
         }
     }
+
+    // 클릭 즉시(await 전) 비주얼 경계 모드 동기화 — 서버 응답 대기 없이 즉각 반응
+    toggleOverrideVisuals(enabled);
 
     await fetch(`${API_URL}/config?key=manual_override_enabled&value=${enabled}`, { method: 'POST' });
 }
