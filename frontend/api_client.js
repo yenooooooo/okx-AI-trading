@@ -191,15 +191,18 @@ async function syncBotStatus() {
 
         // 2. Position
         const symbols = data.symbols || {};
-        const firstSymbol = Object.keys(symbols)[0];
-        const symbolData = firstSymbol ? symbols[firstSymbol] : null;
+        // Chimera 버그 수정: Object.keys()[0]은 메모리 순서 기반이라 타겟 변경 후에도 구형 심볼을 가리킴.
+        // active_target은 서버가 get_config('symbols')[0]을 직접 읽어 반환하므로 항상 최신 타겟이 보장됨.
+        const activeTarget = data.active_target || Object.keys(symbols)[0];
+        const symbolData = activeTarget ? symbols[activeTarget] : null;
 
         // --- Auto-Tracking: 백엔드 타겟 변경 자동 감지 → Deep Sync 트리거 ---
-        if (firstSymbol && firstSymbol !== currentSymbol) {
+        if (activeTarget && activeTarget !== currentSymbol) {
             const posTypeEl = document.getElementById('pos-type');
             const posType = posTypeEl ? posTypeEl.textContent.trim() : 'NONE';
             if (!posType || posType === 'NONE') {
-                executeDeepSync(firstSymbol);
+                executeDeepSync(activeTarget);
+                return; // Deep Sync 후 이 사이클의 나머지 UI 업데이트 스킵 (다음 폴링에서 정상 처리)
             }
         }
 
@@ -220,7 +223,7 @@ async function syncBotStatus() {
             posActive.classList.remove('hidden');
             posActive.classList.add('flex');
             if (posSymbolEl) {
-                posSymbolEl.textContent = firstSymbol.split(':')[0];
+                posSymbolEl.textContent = activeTarget.split(':')[0];
                 posSymbolEl.classList.remove('hidden');
             }
 
@@ -339,7 +342,10 @@ async function syncBrain() {
         const brainData = await brainRes.json();
 
         const symbolBrains = brainData.symbols || {};
-        const brainState = symbolBrains[currentSymbol] || Object.values(symbolBrains)[0];
+        // active_target을 서버로부터 직접 수신해 brainState 조회 키로 사용
+        // (currentSymbol은 executeDeepSync 호출 직후 갱신 전 구형 심볼일 수 있으므로 신뢰도 낮음)
+        const activeTarget = brainData.active_target || currentSymbol;
+        const brainState = symbolBrains[activeTarget] || Object.values(symbolBrains)[0];
 
         if (!brainState) return;
 
@@ -1507,11 +1513,10 @@ function initPriceWebSocket() {
     });
     priceWs.addEventListener('close', () => clearInterval(_wsPingInterval));
 
-    priceWs.onopen = async () => {
-        // Fetch current symbol to subscribe
-        const response = await fetch(`${API_URL}/config`);
-        const config = await response.json();
-        const symbolRaw = Array.isArray(config.symbols) ? config.symbols[0] : 'BTC/USDT:USDT';
+    priceWs.onopen = () => {
+        // async fetch 제거: WebSocket onopen 시점에는 currentSymbol이 이미 executeDeepSync에 의해 최신화됨.
+        // /config 재조회는 불필요하며, 타이밍 경쟁 조건(race condition)을 유발할 수 있으므로 제거.
+        const symbolRaw = currentSymbol;
 
         // Convert symbol format. Ex: "BTC/USDT:USDT" -> "BTC-USDT-SWAP"
         let okxSymbol = symbolRaw.split(':')[0].replace('/', '-');

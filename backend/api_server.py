@@ -537,22 +537,30 @@ async def async_trading_loop():
             # ── 15분 주기 다이내믹 볼륨 스캐너 가동 ──
             if current_time - last_scan_time >= 900:
                 if str(get_config('auto_scan_enabled')).lower() == 'true':
-                    try:
-                        bot_global_state["logs"].append("[엔진] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
-                        await asyncio.sleep(0.5)  # [Phase 4] API Rate Limit 보호용 미세 비동기 지연
-                        top_symbols = await engine_api.scan_top_volume_coins(limit=3)
-                        if top_symbols:
-                            # 설정에 바로 업데이트하여 영속화 및 프론트 반영
-                            set_config('symbols', top_symbols)
-                            scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 자동 갱신 완료: {top_symbols}"
-                            bot_global_state["logs"].append(scan_msg)
-                            logger.info(scan_msg)
-                            send_telegram_sync(_tg_scanner(top_symbols))
-                            last_scan_time = current_time
-                    except Exception as scan_err:
-                        err_msg = f"[오류] 스캐너 로직 실패: {scan_err}"
-                        bot_global_state["logs"].append(err_msg)
-                        logger.error(err_msg)
+                    # 유령 포지션 방어: 보유 포지션이 있으면 타겟 변경 절대 금지
+                    any_pos_open = any(
+                        s.get("position", "NONE") != "NONE"
+                        for s in bot_global_state["symbols"].values()
+                    )
+                    if any_pos_open:
+                        last_scan_time = current_time  # 포지션 유지 중: 스캐너 가동 보류
+                    else:
+                        try:
+                            bot_global_state["logs"].append("[엔진] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
+                            await asyncio.sleep(0.5)  # [Phase 4] API Rate Limit 보호용 미세 비동기 지연
+                            top_symbols = await engine_api.scan_top_volume_coins(limit=3)
+                            if top_symbols:
+                                # 설정에 바로 업데이트하여 영속화 및 프론트 반영
+                                set_config('symbols', top_symbols)
+                                scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 자동 갱신 완료: {top_symbols}"
+                                bot_global_state["logs"].append(scan_msg)
+                                logger.info(scan_msg)
+                                send_telegram_sync(_tg_scanner(top_symbols))
+                                last_scan_time = current_time
+                        except Exception as scan_err:
+                            err_msg = f"[오류] 스캐너 로직 실패: {scan_err}"
+                            bot_global_state["logs"].append(err_msg)
+                            logger.error(err_msg)
                 else:
                     last_scan_time = current_time  # 비활성 상태: 타이머만 갱신, 스캔 스킵
 
@@ -1441,16 +1449,21 @@ async def fetch_current_status():
 
     # logs(300개)는 제외하고 반환 - 매초 전송 시 불필요한 대용량 페이로드 방지
     # 로그는 /api/v1/logs 엔드포인트에서 별도 조회
+    _sym_conf = get_config('symbols')
+    active_target = _sym_conf[0] if isinstance(_sym_conf, list) and _sym_conf else "BTC/USDT:USDT"
     return {
         "is_running": bot_global_state["is_running"],
         "balance": bot_global_state["balance"],
         "symbols": bot_global_state["symbols"],
+        "active_target": active_target,
     }
 
 @app_server.get("/api/v1/brain")
 async def fetch_brain_status():
     """AI 뇌 상태 반환"""
-    return ai_brain_state
+    _sym_conf = get_config('symbols')
+    active_target = _sym_conf[0] if isinstance(_sym_conf, list) and _sym_conf else "BTC/USDT:USDT"
+    return {**ai_brain_state, "active_target": active_target}
 
 @app_server.get("/api/v1/trades")
 async def fetch_trades_history():
