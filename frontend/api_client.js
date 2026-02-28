@@ -659,6 +659,23 @@ const PRESET_CONFIGS = {
         hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.003,
         trailing_stop_rate: 0.002, cooldown_losses_trigger: 3, cooldown_duration_sec: 900,
     },
+    // [Phase 14.3] 초단타 광기 모드 — 모든 방어 관문 해제 + 틱 단위 익절
+    frenzy: {
+        adx_threshold: 15.0,            // 추세 기준 대폭 완화 (낮은 ADX도 진입 허용)
+        chop_threshold: 60.0,           // 횡보 허용치 증가
+        volume_surge_multiplier: 1.2,   // 거래량 기준 완화
+        disparity_threshold: 3.0,       // 이격도 한계치 3% (UI 슬라이더 % 단위)
+        hard_stop_loss_rate: 0.005,     // 0.5% 칼손절 (비율: 0.005)
+        trailing_stop_activation: 0.003, // 0.3% 수익 시 트레일링 즉시 ON (비율: 0.003)
+        trailing_stop_rate: 0.001,      // 고점 대비 0.1% 낙폭 시 틱 익절 (비율: 0.001)
+        cooldown_losses_trigger: 3,     // 3연패 시 쿨다운
+        cooldown_duration_sec: 300,     // 5분 휴식 (초단타 특성상 짧게)
+        risk_per_trade: 1.0,            // 소액 1% 리스크 (UI % 단위)
+        // ── Gate Bypass: 3개 방어 관문 전면 해제 ──
+        bypass_macro: 'true',
+        bypass_disparity: 'true',
+        bypass_indicator: 'true',
+    },
 };
 
 // 리스크 온도계 — risk_per_trade 입력값에 따른 실시간 위험도 안내
@@ -800,7 +817,7 @@ async function applyPreset(presetName) {
     const config = PRESET_CONFIGS[presetName];
     if (!config) return;
 
-    // 1. 각 input에 값 주입 + preset-flash 애니메이션 트리거
+    // 1. 숫자/범위 인풋: TUNING_INPUT_MAP 기준으로 ID 해석 → 값 주입 + 애니메이션 + input 이벤트
     for (const [key, { id }] of Object.entries(TUNING_INPUT_MAP)) {
         if (!(key in config)) continue;
         const input = document.getElementById(id);
@@ -810,11 +827,22 @@ async function applyPreset(presetName) {
         input.classList.remove('preset-flash');
         void input.offsetWidth;
         input.classList.add('preset-flash');
+        // oninput 연결 UI(온도계, val-disparity 스팬 등) 즉각 갱신
+        input.dispatchEvent(new Event('input'));
     }
 
-    // 2. 값 주입 직후 서버에 즉시 일괄 저장
+    // 2. [Phase 14.1/14.3] Gate Bypass 체크박스: 프리셋에 포함된 경우 강제 동기화
+    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator']) {
+        if (!(bkey in config)) continue;
+        const el = document.getElementById(`config-${bkey}`);
+        if (!el) continue;
+        el.checked = (config[bkey] === 'true' || config[bkey] === true);
+        el.dispatchEvent(new Event('input'));
+    }
+
+    // 3. 값 주입 직후 서버에 즉시 일괄 저장
     await saveTuningConfig();
-    // 3. 프리셋 적용 직후 뱃지 즉시 갱신
+    // 4. 프리셋 적용 직후 뱃지 즉시 갱신
     updateActiveTuningBadge();
 }
 
