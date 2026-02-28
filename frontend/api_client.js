@@ -118,9 +118,11 @@ function updatePriceWithTickFlash(price) {
     const el2 = document.getElementById('hero-price');
     const oldPrice = parseFloat(el2 ? el2.dataset.val : 0) || price;
 
-    const formattedPrice = price.toFixed(2);
-    let flashClass = '';
+    // [최적화] 100달러 미만 코인(XRP, DOGE 등)은 소수점 4자리, 그 이상은 2자리로 동적 출력
+    const decimals = price < 100 ? 4 : 2;
+    const formattedPrice = price.toFixed(decimals);
 
+    let flashClass = '';
     if (price > oldPrice) {
         flashClass = 'tick-flash-green';
     } else if (price < oldPrice) {
@@ -254,7 +256,20 @@ async function syncBotStatus() {
 
             updateNumberText('pos-roi', pnl, val => `${pnlSign}${val.toFixed(2)}%`);
             updateNumberText('pos-pnl-usdt', pnlUsdt, val => `${pnlSign}${val.toFixed(2)} USDT`);
-            updateNumberText('pos-current', symbolData.current_price);
+            // [최적화] 현재가는 카운트업 애니메이션 제거하고 즉각 반영 (지연시간 0)
+            const posCurrentEl = document.getElementById('pos-current');
+            if (posCurrentEl) {
+                const p = parseFloat(symbolData.current_price);
+                const decimals = p < 100 ? 4 : 2;
+                const newText = p.toFixed(decimals);
+                if (posCurrentEl.textContent !== newText) {
+                    posCurrentEl.textContent = newText;
+                    // 미세 깜빡임 효과만 유지
+                    posCurrentEl.classList.remove('flash');
+                    void posCurrentEl.offsetWidth;
+                    posCurrentEl.classList.add('flash');
+                }
+            }
 
             const roiEl = document.getElementById('pos-roi');
             const pnlUsdtEl = document.getElementById('pos-pnl-usdt');
