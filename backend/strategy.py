@@ -195,15 +195,15 @@ class TradingStrategy:
         long_disparity_ok = self.bypass_disparity or (current_price <= ema_20_val * (1.0 + self.disparity_threshold))
         short_disparity_ok = self.bypass_disparity or (current_price >= ema_20_val * (1.0 - self.disparity_threshold))
 
-        # Payload 패키징
+        # Payload 패키징 (Telegram HTML 파싱 에러 방지를 위해 <, > 기호 제거)
         payload = {
             "ema_status": (
-                f"Uptrend (Price > EMA)" if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200
-                else (f"Downtrend (Price < EMA)" if macro_ema_200 is not None else "N/A")
+                "상승장 (UP)" if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200
+                else ("하락장 (DOWN)" if macro_ema_200 is not None else "N/A")
             ),
             "vol_multiplier": f"{vol_val / vol_sma_20:.2f}x" if not pd.isna(vol_sma_20) and vol_sma_20 > 0 else "N/A",
             "atr_sl_margin": (
-                f"ATR(14): {latest['atr']:.2f} -> SL Margin: {latest['atr'] * 1.5:.2f}"
+                f"ATR(14): {latest['atr']:.2f} ➔ SL Margin: {latest['atr'] * 1.5:.2f}"
                 if 'atr' in latest and not pd.isna(latest['atr']) else "N/A"
             ),
             "adx": f"{adx_val:.1f}",
