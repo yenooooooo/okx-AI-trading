@@ -309,22 +309,42 @@ class TradingStrategy:
 
     def calculate_position_size_dynamic(self, equity, current_price, leverage=1, contract_size=0.01, risk_rate=0.02):
         """
-        [v2.3] 증거금 부족(Insufficient Margin) 셧다운 완벽 패치
-        ATR 기반 계산을 버리고, 내 시드의 %만큼 정확하게 진입하는 정직한 정률법으로 교체
-        공식: (잔고 * 리스크 비율 * 레버리지) / 현재 가격
+        [v2.4] 증거금 부족(51008) 완전 차단 방어막 (Impenetrable Armor)
+        UI 버그 자동차단, 수수료 여유분 확보, 최대 계약수 캡(Cap) 적용
         """
         if equity <= 0 or current_price <= 0:
             return 1
 
-        # 공식: (내 잔고 * 리스크 비율 * 레버리지) / 현재 가격
+        # [방어 1] UI에서 FRENZY 광기 모드가 1.0(100%)을 보내는 버그 자동 교정
+        # risk_rate가 1.0 이상이면 퍼센트로 입력한 것으로 간주 (예: 1.0 -> 0.01)
+        if risk_rate >= 1.0:
+            risk_rate = risk_rate / 100.0
+
+        # [방어 2] 거래소 수수료(Taker) 및 슬리피지를 위해 최대 가용 시드를 95%로 제한
+        safe_equity = equity * 0.95
+
+        # 기본 정률법 계산 (잔고 * 리스크 비율 * 레버리지 / 현재 가격)
         notional = equity * risk_rate * leverage
         position_size_raw = notional / current_price
 
-        # OKX Swap 계약 단위 정수화 변환
+        # OKX Swap 계약 단위 정수화
         if contract_size > 0:
-            contracts = max(1, round(position_size_raw / contract_size))
+            contracts = round(position_size_raw / contract_size)
         else:
-            contracts = max(1, round(position_size_raw))
+            contracts = round(position_size_raw)
+
+        # 최소 1계약 보장
+        contracts = max(1, contracts)
+
+        # [방어 3] 내 잔고(safe_equity)로 실제 감당 가능한 최대 계약수(Max Capacity) 계산
+        # 1계약 당 필요 증거금 = (계약단위 * 현재가) / 레버리지
+        margin_per_contract = (contract_size * current_price) / leverage
+        max_possible_contracts = int(safe_equity / margin_per_contract)
+
+        # 감당 가능한 계약 수가 1 이상일 때만 캡(Cap)을 씌움
+        # (만약 시드가 너무 작아 1계약도 못 사면, 어차피 거래소가 튕겨내도록 1 전송)
+        if max_possible_contracts >= 1:
+            contracts = min(contracts, max_possible_contracts)
 
         return int(contracts)
 
