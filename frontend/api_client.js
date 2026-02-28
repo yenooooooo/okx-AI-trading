@@ -843,20 +843,28 @@ async function saveTuningConfig() {
 }
 
 async function resetToAuto() {
-    const btn = document.querySelector('#tuning-modal button[onclick="resetToAuto()"]');
+    // 모달창과 메인화면에 있는 모든 AUTO 버튼을 선택
+    const btns = document.querySelectorAll('button[onclick="resetToAuto()"]');
     try {
-        if (btn) { btn.disabled = true; btn.textContent = '⏳ 리셋 중...'; }
-        // 1. 서버: DB 튜닝 키 전체 삭제 + 전략 인스턴스 재생성
+        btns.forEach(btn => {
+            btn.disabled = true;
+            btn.dataset.origText = btn.textContent.trim();
+            btn.textContent = '⏳ 리셋 중...';
+        });
+        // 1. 서버: DB 튜닝 키 전체 삭제 + 전략 인스턴스 재생성 딥 리셋
         const res = await fetch(`${API_URL}/tuning/reset`, { method: 'POST' });
         if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
-        // 2. Tier 1 기본값으로 입력창 초기화 + DB에 즉시 재저장
-        await applyPreset('tier1');
-        showToast('AI 순정 모드 복귀 완료', 'Tier 1 기본값 딥 리셋 · 전략 인스턴스 재생성 완료.', 'SUCCESS');
+        // 2. 팩토리 리셋 프리셋으로 UI 입력창 값 동기화 및 DB 재저장
+        await applyPreset('factory_reset');
+        showToast('AI 순정 모드 복귀 완료', '모든 튜닝값이 리셋되고 가장 똑똑한 본래의 뇌로 복귀했습니다.', 'SUCCESS');
     } catch (error) {
         console.error('[ANTIGRAVITY 디버그] resetToAuto 실패:', error);
         showToast('리셋 실패', error.message || '서버 통신 오류가 발생했습니다.', 'ERROR');
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '🤖 AUTO RESET'; }
+        btns.forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = btn.dataset.origText || '🤖 AUTO RESET';
+        });
     }
 }
 
