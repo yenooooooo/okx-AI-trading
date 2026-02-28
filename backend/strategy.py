@@ -231,48 +231,46 @@ class TradingStrategy:
 
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False):
         """
-        파산 방지 핵심 모듈 — 포지션의 청산(손절/익절) 여부 + UI 표시값을 단일 반환
-        [v2.2 DRY] Tuple 반환으로 api_server.py 이중 계산 완전 제거
-        반환값: (action: str, real_sl: float, trailing_active: bool, trailing_target: float)
-          - action: 'STOP_LOSS' | 'TRAILING_STOP_EXIT' | 'KEEP'
-          - real_sl: 현재 하드 손절가 (프론트엔드 표시용)
-          - trailing_active: 트레일링 스탑 활성 여부
-          - trailing_target: 트레일링 청산 기준가 (활성 시)
+        파산 방지 핵심 모듈 — 하드코딩 제거 및 UI 튜닝 파라미터(%) 직결 완료
+        반환값: (action, real_sl, trailing_active, trailing_target)
         """
-        if current_atr <= 0 or pd.isna(current_atr):
-            current_atr = entry_price * 0.01
-
         # ── 손절가 및 수익/낙폭 계산 ──
         if position_side == "LONG":
             profit_usdt = current_price - entry_price
             drawdown_usdt = highest_price - current_price
-            hard_sl_price = (entry_price + (entry_price * 0.001)) if partial_tp_executed else (entry_price - (current_atr * 1.5))
+            # [수정] ATR 하드코딩 제거 -> UI 설정된 hard_stop_loss_rate(%) 반영
+            hard_sl_price = (entry_price + (entry_price * 0.001)) if partial_tp_executed else (entry_price - (entry_price * self.hard_stop_loss_rate))
         elif position_side == "SHORT":
             profit_usdt = entry_price - current_price
             drawdown_usdt = current_price - highest_price
-            hard_sl_price = (entry_price - (entry_price * 0.001)) if partial_tp_executed else (entry_price + (current_atr * 1.5))
+            # [수정] ATR 하드코딩 제거 -> UI 설정된 hard_stop_loss_rate(%) 반영
+            hard_sl_price = (entry_price - (entry_price * 0.001)) if partial_tp_executed else (entry_price + (entry_price * self.hard_stop_loss_rate))
         else:
             return "KEEP", 0.0, False, 0.0
 
-        # ── 1. 하드 스탑로스 (ATR * 1.5) ──
+        # ── 1. 하드 스탑로스 ──
         if position_side == "LONG" and current_price <= hard_sl_price:
             return "STOP_LOSS", hard_sl_price, False, 0.0
         if position_side == "SHORT" and current_price >= hard_sl_price:
             return "STOP_LOSS", hard_sl_price, False, 0.0
 
-        # ── 2. 트레일링 스탑 ──
-        # 발동: fee_margin(0.15%) + ATR*0.3 이상 수익 구간
-        fee_cover_threshold = (entry_price * self.fee_margin) + (current_atr * 0.3)
-        trailing_active = profit_usdt >= fee_cover_threshold
+        # ── 2. 트레일링 스탑 (UI 변수 100% 직결) ──
+        # 발동 조건: 사용자가 설정한 trailing_stop_activation (%) 이상의 수익 발생 시
+        activation_threshold_usdt = entry_price * self.trailing_stop_activation
+        trailing_active = profit_usdt >= activation_threshold_usdt
         trailing_target = 0.0
 
         if trailing_active:
-            if position_side == "LONG":
-                trailing_target = highest_price - (current_atr * 0.8)
-            else:
-                trailing_target = highest_price + (current_atr * 0.8)
+            # 추적 낙폭 거리: 고점/저점 대비 trailing_stop_rate (%)
+            trailing_distance_usdt = highest_price * self.trailing_stop_rate
 
-            if drawdown_usdt >= (current_atr * 0.8):
+            if position_side == "LONG":
+                trailing_target = highest_price - trailing_distance_usdt
+            else:
+                trailing_target = highest_price + trailing_distance_usdt
+
+            # 고점(저점) 대비 낙폭이 설정된 추적 거리 이상 떨어지면 청산
+            if drawdown_usdt >= trailing_distance_usdt:
                 return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
 
         return "KEEP", hard_sl_price, trailing_active, trailing_target
