@@ -346,7 +346,7 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     sym_state["entry_price"]           = 0.0
     sym_state["unrealized_pnl_percent"] = 0.0
     sym_state["unrealized_pnl"]        = 0.0
-    sym_state["take_profit_price"]     = 0.0
+    sym_state["take_profit_price"]     = "대기중"  # [Phase 16] 문자열 통일
     sym_state["stop_loss_price"]       = 0.0
 
     pnl_amount     = 0.0
@@ -652,7 +652,7 @@ async def async_trading_loop():
                             "entry_price": 0.0,
                             "current_price": 0.0,
                             "unrealized_pnl_percent": 0.0,
-                            "take_profit_price": 0.0,
+                            "take_profit_price": "대기중",  # [Phase 16] 문자열 통일
                             "stop_loss_price": 0.0,
                             "highest_price": 0.0,
                             "lowest_price": 0.0,
@@ -904,6 +904,21 @@ async def async_trading_loop():
                                 bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                                 bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
 
+                                # [Phase 16] 다이내믹 익절가(Dynamic TP) 시각화 로직
+                                _is_partial_done = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
+                                if not _is_partial_done:
+                                    # 1차 분할 익절 타겟 선제적 계산 (수수료 0.15% + ATR 50%)
+                                    _target_offset = (entry * 0.0015) + (current_atr * 0.5)
+                                    _first_target = (entry + _target_offset) if position_side == "LONG" else (entry - _target_offset)
+                                    bot_global_state["symbols"][symbol]["take_profit_price"] = f"🎯 1차 타겟: ${_first_target:,.2f} (50%)"
+                                else:
+                                    # 1차 익절 완료 후 트레일링 스탑 상태
+                                    _t_target = bot_global_state["symbols"][symbol].get("trailing_target", 0.0)
+                                    if _t_target > 0:
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = f"🔥 트레일링 추적: ${_t_target:,.2f}"
+                                    else:
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = "🚀 트레일링 대기"
+
                                 # --- [Step 2] 50% 분할 익절 (Partial TP) 조건 체크 ---
                                 if not partial_tp_executed:
                                     # [v2.1] 발동 조건: 수수료 마진 0.15% + ATR*0.5 이상 수익 구간
@@ -1050,7 +1065,7 @@ async def async_trading_loop():
                                         # 4. 프론트엔드 포지션 초기화
                                         bot_global_state["symbols"][symbol]["position"] = "NONE"
                                         bot_global_state["symbols"][symbol]["entry_price"] = 0.0
-                                        bot_global_state["symbols"][symbol]["take_profit_price"] = 0.0
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
                                         bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
                                         bot_global_state["symbols"][symbol]["real_sl"] = 0.0
                                         bot_global_state["symbols"][symbol]["trailing_active"] = False
@@ -1226,7 +1241,7 @@ async def execute_test_order(direction: str = "LONG"):
         if symbol not in bot_global_state["symbols"]:
             bot_global_state["symbols"][symbol] = {
                 "position": "NONE", "entry_price": 0.0, "current_price": 0.0,
-                "unrealized_pnl_percent": 0.0, "take_profit_price": 0.0,
+                "unrealized_pnl_percent": 0.0, "take_profit_price": "대기중",  # [Phase 16]
                 "stop_loss_price": 0.0, "highest_price": 0.0, "lowest_price": 0.0
             }
 
@@ -1378,7 +1393,7 @@ async def close_paper_position():
         # 상태 초기화
         sym_state["position"] = "NONE"
         sym_state["entry_price"] = 0.0
-        sym_state["take_profit_price"] = 0.0
+        sym_state["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
         sym_state["stop_loss_price"] = 0.0
         sym_state["real_sl"] = 0.0
         sym_state["trailing_active"] = False

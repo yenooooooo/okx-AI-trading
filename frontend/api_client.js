@@ -234,16 +234,25 @@ async function syncBotStatus() {
             updateText('pos-type', symbolData.position);
             updateNumberText('pos-entry', symbolData.entry_price);
             // TP/SL 상태 동기화 (백엔드 실시간 계산값 기반)
-            const trailingActive = symbolData.trailing_active === true;
-            const trailingTarget = parseFloat(symbolData.trailing_target || 0);
             const realSl = parseFloat(symbolData.real_sl || 0);
 
+            // [Phase 16] 다이내믹 목표가 렌더링 (백엔드에서 완성된 문자열이 넘어옴)
+            const posTpEl = document.getElementById('pos-tp');
+            if (posTpEl) {
+                const tpVal = symbolData.take_profit_price;
+                if (tpVal && tpVal !== 0 && tpVal !== '0.0') {
+                    posTpEl.textContent = tpVal;
+                } else {
+                    posTpEl.textContent = '대기중';
+                }
+            }
+            // pos-tp-expect는 trailing 상태에 맞게 유지
+            const trailingActive = symbolData.trailing_active === true;
+            const trailingTarget = parseFloat(symbolData.trailing_target || 0);
             if (trailingActive && trailingTarget > 0) {
-                updateText('pos-tp', trailingTarget.toFixed(4));
                 updateText('pos-tp-expect', 'Trailing Active 🎯');
             } else {
-                updateText('pos-tp', '대기중');
-                updateText('pos-tp-expect', '목표가 대기중');
+                updateText('pos-tp-expect', '목표가 산출 중');
             }
 
             updateNumberText('pos-sl', realSl > 0 ? realSl : 0);
