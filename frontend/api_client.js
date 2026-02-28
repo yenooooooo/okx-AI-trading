@@ -147,7 +147,7 @@ function updatePriceWithTickFlash(price) {
 // --- Status Sync ---
 
 // --- [CORE] Deep Sync 헬퍼 — 타겟 변경 시 모든 신경망 일괄 초기화 (단일 진실 소스) ---
-function executeDeepSync(newSymbol) {
+async function executeDeepSync(newSymbol) {
     // 1. 글로벌 심볼 즉각 갱신
     currentSymbol = newSymbol;
 
@@ -173,10 +173,10 @@ function executeDeepSync(newSymbol) {
         }
     });
 
-    // 6. 신경망 재연결 — 웹소켓·차트·뇌 동시 갱신
+    // 6. 신경망 재연결 — 웹소켓 즉각 연결 후 차트·뇌 병렬 완료 대기
+    // initPriceWebSocket은 동기식이므로 먼저 실행, syncChart·syncBrain은 Promise.all로 병렬 처리
     initPriceWebSocket();
-    syncChart();
-    syncBrain();
+    await Promise.all([syncChart(), syncBrain()]);
 }
 
 async function syncBotStatus() {
@@ -942,8 +942,15 @@ async function syncChart() {
     try {
         if (!chart) initChart();
 
-        const response = await fetch(`${API_URL}/ohlcv?symbol=${encodeURIComponent(currentSymbol)}&limit=60`);
+        // Stale Response 방어: 요청 시점의 심볼을 캡처. 응답 도착 시 currentSymbol과 비교하여
+        // 그 사이 타겟이 바뀐 경우 구형 데이터를 즉시 폐기한다.
+        const requestedSymbol = currentSymbol;
+
+        const response = await fetch(`${API_URL}/ohlcv?symbol=${encodeURIComponent(requestedSymbol)}&limit=60`);
         const ohlcv = await response.json();
+
+        // 1차 Stale Check: OHLCV 응답 도착 후 심볼이 바뀌었으면 폐기
+        if (requestedSymbol !== currentSymbol) return;
 
         const overlay = document.getElementById('chart-overlay');
 
@@ -974,9 +981,12 @@ async function syncChart() {
             const tradesRes = await fetch(`${API_URL}/trades`);
             const allTrades = await tradesRes.json();
 
+            // 2차 Stale Check: 거래 내역 응답 도착 후 심볼이 바뀌었으면 마커 렌더링 폐기
+            if (requestedSymbol !== currentSymbol) return;
+
             if (Array.isArray(allTrades) && allTrades.length > 0) {
-                // 현재 차트 심볼과 일치하는 거래만 필터링
-                const symbolTrades = allTrades.filter(t => t.symbol === currentSymbol);
+                // 요청 시점 심볼(requestedSymbol)과 일치하는 거래만 필터링
+                const symbolTrades = allTrades.filter(t => t.symbol === requestedSymbol);
                 const markers = [];
 
                 symbolTrades.forEach(trade => {
