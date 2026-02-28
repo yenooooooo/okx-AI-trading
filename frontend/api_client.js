@@ -455,10 +455,11 @@ function renderGates(gates, passed) {
         const el = document.getElementById(elId);
         if (!el || !gates[key]) continue;
         const g = gates[key];
+        const targetHtml = g.target ? `<span class="text-[9px] text-gray-500 ml-1">${g.target}</span>` : '';
         if (g.pass) {
-            el.innerHTML = `<span class="text-neon-green">✅</span> <span class="text-neon-green">${g.value}</span>`;
+            el.innerHTML = `<span class="text-neon-green">✅</span> <span class="text-neon-green">${g.value}</span>${targetHtml}`;
         } else {
-            el.innerHTML = `<span class="text-neon-red">❌</span> <span class="text-gray-500">${g.value}</span>`;
+            el.innerHTML = `<span class="text-neon-red">❌</span> <span class="text-gray-500">${g.value}</span>${targetHtml}`;
         }
     }
 }
@@ -485,6 +486,55 @@ function renderMonologue(lines) {
         else cls += ' text-gray-600';
         return `<div class="${cls}">${line}</div>`;
     }).join('');
+}
+
+// --- [C] 활성 전술 프리셋 감지 및 뱃지 렌더링 ---
+function updateActiveTuningBadge() {
+    const badge = document.getElementById('active-tuning-badge');
+    if (!badge) return;
+
+    // DOM 에서 현재 튜닝 파라미터 값 수집
+    const currentVals = {};
+    for (const [key, { id, parse }] of Object.entries(TUNING_INPUT_MAP)) {
+        const input = document.getElementById(id);
+        currentVals[key] = input ? parse(input.value) : NaN;
+    }
+
+    const PRESET_LABELS = {
+        sniper:        ['🎯 스나이퍼',    'text-yellow-300 border-yellow-500/50 bg-yellow-500/10'],
+        trend_rider:   ['🌊 트렌드라이더', 'text-blue-300 border-blue-500/50 bg-blue-500/10'],
+        scalper:       ['⚡ 스캘퍼',       'text-neon-green border-neon-green/50 bg-neon-green/10'],
+        iron_dome:     ['🛡️ 아이언돔',    'text-orange-300 border-orange-500/50 bg-orange-500/10'],
+        factory_reset: ['🏭 팩토리',       'text-gray-300 border-gray-500/50 bg-gray-500/10'],
+    };
+
+    let matchedLabel = null;
+    let matchedClass = null;
+
+    for (const [presetName, presetVals] of Object.entries(PRESET_CONFIGS)) {
+        const keys = Object.keys(TUNING_INPUT_MAP);
+        const isMatch = keys.every(key => {
+            const { parse } = TUNING_INPUT_MAP[key];
+            const cur = currentVals[key];
+            const pre = presetVals[key];
+            if (pre === undefined) return true; // 프리셋에 없는 키는 무시
+            // 정수형(parseInt) 비교: 정수 비교, 부동소수점(parseFloat): 소수 오차 허용
+            if (parse === parseInt) return Math.round(cur) === Math.round(pre);
+            return Math.abs(cur - pre) < 0.00001;
+        });
+        if (isMatch && PRESET_LABELS[presetName]) {
+            [matchedLabel, matchedClass] = PRESET_LABELS[presetName];
+            break;
+        }
+    }
+
+    if (matchedLabel) {
+        badge.textContent = matchedLabel;
+        badge.className = `px-1.5 py-0.5 rounded font-mono text-[9px] border transition-all ${matchedClass}`;
+    } else {
+        badge.textContent = '🛠️ 커스텀';
+        badge.className = 'px-1.5 py-0.5 rounded font-mono text-[9px] border text-purple-300 border-purple-500/50 bg-purple-500/10 transition-all';
+    }
 }
 
 async function toggleBot() {
@@ -605,6 +655,7 @@ async function syncConfig() {
                 if (input) input.value = parse(val);
             }
         }
+        updateActiveTuningBadge();
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncConfig 실패 (엔드포인트: /api/v1/config GET):", error);
     }
@@ -629,6 +680,8 @@ async function applyPreset(presetName) {
 
     // 2. 값 주입 직후 서버에 즉시 일괄 저장
     await saveTuningConfig();
+    // 3. 프리셋 적용 직후 뱃지 즉시 갱신
+    updateActiveTuningBadge();
 }
 
 async function openTuningModal() {

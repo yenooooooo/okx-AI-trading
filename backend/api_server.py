@@ -710,13 +710,19 @@ async def async_trading_loop():
                         _macro_ok  = bool(current_price > float(macro_ema_200))
                         _macro_lbl = "상승추세 ↑" if _macro_ok else "하락추세 ↓"
 
+                    # 동적 임계값 — strategy_instance 에서 직접 바인딩 (하드코딩 제거)
+                    _adx_min  = strategy_instance.adx_threshold
+                    _adx_max  = strategy_instance.adx_max
+                    _chop_max = strategy_instance.chop_threshold
+                    _vol_mul  = strategy_instance.volume_surge_multiplier
+
                     _gates = {
-                        "adx":       {"pass": bool(25 <= _adx_v <= 40),  "value": f"{_adx_v:.1f}",      "target": "25~40"},
-                        "chop":      {"pass": bool(_chop_v < 61.8),       "value": f"{_chop_v:.1f}",     "target": "< 61.8"},
-                        "volume":    {"pass": bool(_vol_ratio >= 1.5),    "value": f"{_vol_ratio:.2f}x", "target": "≥ 1.5x"},
-                        "disparity": {"pass": bool(_disparity < 0.8),     "value": f"{_disparity:.2f}%", "target": "< 0.8%"},
-                        "macd_rsi":  {"pass": bool(_mr_ok),               "value": f"RSI {_rsi_v:.1f}",  "target": "크로스+구간"},
-                        "macro":     {"pass": bool(_macro_ok),            "value": _macro_lbl,           "target": "EMA200"},
+                        "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max), "value": f"{_adx_v:.1f}",      "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
+                        "chop":      {"pass": bool(_chop_v < _chop_max),             "value": f"{_chop_v:.1f}",     "target": f"< {_chop_max:.1f}"},
+                        "volume":    {"pass": bool(_vol_ratio >= _vol_mul),          "value": f"{_vol_ratio:.2f}x", "target": f"≥ {_vol_mul:.1f}x"},
+                        "disparity": {"pass": bool(_disparity < 0.8),               "value": f"{_disparity:.2f}%", "target": "< 0.8%"},
+                        "macd_rsi":  {"pass": bool(_mr_ok),                         "value": f"RSI {_rsi_v:.1f}",  "target": "크로스+구간"},
+                        "macro":     {"pass": bool(_macro_ok),                      "value": _macro_lbl,           "target": "EMA200"},
                     }
                     _passed = int(sum(1 for g in _gates.values() if g["pass"]))
                     ai_brain_state["symbols"][symbol]["gates"]        = _gates
@@ -729,17 +735,17 @@ async def async_trading_loop():
                         _mono = f"[{_ts}] 🟢 LONG 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
                     elif signal == "SHORT":
                         _mono = f"[{_ts}] 🔴 SHORT 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
-                    elif not (25 <= _adx_v <= 40):
-                        if _adx_v < 25:
-                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 방향성 없는 시장이야. 25 이상으로 올라올 때까지 기다리는 중... ({_passed}/6)"
+                    elif not (_adx_min <= _adx_v <= _adx_max):
+                        if _adx_v < _adx_min:
+                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 방향성 없는 시장이야. {_adx_min:.0f} 이상으로 올라올 때까지 기다리는 중... ({_passed}/6)"
                         else:
-                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. 과열 식을 때까지 관망 중... ({_passed}/6)"
-                    elif _chop_v >= 61.8:
-                        _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. 61.8 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
+                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. {_adx_max:.0f} 아래로 식을 때까지 관망 중... ({_passed}/6)"
+                    elif _chop_v >= _chop_max:
+                        _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. {_chop_max:.1f} 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
                     elif _disparity >= 0.8:
                         _mono = f"[{_ts}] 이격도 {_disparity:.2f}% — 이미 너무 달렸어. EMA20에 붙을 때까지 기다리는 중... ({_passed}/6)"
-                    elif _vol_ratio < 1.5:
-                        _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. 1.5x 이상 폭발 대기 중... ({_passed}/6)"
+                    elif _vol_ratio < _vol_mul:
+                        _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. {_vol_mul:.1f}x 이상 폭발 대기 중... ({_passed}/6)"
                     elif not _macro_ok:
                         _mono = f"[{_ts}] EMA200 역방향({_macro_lbl}) — 큰 흐름 거슬러 들어가면 안 돼. 추세 전환 대기 중... ({_passed}/6)"
                     elif not _mr_ok:
