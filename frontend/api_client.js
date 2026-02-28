@@ -590,11 +590,11 @@ function updateActiveTuningBadge() {
     }
 
     const PRESET_LABELS = {
-        sniper:        ['🎯 스나이퍼',    'text-yellow-300 border-yellow-500/50 bg-yellow-500/10'],
-        trend_rider:   ['🌊 트렌드라이더', 'text-blue-300 border-blue-500/50 bg-blue-500/10'],
-        scalper:       ['⚡ 스캘퍼',       'text-neon-green border-neon-green/50 bg-neon-green/10'],
-        iron_dome:     ['🛡️ 아이언돔',    'text-orange-300 border-orange-500/50 bg-orange-500/10'],
-        factory_reset: ['🏭 팩토리',       'text-gray-300 border-gray-500/50 bg-gray-500/10'],
+        sniper: ['🎯 스나이퍼', 'text-yellow-300 border-yellow-500/50 bg-yellow-500/10'],
+        trend_rider: ['🌊 트렌드라이더', 'text-blue-300 border-blue-500/50 bg-blue-500/10'],
+        scalper: ['⚡ 스캘퍼', 'text-neon-green border-neon-green/50 bg-neon-green/10'],
+        iron_dome: ['🛡️ 아이언돔', 'text-orange-300 border-orange-500/50 bg-orange-500/10'],
+        factory_reset: ['🏭 팩토리', 'text-gray-300 border-gray-500/50 bg-gray-500/10'],
     };
 
     let matchedLabel = null;
@@ -1231,7 +1231,7 @@ function formatTerminalMsg(rawMsg) {
         '<span class="inline-block bg-purple-500/10 text-purple-400 border border-purple-500/20 px-1.5 py-0.5 rounded font-mono text-[9px] mx-1">PAPER</span>');
 
     // ── ② 가격 ($N,NNN.NN) 하이라이팅 — 흰색 굵게 ──
-    html = html.replace(/(\$\d{1,3}(?:,\d{3})*(?:\.\d+)?)/g,
+    html = html.replace(/(\$[\d,]+(?:\.\d+)?)/g,
         '<strong class="text-white font-bold tracking-wider">$1</strong>');
 
     // ── ③ 수익률 (+/-N.NN%) 하이라이팅 — + 초록 / - 빨간 ──

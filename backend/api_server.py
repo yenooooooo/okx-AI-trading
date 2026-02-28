@@ -348,6 +348,7 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     sym_state["unrealized_pnl"]        = 0.0
     sym_state["take_profit_price"]     = "대기중"  # [Phase 16] 문자열 통일
     sym_state["stop_loss_price"]       = 0.0
+    sym_state["entry_timestamp"]       = 0.0  # [Race Condition Fix] Grace Period 리셋
 
     pnl_amount     = 0.0
     total_gross    = 0.0
@@ -659,6 +660,7 @@ async def async_trading_loop():
                             "real_sl": 0.0,
                             "trailing_active": False,
                             "trailing_target": 0.0,
+                            "entry_timestamp": 0.0,  # [Race Condition Fix] 진입 시각 기록 — Grace Period 계산용
                         }
 
                     # OHLCV 데이터 수집 (5분봉, limit=200: ADX/MACD 지표 충분한 캔들 확보)
@@ -671,8 +673,13 @@ async def async_trading_loop():
                     # ── 수동 청산 감지: 내부엔 포지션이 있는데 거래소엔 없으면 외부 청산 ──
                     # [Shadow Mode] Paper 포지션은 거래소에 실제 포지션이 없으므로 감지 대상에서 제외
                     _sym_is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
+                    # [Race Condition Fix] 진입 직후 OKX API 전파 지연(최대 10~15초)으로 인한
+                    # false manual-close 무한 알람 루프 차단 — 진입 후 15초간 수동청산 감지 비활성화
+                    _entry_ts = bot_global_state["symbols"][symbol].get("entry_timestamp", 0.0)
+                    _grace_period_ok = (time.time() - _entry_ts) > 15.0
                     if (exchange_open_symbols is not None
                             and not _sym_is_paper
+                            and _grace_period_ok
                             and bot_global_state["symbols"][symbol]["position"] != "NONE"
                             and bot_global_state["symbols"][symbol]["entry_price"] > 0
                             and symbol not in exchange_open_symbols):
@@ -847,6 +854,7 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
                                         bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
                                         bot_global_state["symbols"][symbol]["partial_tp_executed"] = False  # [Partial TP] 진입 시 반드시 초기화
+                                        bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
                                         
                                         del bot_global_state["symbols"][symbol]["pending_order_id"]
                                         del bot_global_state["symbols"][symbol]["pending_order_time"]
@@ -1072,6 +1080,7 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
                                         bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
                                         bot_global_state["symbols"][symbol]["is_paper"] = False  # 플래그 리셋
+                                        bot_global_state["symbols"][symbol]["entry_timestamp"] = 0.0  # [Race Condition Fix]
 
                                         # [v2.1] 연패 쿨다운 카운터 업데이트 (Paper도 카운트하여 전략 검증)
                                         is_loss = (pnl_amount < 0)
@@ -1172,6 +1181,7 @@ async def async_trading_loop():
                                     bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
                                     bot_global_state["symbols"][symbol]["contracts"] = trade_amount
                                     bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
+                                    bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
 
                                     entry_emoji = "📈" if signal == "LONG" else "📉"
                                     entry_msg = f"{_paper_tag}{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
