@@ -696,6 +696,7 @@ const TUNING_INPUT_MAP = {
     'trailing_stop_rate': { id: 'tuning-trailing-rate', parse: parseFloat },
     'cooldown_losses_trigger': { id: 'tuning-cooldown-losses', parse: parseInt },
     'cooldown_duration_sec': { id: 'tuning-cooldown-duration', parse: parseInt },
+    'disparity_threshold': { id: 'config-disparity_threshold', parse: parseFloat },  // [Phase 14.2] DB: % 단위 저장
 };
 
 // --- Config Sync ---
@@ -775,6 +776,13 @@ async function syncConfig() {
                 const { id, parse } = TUNING_INPUT_MAP[key];
                 const input = document.getElementById(id);
                 if (input) input.value = parse(val);
+            } else if (key === 'disparity_threshold') {
+                // [Phase 14.2] 이격도 슬라이더 + 표시 스팬 동시 갱신
+                const slider = document.getElementById('config-disparity_threshold');
+                const span = document.getElementById('val-disparity');
+                const v = parseFloat(val);
+                if (slider) slider.value = v;
+                if (span) span.textContent = v.toFixed(1) + '%';
             } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator'].includes(key)) {
                 // [Phase 14.1] Gate Bypass 체크박스 동기화
                 const el = document.getElementById(`config-${key}`);

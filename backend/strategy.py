@@ -33,9 +33,12 @@ class TradingStrategy:
         self.kill_switch_active = False       # 킬스위치 발동 여부
         self.kill_switch_until = 0            # 킬스위치 해제 타임스탬프
 
+        # [Phase 14.2] 이격도 동적 한계치 (UI 직결 — DB에서 % 단위로 수신, 내부는 비율)
+        self.disparity_threshold = 0.008  # 기본 0.8% → 0.008 비율 (DB: "0.8" → /100.0 변환 후 주입)
+
         # [v3.5] Gate Bypass 스위치 (초단타 전용 방어 관문 개별 해제)
         self.bypass_macro = False       # True: 1h EMA200 거시 추세 필터 무시
-        self.bypass_disparity = False   # True: EMA20 이격도 0.8% 필터 무시
+        self.bypass_disparity = False   # True: EMA20 이격도 필터 무시
         self.bypass_indicator = False   # True: RSI 범위 조건 무시 (MACD 방향만 사용)
 
     async def get_macro_ema_200(self, engine_api, symbol):
@@ -183,13 +186,14 @@ class TradingStrategy:
         # 거래량 폭발 필터링
         volume_verified = vol_val > (vol_sma_20 * self.volume_surge_multiplier) if not pd.isna(vol_sma_20) else True
 
-        # 단기 5m EMA 20 이격도 필터: 0.8% 이상 벨어지면 진입 금지
+        # 단기 5m EMA 20 이격도 필터 — [Phase 14.2] 방향별 동적 한계치 (UI 직결, 하드코딩 완전 제거)
         ema_20_val = latest['ema_20'] if 'ema_20' in latest and not pd.isna(latest['ema_20']) else current_price
         disparity_pct = abs((current_price - ema_20_val) / ema_20_val) * 100 if current_price and ema_20_val else 0.0
 
-        # [v3.5] bypass_disparity: True 시 이격도 필터 무시
-        if not self.bypass_disparity and disparity_pct >= 0.8:
-            return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 이격 (안전 이격거리 0.8% 초과)", None
+        # LONG: 가격이 EMA20 위로 threshold 초과 시 추격매수 차단
+        # SHORT: 가격이 EMA20 아래로 threshold 초과 시 추격매도 차단
+        long_disparity_ok = self.bypass_disparity or (current_price <= ema_20_val * (1.0 + self.disparity_threshold))
+        short_disparity_ok = self.bypass_disparity or (current_price >= ema_20_val * (1.0 - self.disparity_threshold))
 
         # Payload 패키징
         payload = {
@@ -221,6 +225,8 @@ class TradingStrategy:
 
         # LONG 신호 판단
         if long_entry:
+            if not long_disparity_ok:
+                return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 위로 이격 (LONG 추격 금지, 한계 {self.disparity_threshold * 100:.1f}%)", None
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
             # [v2.1] 거시 추세 강제 필터: 1h EMA200 아래에서 LONG 절대 차단 ([v3.5] bypass_macro 해제 시 무시)
@@ -230,6 +236,8 @@ class TradingStrategy:
 
         # SHORT 신호 판단
         if short_entry:
+            if not short_disparity_ok:
+                return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 아래로 이격 (SHORT 추격 금지, 한계 {self.disparity_threshold * 100:.1f}%)", None
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
             # [v2.1] 거시 추세 강제 필터: 1h EMA200 위에서 SHORT 절대 차단 ([v3.5] bypass_macro 해제 시 무시)
