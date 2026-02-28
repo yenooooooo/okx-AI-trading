@@ -376,14 +376,20 @@
 
                     <div id="manual-override-panel"
                         class="hidden mt-3 p-4 bg-navy-900/40 rounded-lg border border-navy-border/50 space-y-4">
-                        <div>
+                        <div class="mb-4">
                             <div class="flex justify-between text-xs mb-2">
-                                <span class="text-gray-400">계약수 (Contracts)</span>
-                                <span id="manual-amount-display" class="font-mono text-neon-green">1</span>
+                                <span class="text-gray-400">타격 규모 (Target Size)</span>
+                                <span class="font-mono text-neon-green"><span id="manual-amount-display">10</span> USDT</span>
                             </div>
-                            <input type="number" id="manual-amount" min="1" max="9999" step="1" value="1"
-                                class="w-full bg-navy-900 border border-navy-border rounded p-2 text-neon-green text-sm font-mono focus:outline-none focus:border-neon-green text-center tracking-widest"
+                            <input type="number" id="manual-amount" min="1" step="1" value="10"
+                                class="w-full bg-navy-900 border border-navy-border rounded p-2 text-neon-green text-sm font-mono focus:outline-none focus:border-neon-green text-center tracking-widest transition-colors"
                                 oninput="document.getElementById('manual-amount-display').textContent = this.value">
+                            <div class="grid grid-cols-4 gap-1.5 mt-2">
+                                <button onclick="setQuickAmount(10)" class="text-[9px] font-mono py-1 rounded bg-navy-800 border border-navy-border hover:border-gray-500 hover:text-white text-gray-400 transition-all">10%</button>
+                                <button onclick="setQuickAmount(25)" class="text-[9px] font-mono py-1 rounded bg-navy-800 border border-navy-border hover:border-gray-500 hover:text-white text-gray-400 transition-all">25%</button>
+                                <button onclick="setQuickAmount(50)" class="text-[9px] font-mono py-1 rounded bg-navy-800 border border-navy-border hover:border-neon-green hover:text-neon-green hover:bg-neon-green/10 text-gray-400 transition-all">50%</button>
+                                <button onclick="setQuickAmount(100)" class="text-[9px] font-mono font-bold py-1 rounded bg-navy-800 border border-navy-border hover:border-neon-red hover:text-neon-red hover:bg-neon-red/10 text-gray-400 transition-all">MAX</button>
+                            </div>
                         </div>
                         <div>
                             <div class="flex justify-between text-xs mb-2">

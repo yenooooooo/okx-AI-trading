@@ -1378,6 +1378,27 @@ function toggleManualPanel() {
     }
 }
 
+// --- Quick Allocator: 현재 잔고의 N% → USDT 증거금 주입 ---
+function setQuickAmount(percent) {
+    const balanceEl = document.getElementById('current-balance');
+    if (!balanceEl) return;
+    // current-balance는 "75.43" 형태 (updateNumberText가 toFixed(2)로 렌더링)
+    const balance = parseFloat(balanceEl.textContent.replace(/,/g, ''));
+    if (!balance || balance <= 0) return;
+
+    const usdt = Math.floor(balance * percent / 100);
+    const input = document.getElementById('manual-amount');
+    const display = document.getElementById('manual-amount-display');
+    if (input) input.value = usdt;
+    if (display) display.textContent = usdt;
+
+    // 0.3초 플래시 피드백 (bg-neon-green/20)
+    if (input) {
+        input.classList.add('bg-neon-green/20');
+        setTimeout(() => input.classList.remove('bg-neon-green/20'), 300);
+    }
+}
+
 async function toggleManualOverride() {
     const enabled = document.getElementById('manual-override-toggle').checked;
     const status = document.getElementById('override-status');

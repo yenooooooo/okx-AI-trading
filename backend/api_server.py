@@ -1087,17 +1087,20 @@ async def async_trading_loop():
                             try:
                                 # 수동 오버라이드 or [v2.2] ATR 기반 동적 포지션 사이징
                                 manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
+                                trade_leverage = max(1, min(100, int(get_config('manual_leverage' if manual_override else 'leverage') or 1)))
+                                try:
+                                    contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                except Exception:
+                                    contract_size = 0.01
                                 if manual_override:
-                                    trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
-                                    trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
+                                    # [Phase 9.1] USDT → 계약수 환산
+                                    # 공식: 계약수 = floor(입력USDT * 레버리지 / (현재가 * 계약당기초자산))
+                                    seed_usdt = max(1.0, float(get_config('manual_amount') or 10))
+                                    notional = seed_usdt * trade_leverage
+                                    trade_amount = max(1, round(notional / (current_price * contract_size)))
                                 else:
-                                    trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
                                     # [v2.2] ATR 기반 동적 사이징: Risk 2% / (ATR * 1.5)
                                     current_atr_for_sizing = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else current_price * 0.01
-                                    try:
-                                        contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
-                                    except Exception:
-                                        contract_size = 0.01
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
                                         curr_bal, current_atr_for_sizing, trade_leverage, contract_size
                                     )
@@ -1224,17 +1227,20 @@ async def execute_test_order(direction: str = "LONG"):
             
         # 수동 오버라이드 or 동적 포지션 사이징
         manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
+        trade_leverage = max(1, min(100, int(get_config('manual_leverage' if manual_override else 'leverage') or 1)))
+        current_price_now = (await asyncio.to_thread(engine_api.get_current_price, symbol)) or 1
+        try:
+            contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+        except Exception:
+            contract_size = 0.01
         if manual_override:
-            trade_amount = max(1, int(float(get_config('manual_amount') or 1)))
-            trade_leverage = max(1, min(100, int(get_config('manual_leverage') or 1)))
+            # [Phase 9.1] USDT → 계약수 환산 (async_trading_loop와 동일 공식 — DRY)
+            # 공식: 계약수 = round(입력USDT * 레버리지 / (현재가 * 계약당기초자산))
+            seed_usdt = max(1.0, float(get_config('manual_amount') or 10))
+            notional = seed_usdt * trade_leverage
+            trade_amount = max(1, round(notional / (current_price_now * contract_size)))
         else:
-            trade_leverage = max(1, min(100, int(get_config('leverage') or 1)))
-            current_price_now = (await asyncio.to_thread(engine_api.get_current_price, symbol)) or 1
             curr_bal_now = await asyncio.to_thread(engine_api.get_usdt_balance)
-            try:
-                contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
-            except Exception:
-                contract_size = 0.01
             strategy_tmp = TradingStrategy(initial_seed=75.0)
             trade_amount = strategy_tmp.calculate_position_size_dynamic(
                 curr_bal_now, current_price_now * 0.01, trade_leverage, contract_size
