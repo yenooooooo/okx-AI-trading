@@ -503,11 +503,14 @@ function renderGates(gates, passed) {
         const el = document.getElementById(elId);
         if (!el || !gates[key]) continue;
         const g = gates[key];
-        const targetHtml = g.target ? `<span class="text-[9px] text-gray-500 ml-1">${g.target}</span>` : '';
+
+        // UI 개선: 세로 구분선(border-l)과 '목표:' 레이블을 추가하여 가독성 극대화
+        const targetHtml = g.target ? `<span class="text-[9px] text-gray-500 ml-1.5 border-l border-gray-600/50 pl-1.5 tracking-wider">목표: ${g.target}</span>` : '';
+
         if (g.pass) {
-            el.innerHTML = `<span class="text-neon-green">✅</span> <span class="text-neon-green">${g.value}</span>${targetHtml}`;
+            el.innerHTML = `<span class="text-neon-green text-[10px] mr-1">✅</span><span class="text-neon-green font-bold text-[11px]">${g.value}</span>${targetHtml}`;
         } else {
-            el.innerHTML = `<span class="text-neon-red">❌</span> <span class="text-gray-500">${g.value}</span>${targetHtml}`;
+            el.innerHTML = `<span class="text-neon-red text-[10px] mr-1">❌</span><span class="text-gray-400 font-bold text-[11px]">${g.value}</span>${targetHtml}`;
         }
     }
 }
