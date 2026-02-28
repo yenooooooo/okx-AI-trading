@@ -1043,6 +1043,16 @@
                 <!-- ══ LEFT: Parameter Input Panel ══ -->
                 <div class="flex flex-col border-b md:border-b-0 md:border-r border-navy-border min-h-0">
                     <div class="px-3 py-4 md:px-5 md:py-5 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+                        <!-- Engine Live Status Badge -->
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-sm font-bold text-gray-300 flex items-center gap-2">
+                                <span class="text-blue-400">⚙️</span> 매매 제어 설정 (AI Tuning)
+                            </h3>
+                            <div id="engine-live-badge"
+                                class="px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 transition-all bg-navy-900 border-navy-border text-gray-500">
+                                <span class="animate-pulse">⏳</span> 상태 확인 중...
+                            </div>
+                        </div>
                         <p class="text-sm font-mono text-gray-300 leading-relaxed">
                             전략 파라미터를 실시간으로 변경합니다. 저장 즉시 다음 사이클(최대 60초)에 반영됩니다.
                         </p>

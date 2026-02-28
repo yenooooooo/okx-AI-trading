@@ -1457,11 +1457,29 @@ async def fetch_current_status():
     # 로그는 /api/v1/logs 엔드포인트에서 별도 조회
     _sym_conf = get_config('symbols')
     active_target = _sym_conf[0] if isinstance(_sym_conf, list) and _sym_conf else "BTC/USDT:USDT"
+
+    # 엔진 튜닝 모드 판별 (DB 내 risk_per_trade 존재 여부 기준)
+    try:
+        _risk = get_config('risk_per_trade')
+        if _risk:
+            engine_mode = "TUNED"
+            active_risk = round(float(_risk) * 100, 1)
+        else:
+            engine_mode = "AUTO"
+            active_risk = "AI Dynamic"
+    except Exception:
+        engine_mode = "AUTO"
+        active_risk = "AI Dynamic"
+
     return {
         "is_running": bot_global_state["is_running"],
         "balance": bot_global_state["balance"],
         "symbols": bot_global_state["symbols"],
         "active_target": active_target,
+        "engine_status": {
+            "mode": engine_mode,
+            "risk": active_risk,
+        },
     }
 
 @app_server.get("/api/v1/brain")

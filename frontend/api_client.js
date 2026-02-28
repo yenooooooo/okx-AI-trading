@@ -330,6 +330,20 @@ async function syncBotStatus() {
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-green hover:bg-neon-green hover:text-navy-900 text-neon-green text-sm font-bold rounded transition-all font-mono tracking-widest';
         }
 
+        // 4. Engine Live Status Badge
+        if (data.engine_status) {
+            const badgeEl = document.getElementById('engine-live-badge');
+            if (badgeEl) {
+                if (data.engine_status.mode === 'AUTO') {
+                    badgeEl.className = 'px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 transition-all bg-blue-500/10 border-blue-500/50 text-blue-400';
+                    badgeEl.innerHTML = `<span class="animate-pulse">🤖</span> 순정 AI 다이내믹 연산 중`;
+                } else {
+                    badgeEl.className = 'px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1.5 transition-all bg-orange-500/10 border-orange-500/50 text-orange-400';
+                    badgeEl.innerHTML = `<span class="animate-pulse">⚙️</span> 수동 통제 중 (Risk: ${data.engine_status.risk}%)`;
+                }
+            }
+        }
+
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncBotStatus 실패 (엔드포인트: /api/v1/status):", error);
     }
