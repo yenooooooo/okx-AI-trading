@@ -1128,11 +1128,10 @@ async def async_trading_loop():
                                     notional = seed_usdt * trade_leverage
                                     trade_amount = max(1, round(notional / (current_price * contract_size)))
                                 else:
-                                    # [v2.2] ATR 기반 동적 사이징 (UI 튜닝값 연동)
+                                    # [v2.3] 정률법 기반 동적 사이징 적용 (UI 연동 · 증거금 부족 패치)
                                     _risk_rate = float(get_config('risk_per_trade') or 0.02)
-                                    current_atr_for_sizing = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else current_price * 0.01
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
-                                        curr_bal, current_atr_for_sizing, trade_leverage, contract_size, _risk_rate
+                                        curr_bal, current_price, trade_leverage, contract_size, _risk_rate
                                     )
                                 # 레버리지 거래소 적용
                                 try:
@@ -1274,7 +1273,7 @@ async def execute_test_order(direction: str = "LONG"):
             strategy_tmp = TradingStrategy(initial_seed=75.0)
             _risk_rate = float(get_config('risk_per_trade') or 0.02)
             trade_amount = strategy_tmp.calculate_position_size_dynamic(
-                curr_bal_now, current_price_now * 0.01, trade_leverage, contract_size, _risk_rate
+                curr_bal_now, current_price_now, trade_leverage, contract_size, _risk_rate
             )
         # 레버리지 거래소 적용
         try:

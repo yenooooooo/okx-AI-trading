@@ -307,22 +307,20 @@ class TradingStrategy:
             self.loss_cooldown_until = 0
 
 
-    def calculate_position_size_dynamic(self, equity, current_atr, leverage=1, contract_size=0.01, risk_rate=0.02):
+    def calculate_position_size_dynamic(self, equity, current_price, leverage=1, contract_size=0.01, risk_rate=0.02):
         """
-        [v2.2] 변동성 기반 동적 포지션 사이징 (UI 연동 완료)
-        공식: Risk Per Trade = Equity * risk_rate (DB에서 전달받은 리스크 비율)
-              Stop Distance = ATR * 1.5 (하드 SL 폭)
-              Position Size = Risk Per Trade / Stop Distance
-        ATR이 넓으면 수량을 줄이고, 좁으면 수량을 늘림
+        [v2.3] 증거금 부족(Insufficient Margin) 셧다운 완벽 패치
+        ATR 기반 계산을 버리고, 내 시드의 %만큼 정확하게 진입하는 정직한 정률법으로 교체
+        공식: (잔고 * 리스크 비율 * 레버리지) / 현재 가격
         """
-        if equity <= 0 or current_atr <= 0:
-            return 1  # 최소 1계약
+        if equity <= 0 or current_price <= 0:
+            return 1
 
-        risk_amount = equity * risk_rate              # DB에서 전달받은 리스크 비율 적용
-        stop_distance = current_atr * 1.5             # 하드 SL 폭 (ATR * 1.5)
-        position_size_raw = risk_amount / stop_distance
+        # 공식: (내 잔고 * 리스크 비율 * 레버리지) / 현재 가격
+        notional = equity * risk_rate * leverage
+        position_size_raw = notional / current_price
 
-        # 계약 단위로 변환
+        # OKX Swap 계약 단위 정수화 변환
         if contract_size > 0:
             contracts = max(1, round(position_size_raw / contract_size))
         else:
