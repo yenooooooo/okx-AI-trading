@@ -780,35 +780,38 @@ async function updateConfigValue(key) {
 }
 
 async function setTargetSymbol(newSymbol) {
-    // 안전장치: 포지션 보유 중 타겟 변경 차단
+    // 사전 차단: 포지션 보유 중 타겟 변경 강력 차단
     const currentPos = document.getElementById('pos-type')?.textContent;
     if (currentPos && currentPos.trim() !== 'NONE') {
-        showToast('변경 불가', '포지션 유지 중에는 타겟을 변경할 수 없습니다.', 'ERROR');
+        showToast('변경 불가', '현재 포지션이 열려있어 타겟을 변경할 수 없습니다. 청산 후 시도하세요.', 'ERROR');
         return;
     }
     try {
-        // 서버에 새 심볼 저장
+        // 서버 상태 업데이트
         await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(JSON.stringify([newSymbol]))}`, { method: 'POST' });
 
-        // 버튼 UI 활성 상태 갱신
+        // 클라이언트 상태 즉각 리셋 (Ghost Data 방지)
+        currentSymbol = newSymbol;
+        const heroPriceEl = document.getElementById('hero-price');
+        if (heroPriceEl) heroPriceEl.textContent = '---';
+        if (candleSeries) candleSeries.setData([]);
+        const feed = document.getElementById('monologue-feed');
+        if (feed) feed.innerHTML = `<div class="text-[11px] font-mono text-neon-green italic animate-pulse">🎯 [${newSymbol}] 조준 완료. 데이터 동기화 중...</div>`;
+
+        // 버튼 UI 활성 상태 갱신 (ticker-badge span은 innerHTML 방식이 아니므로 유지됨)
         document.querySelectorAll('.target-coin-btn').forEach(btn => {
             if (btn.dataset.symbol === newSymbol) {
-                btn.className = 'target-coin-btn text-xs py-2 rounded font-mono font-bold transition-all flex items-center justify-center border border-neon-green text-neon-green bg-neon-green/10';
+                btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-neon-green text-neon-green bg-neon-green/10';
             } else {
-                btn.className = 'target-coin-btn text-xs py-2 rounded font-mono font-bold transition-all flex items-center justify-center border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
+                btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
             }
         });
 
-        // 글로벌 심볼 갱신
-        currentSymbol = newSymbol;
-
-        // 호가창·차트 즉시 전환
+        // 신경망 재연결 — 새 코인 데이터로 화면 전체 강제 새로고침
         initPriceWebSocket();
         syncChart();
-
-        // 혼잣말 리셋
-        const feed = document.getElementById('monologue-feed');
-        if (feed) feed.innerHTML = '<div class="text-[11px] font-mono text-neon-green italic animate-pulse">새로운 타겟 조준 완료. 데이터 동기화 중...</div>';
+        syncBrain();
+        syncBotStatus();
 
         // 토스트 알림
         showToast('타겟 변경', `조준경이 ${newSymbol}로 전환되었습니다.`, 'INFO');
@@ -1554,6 +1557,47 @@ async function syncSystemHealth() {
     }
 }
 
+// --- 실시간 등락률 뱃지 (Live Tickers via OKX Public API) ---
+async function fetchLiveTickers() {
+    try {
+        const res = await fetch('https://www.okx.com/api/v5/market/tickers?instType=SWAP');
+        if (!res.ok) return;
+        const { data } = await res.json();
+        if (!Array.isArray(data)) return;
+
+        // instId 키로 O(1) 접근용 Map 생성
+        const tickerMap = new Map(data.map(t => [t.instId, t]));
+
+        document.querySelectorAll('.target-coin-btn').forEach(btn => {
+            const dataSymbol = btn.dataset.symbol; // e.g. "BTC/USDT:USDT"
+            if (!dataSymbol) return;
+
+            // BTC/USDT:USDT → BTC-USDT-SWAP
+            const instId = dataSymbol.split('/')[0] + '-USDT-SWAP';
+            const ticker = tickerMap.get(instId);
+            if (!ticker) return;
+
+            const last = parseFloat(ticker.last);
+            const open24h = parseFloat(ticker.open24h);
+            if (!open24h || isNaN(last)) return;
+
+            const changePct = (last - open24h) / open24h * 100;
+            const sign = changePct >= 0 ? '+' : '';
+            const colorClass = changePct >= 0 ? 'text-neon-green' : 'text-neon-red';
+
+            let badge = btn.querySelector('.ticker-badge');
+            if (!badge) {
+                badge = document.createElement('span');
+                btn.appendChild(badge);
+            }
+            badge.className = `ticker-badge ml-1.5 text-[9px] ${colorClass}`;
+            badge.textContent = `${sign}${changePct.toFixed(1)}%`;
+        });
+    } catch (e) {
+        // OKX Public API 오류 시 조용히 무시 (뱃지 미갱신)
+    }
+}
+
 // --- Init & Intervals (Parallel Optimization) ---
 async function initializeApp() {
     // 순차적 페칭 대신 Promise.all을 활용해 병렬 스레드로 대기 시간 단축
@@ -1569,6 +1613,7 @@ async function initializeApp() {
         updateLogs(),
         syncSystemHealth(),
         fetchAndRenderHeatmap(),  // 히트맵 초기 렌더링
+        fetchLiveTickers(),       // 실시간 등락률 뱃지 초기 렌더링
     ]);
 
     // 초기 렌더링 후 타이머 설정
@@ -1580,6 +1625,7 @@ async function initializeApp() {
     setInterval(syncConfig, 30000);     // 외부 설정 변경 자동 반영
     setInterval(syncSystemHealth, 5000); // 헬스 체크 (5초 — 매매 뇌 부하 최소화)
     setInterval(fetchAndRenderHeatmap, 60000); // 히트맵 1분마다 갱신
+    setInterval(fetchLiveTickers, 5000);       // 등락률 뱃지 5초마다 갱신
 }
 
 // Start
