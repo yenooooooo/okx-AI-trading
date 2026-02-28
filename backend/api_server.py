@@ -517,7 +517,6 @@ async def async_trading_loop():
             current_time = time.time()
 
             # ── [HOTFIX: Split Brain 방지] 외부에서 뇌(전략)가 포맷되었는지 감시 ──
-            global _active_strategy
             if strategy_instance is not _active_strategy:
                 strategy_instance = _active_strategy
                 logger.info("[엔진 딥 리셋] 매매 루프: 새로운 뇌(TradingStrategy) 이식 완료.")

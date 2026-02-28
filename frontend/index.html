@@ -1038,7 +1038,7 @@
             </div>
 
             <!-- Body: Side-by-Side Grid -->
-            <div class="grid grid-cols-1 md:grid-cols-2 flex-1 min-h-0 overflow-hidden">
+            <div class="grid grid-cols-1 md:grid-cols-2 flex-1 min-h-0 overflow-y-auto md:overflow-hidden">
 
                 <!-- ══ LEFT: Parameter Input Panel ══ -->
                 <div class="flex flex-col border-b md:border-b-0 md:border-r border-navy-border min-h-0">
@@ -1194,17 +1194,6 @@
                             </div>
                         </div>
                     </div>
-                    <!-- Left Footer: Dual Button Layout -->
-                    <div class="px-5 py-4 flex-shrink-0 border-t border-navy-border flex flex-col md:flex-row gap-2">
-                        <button onclick="resetToAuto()"
-                            class="flex-1 py-2.5 bg-blue-500/10 border border-blue-500/50 hover:bg-blue-500/20 text-blue-400 font-mono text-xs tracking-widest font-bold rounded transition-all flex items-center justify-center gap-1.5">
-                            🤖 AUTO RESET
-                        </button>
-                        <button onclick="saveTuningConfig()"
-                            class="flex-1 py-2.5 bg-purple-500/20 border border-purple-500 hover:bg-purple-500 hover:text-white transition rounded text-purple-300 font-mono text-xs tracking-widest font-bold">
-                            💾 SAVE &amp; APPLY
-                        </button>
-                    </div>
                 </div>
 
                 <!-- ══ RIGHT: Tactical Grimoire ══ -->
@@ -1290,6 +1279,18 @@
                     </div>
                 </div>
 
+            </div>
+
+            <!-- ══ Global Footer: 모달 전체 하단 고정 버튼 영역 ══ -->
+            <div class="px-5 py-4 flex-shrink-0 border-t border-navy-border flex flex-col md:flex-row gap-3 bg-navy-900/80 rounded-b-xl">
+                <button onclick="resetToAuto()"
+                    class="flex-1 py-3 bg-blue-500/10 border border-blue-500/50 hover:bg-blue-500/20 text-blue-400 font-mono text-xs tracking-widest font-bold rounded transition-all flex items-center justify-center gap-1.5">
+                    🤖 AUTO RESET (AI 순정 모드 복귀)
+                </button>
+                <button onclick="saveTuningConfig()"
+                    class="flex-1 py-3 bg-purple-500/20 border border-purple-500 hover:bg-purple-500 hover:text-white transition rounded text-purple-300 font-mono text-xs tracking-widest font-bold">
+                    💾 엔진에 설정 덮어쓰기 (SAVE &amp; APPLY)
+                </button>
             </div>
         </div>
     </div>
