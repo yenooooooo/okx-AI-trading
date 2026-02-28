@@ -1103,10 +1103,11 @@ async def async_trading_loop():
                                     notional = seed_usdt * trade_leverage
                                     trade_amount = max(1, round(notional / (current_price * contract_size)))
                                 else:
-                                    # [v2.2] ATR 기반 동적 사이징: Risk 2% / (ATR * 1.5)
+                                    # [v2.2] ATR 기반 동적 사이징 (UI 튜닝값 연동)
+                                    _risk_rate = float(get_config('risk_per_trade') or 0.02)
                                     current_atr_for_sizing = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else current_price * 0.01
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
-                                        curr_bal, current_atr_for_sizing, trade_leverage, contract_size
+                                        curr_bal, current_atr_for_sizing, trade_leverage, contract_size, _risk_rate
                                     )
                                 # 레버리지 거래소 적용
                                 try:
@@ -1246,8 +1247,9 @@ async def execute_test_order(direction: str = "LONG"):
         else:
             curr_bal_now = await asyncio.to_thread(engine_api.get_usdt_balance)
             strategy_tmp = TradingStrategy(initial_seed=75.0)
+            _risk_rate = float(get_config('risk_per_trade') or 0.02)
             trade_amount = strategy_tmp.calculate_position_size_dynamic(
-                curr_bal_now, current_price_now * 0.01, trade_leverage, contract_size
+                curr_bal_now, current_price_now * 0.01, trade_leverage, contract_size, _risk_rate
             )
         # 레버리지 거래소 적용
         try:
@@ -1764,6 +1766,7 @@ async def reset_tuning_to_auto():
         "adx_threshold", "adx_max", "chop_threshold", "volume_surge_multiplier",
         "fee_margin", "hard_stop_loss_rate", "trailing_stop_activation",
         "trailing_stop_rate", "cooldown_losses_trigger", "cooldown_duration_sec",
+        "risk_per_trade", "leverage",  # [누락된 핵심 파라미터 추가]
     ]
     delete_configs(keys)
     _active_strategy = TradingStrategy()

@@ -291,10 +291,10 @@ class TradingStrategy:
             self.loss_cooldown_until = 0
 
 
-    def calculate_position_size_dynamic(self, equity, current_atr, leverage=1, contract_size=0.01):
+    def calculate_position_size_dynamic(self, equity, current_atr, leverage=1, contract_size=0.01, risk_rate=0.02):
         """
-        [v2.2] 변동성 기반 동적 포지션 사이징
-        공식: Risk Per Trade = Equity * 2%
+        [v2.2] 변동성 기반 동적 포지션 사이징 (UI 연동 완료)
+        공식: Risk Per Trade = Equity * risk_rate (DB에서 전달받은 리스크 비율)
               Stop Distance = ATR * 1.5 (하드 SL 폭)
               Position Size = Risk Per Trade / Stop Distance
         ATR이 넓으면 수량을 줄이고, 좁으면 수량을 늘림
@@ -302,9 +302,9 @@ class TradingStrategy:
         if equity <= 0 or current_atr <= 0:
             return 1  # 최소 1계약
 
-        risk_per_trade = equity * 0.02                # 전체 자본의 2%
+        risk_amount = equity * risk_rate              # DB에서 전달받은 리스크 비율 적용
         stop_distance = current_atr * 1.5             # 하드 SL 폭 (ATR * 1.5)
-        position_size_raw = risk_per_trade / stop_distance
+        position_size_raw = risk_amount / stop_distance
 
         # 계약 단위로 변환
         if contract_size > 0:
