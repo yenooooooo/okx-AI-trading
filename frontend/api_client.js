@@ -802,6 +802,24 @@ async function saveTuningConfig() {
     }
 }
 
+async function resetToAuto() {
+    const btn = document.querySelector('#tuning-modal button[onclick="resetToAuto()"]');
+    try {
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 리셋 중...'; }
+        // 1. 서버: DB 튜닝 키 전체 삭제 + 전략 인스턴스 재생성
+        const res = await fetch(`${API_URL}/tuning/reset`, { method: 'POST' });
+        if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
+        // 2. Tier 1 기본값으로 입력창 초기화 + DB에 즉시 재저장
+        await applyPreset('tier1');
+        showToast('AI 순정 모드 복귀 완료', 'Tier 1 기본값 딥 리셋 · 전략 인스턴스 재생성 완료.', 'SUCCESS');
+    } catch (error) {
+        console.error('[ANTIGRAVITY 디버그] resetToAuto 실패:', error);
+        showToast('리셋 실패', error.message || '서버 통신 오류가 발생했습니다.', 'ERROR');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🤖 AUTO RESET'; }
+    }
+}
+
 // --- 버튼 피드백 공통 헬퍼 ---
 function flashBtn(btn, success) {
     if (!btn) return;

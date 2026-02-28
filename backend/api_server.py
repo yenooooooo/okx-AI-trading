@@ -11,7 +11,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
-from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades
+from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs
 from backtester import Backtester
 from notifier import send_telegram_sync
 from logger import get_logger
@@ -1733,6 +1733,22 @@ async def update_config(key: str, value: str):
         bot_global_state["logs"].append(log_msg)
         logger.error(log_msg)
         return {"success": False, "message": str(e)}
+
+@app_server.post("/api/v1/tuning/reset")
+async def reset_tuning_to_auto():
+    """튜닝 파라미터 전체 삭제 + 전략 인스턴스 재생성 (AI 순정 모드 딥 리셋)"""
+    global _active_strategy
+    keys = [
+        "adx_threshold", "adx_max", "chop_threshold", "volume_surge_multiplier",
+        "fee_margin", "hard_stop_loss_rate", "trailing_stop_activation",
+        "trailing_stop_rate", "cooldown_losses_trigger", "cooldown_duration_sec",
+    ]
+    delete_configs(keys)
+    _active_strategy = TradingStrategy()
+    msg = "[시스템] 사령관 명령 수신: 튜닝 데이터 삭제 및 AI 순정 모드(Tier 1) 딥 리셋 완료."
+    bot_global_state["logs"].append(msg)
+    logger.info(msg)
+    return {"success": True, "message": msg}
 
 @app_server.get("/api/v1/ohlcv")
 async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):

@@ -221,5 +221,16 @@ def wipe_all_trades():
     conn.commit()
     conn.close()
 
+def delete_configs(keys: List[str]):
+    """여러 설정 키를 한 번에 삭제 (AI 순정 모드 복귀용)"""
+    if not keys:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    placeholders = ','.join('?' * len(keys))
+    cursor.execute(f'DELETE FROM bot_config WHERE key IN ({placeholders})', keys)
+    conn.commit()
+    conn.close()
+
 # 데이터베이스 초기화 (모듈 로드 시 자동 실행)
 init_db()

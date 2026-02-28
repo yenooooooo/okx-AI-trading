@@ -1167,11 +1167,15 @@
                             </div>
                         </div>
                     </div>
-                    <!-- Left Footer: Save Button -->
-                    <div class="px-5 py-4 flex-shrink-0 border-t border-navy-border">
+                    <!-- Left Footer: Dual Button Layout -->
+                    <div class="px-5 py-4 flex-shrink-0 border-t border-navy-border flex flex-col md:flex-row gap-2">
+                        <button onclick="resetToAuto()"
+                            class="flex-1 py-2.5 bg-navy-800 border border-navy-border hover:border-blue-500 text-blue-400 font-mono text-xs tracking-widest font-bold rounded transition-all flex items-center justify-center gap-1.5">
+                            🤖 AUTO RESET
+                        </button>
                         <button onclick="saveTuningConfig()"
-                            class="text-xs w-full py-2.5 bg-purple-500/20 border border-purple-500 hover:bg-purple-500 hover:text-white transition rounded text-purple-300 font-mono tracking-widest font-bold">
-                            SAVE &amp; APPLY
+                            class="flex-1 py-2.5 bg-purple-500/20 border border-purple-500 hover:bg-purple-500 hover:text-white transition rounded text-purple-300 font-mono text-xs tracking-widest font-bold">
+                            💾 SAVE &amp; APPLY
                         </button>
                     </div>
                 </div>
