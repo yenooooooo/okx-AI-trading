@@ -383,7 +383,7 @@
                             </div>
                             <input type="number" id="manual-amount" min="1" step="1" value="10"
                                 class="w-full bg-navy-900 border border-navy-border rounded p-2 text-neon-green text-sm font-mono focus:outline-none focus:border-neon-green text-center tracking-widest transition-colors"
-                                oninput="document.getElementById('manual-amount-display').textContent = this.value">
+                                oninput="document.getElementById('manual-amount-display').textContent = this.value; updateOrderPreview()">
                             <div class="grid grid-cols-4 gap-1.5 mt-2">
                                 <button onclick="setQuickAmount(10)" class="text-[9px] font-mono py-1 rounded bg-navy-800 border border-navy-border hover:border-gray-500 hover:text-white text-gray-400 transition-all">10%</button>
                                 <button onclick="setQuickAmount(25)" class="text-[9px] font-mono py-1 rounded bg-navy-800 border border-navy-border hover:border-gray-500 hover:text-white text-gray-400 transition-all">25%</button>
@@ -398,9 +398,20 @@
                             </div>
                             <input type="range" id="manual-leverage" min="1" max="100" step="1" value="1"
                                 class="w-full accent-neon-green"
-                                oninput="document.getElementById('manual-lev-display').textContent = this.value + 'x'">
+                                oninput="document.getElementById('manual-lev-display').textContent = this.value + 'x'; updateOrderPreview()">
                             <div class="flex justify-between text-[10px] text-gray-600 font-mono mt-1">
                                 <span>1x</span><span>25x</span><span>50x</span><span>100x</span>
+                            </div>
+                        </div>
+                        <!-- 실시간 주문 견적서 프리뷰 -->
+                        <div class="bg-navy-900/60 border border-navy-border border-dashed rounded p-2.5 mb-3 flex flex-col gap-1.5 transition-all" id="order-preview-box">
+                            <div class="flex justify-between items-center text-[10px] font-mono text-gray-400">
+                                <span>총 타격 볼륨 (USDT x Lev)</span>
+                                <span id="preview-total-volume" class="text-white font-bold">0.00 USDT</span>
+                            </div>
+                            <div class="flex justify-between items-center text-[10px] font-mono text-gray-400">
+                                <span>예상 확보 수량 (Est. Qty)</span>
+                                <span id="preview-est-qty" class="text-neon-green font-bold">≈ 0.0000</span>
                             </div>
                         </div>
                         <button onclick="saveManualOverride()"

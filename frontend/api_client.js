@@ -1397,6 +1397,38 @@ function setQuickAmount(percent) {
         input.classList.add('bg-neon-green/20');
         setTimeout(() => input.classList.remove('bg-neon-green/20'), 300);
     }
+    // 퀵 할당 후 견적서 즉시 갱신
+    updateOrderPreview();
+}
+
+// --- Live Order Receipt: 실시간 주문 견적서 프리뷰 계산 엔진 ---
+function updateOrderPreview() {
+    const totalVolumeEl = document.getElementById('preview-total-volume');
+    const estQtyEl = document.getElementById('preview-est-qty');
+    if (!totalVolumeEl || !estQtyEl) return;
+
+    const amount = parseFloat(document.getElementById('manual-amount')?.value) || 0;
+    const leverage = parseFloat(document.getElementById('manual-leverage')?.value) || 1;
+    const totalVolume = amount * leverage;
+
+    // 콤마 포함 숫자 문자열 안전 파싱 (예: "95,234.12" → 95234.12)
+    const heroPriceRaw = document.getElementById('hero-price')?.textContent.replace(/,/g, '') || '0';
+    const currentPrice = parseFloat(heroPriceRaw) || 0;
+
+    // 총 타격 볼륨 렌더링
+    totalVolumeEl.textContent = totalVolume.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    }) + ' USDT';
+
+    // 예상 확보 수량 렌더링
+    const coinName = currentSymbol.split('/')[0]; // "BTC/USDT:USDT" → "BTC"
+    if (currentPrice <= 0) {
+        estQtyEl.textContent = '대기중...';
+    } else {
+        const estQty = totalVolume / currentPrice;
+        estQtyEl.textContent = `≈ ${estQty.toFixed(4)} ${coinName}`;
+    }
 }
 
 async function toggleManualOverride() {
@@ -1591,6 +1623,12 @@ function initPriceWebSocket() {
                 }
 
                 // 3. pos-current 마크가격 표시 (pos-roi는 백엔드 OKX 정확값으로 처리)
+
+                // 4. 오버라이드 패널 오픈 상태에서 견적서 실시간 갱신 (가격 연동 출렁임)
+                const overridePanel = document.getElementById('manual-override-panel');
+                if (overridePanel && !overridePanel.classList.contains('hidden')) {
+                    updateOrderPreview();
+                }
             }
         }
     };
