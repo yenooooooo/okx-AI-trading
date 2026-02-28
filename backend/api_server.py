@@ -512,15 +512,12 @@ async def async_trading_loop():
     last_log_time = 0
     last_scan_time = 0  # 스캐너 마지막 작동 시간
     _circuit_breaker_last_warn = {}  # 서킷 브레이커 로그 쓰로틀 (심볼별 마지막 경고 시각)
-    _config_sync_counter = 0  # DB 설정 실시간 동기화 카운터 (20회 × 3초 = 60초마다 갱신)
-
     while bot_global_state["is_running"]:
         try:
             current_time = time.time()
 
-            # ── [실시간 설정 동기화] 60초마다 DB에서 핵심 설정값 갱신 (UI 변경 즉시 반영) ──
-            _config_sync_counter += 1
-            if _config_sync_counter >= 20:
+            # ── [실시간 설정 동기화] 매 루프마다 DB → strategy_instance 강제 주입 (UI 변경 즉각 반영) ──
+            try:
                 strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
                 strategy_instance.adx_threshold = float(get_config('adx_threshold') or 25.0)
                 strategy_instance.adx_max = float(get_config('adx_max') or 40.0)
@@ -532,7 +529,8 @@ async def async_trading_loop():
                 strategy_instance.trailing_stop_rate = float(get_config('trailing_stop_rate') or 0.002)
                 strategy_instance.cooldown_losses_trigger = int(get_config('cooldown_losses_trigger') or 3)
                 strategy_instance.cooldown_duration_sec = int(get_config('cooldown_duration_sec') or 900)
-                _config_sync_counter = 0
+            except Exception as _sync_err:
+                logger.error(f"[설정 동기화 오류] {_sync_err}")
 
             # ── 15분 주기 다이내믹 볼륨 스캐너 가동 ──
             if current_time - last_scan_time >= 900:

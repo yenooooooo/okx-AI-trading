@@ -646,8 +646,31 @@ const PRESET_CONFIGS = {
     },
 };
 
+// 리스크 온도계 — risk_per_trade 입력값에 따른 실시간 위험도 안내
+function updateRiskThermometer(value) {
+    const el = document.getElementById('risk-thermometer-text');
+    if (!el) return;
+    const v = parseFloat(value);
+    if (isNaN(v) || String(value).trim() === '') {
+        el.className = 'text-[10px] font-mono mt-1.5 transition-colors duration-300 text-gray-500';
+        el.textContent = '리스크 비율을 입력하면 AI가 위험도를 분석합니다.';
+        return;
+    }
+    if (v <= 2) {
+        el.className = 'text-[10px] font-mono mt-1.5 transition-colors duration-300 text-neon-green';
+        el.textContent = '🛡️ 방어력 극대화 모드. 안전한 복리 우상향을 지향합니다.';
+    } else if (v <= 5) {
+        el.className = 'text-[10px] font-mono mt-1.5 transition-colors duration-300 text-yellow-400';
+        el.textContent = '⚖️ 표준 밸런스 모드. 적절한 수익과 리스크를 동반합니다.';
+    } else {
+        el.className = 'text-[10px] font-mono mt-1.5 transition-colors duration-300 text-orange-500 font-bold animate-pulse';
+        el.textContent = '⚠️ 초고위험 세팅! 단 1번의 손절로 시드의 큰 비중이 증발할 수 있습니다.';
+    }
+}
+
 // 튜닝 파라미터 맵 — syncConfig() 와 saveTuningConfig() 공유 단일 진실 소스
 const TUNING_INPUT_MAP = {
+    'risk_per_trade': { id: 'config-risk_per_trade', parse: v => parseFloat(v) / 100 },
     'adx_threshold': { id: 'tuning-adx-threshold', parse: parseFloat },
     'adx_max': { id: 'tuning-adx-max', parse: parseFloat },
     'chop_threshold': { id: 'tuning-chop-threshold', parse: parseFloat },
@@ -668,8 +691,10 @@ async function syncConfig() {
         for (const [key, val] of Object.entries(configs)) {
             if (key === 'risk_per_trade') {
                 const input = document.getElementById('config-risk-rate');
+                const tuningInput = document.getElementById('config-risk_per_trade');
                 const v = parseFloat(val) * 100;
                 if (input) input.value = v;
+                if (tuningInput) { tuningInput.value = v.toFixed(1); updateRiskThermometer(v); }
                 updateText('risk-val-display', v.toFixed(1) + '%', false);
             } else if (key === 'leverage') {
                 const input = document.getElementById('config-leverage');
@@ -809,7 +834,8 @@ async function saveTuningConfig() {
                 btn.classList.add('border-purple-500', 'text-purple-300', 'bg-purple-500/20');
             }, 2000);
         }
-        showToast('엔진 튜닝 적용', '10개 파라미터 저장 완료. 최대 60초 내 반영됩니다.', 'SUCCESS');
+        showToast('엔진 튜닝 적용', '11개 파라미터 저장 완료. 백엔드 매매 엔진에 즉각 반영됩니다.', 'SUCCESS');
+        syncBotStatus(); // 런타임 엔진 상태 뱃지 즉시 갱신
     } catch (error) {
         console.error('[ANTIGRAVITY 디버그] saveTuningConfig 실패:', error);
         showToast('저장 실패', error.message || '서버 통신 오류가 발생했습니다.', 'ERROR');
