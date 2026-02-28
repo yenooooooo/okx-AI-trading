@@ -199,7 +199,7 @@
     <!-- Header -->
     <header class="flex justify-between items-center glass-panel p-4 z-20">
         <div>
-            <h1 class="text-2xl font-bold tracking-tight">ANTIGRAVITY <span
+            <h1 class="text-lg md:text-2xl font-bold tracking-tight">ANTIGRAVITY <span
                     class="text-neon-green font-mono text-sm">v2.0</span></h1>
             <p class="text-xs text-gray-400">High-End Trading Intelligence Dashboard</p>
         </div>
@@ -210,7 +210,7 @@
                         class="animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-red opacity-75"></span>
                     <span id="status-dot" class="relative inline-flex rounded-full h-3 w-3 bg-neon-red"></span>
                 </span>
-                <span id="bot-status-text" class="font-mono text-sm tracking-widest text-gray-400 uppercase">🛑 시스템
+                <span id="bot-status-text" class="hidden md:inline-block font-mono text-sm tracking-widest text-gray-400 uppercase">🛑 시스템
                     중지</span>
             </div>
             <button id="toggle-bot-btn"
@@ -475,7 +475,7 @@
             </div>
 
             <!-- Indicator Gauges -->
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="glass-panel p-5 relative overflow-hidden">
                     <h3 class="text-xs text-gray-400 uppercase tracking-widest mb-3 flex justify-between">
                         <span>Relative Strength (RSI)</span>
@@ -570,7 +570,7 @@
                         style="width:0%;box-shadow:0 0 6px rgba(0,255,136,0.5);"></div>
                 </div>
                 <!-- 관문 목록 -->
-                <div class="grid grid-cols-2 gap-x-4 gap-y-1.5" id="gates-list">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2" id="gates-list">
                     <div
                         class="flex items-center justify-between text-[11px] font-mono bg-navy-900/40 rounded px-2 py-1">
                         <span class="text-gray-400">ADX 추세강도</span>
@@ -618,7 +618,7 @@
             </div>
 
             <!-- Extended Intelligence Panel (Market Radar & Recent Executions) -->
-            <div class="glass-panel p-4 flex gap-6">
+            <div class="glass-panel p-4 flex flex-col md:flex-row gap-4 md:gap-6">
                 <!-- Market Radar (Left 50%) -->
                 <div class="flex-1 flex flex-col">
                     <h3
@@ -642,7 +642,7 @@
                     </div>
                 </div>
                 <!-- Divider -->
-                <div class="w-px bg-navy-border/50 hidden lg:block"></div>
+                <div class="w-px bg-navy-border/50 hidden md:block"></div>
                 <!-- Recent Executions (Right 50%) -->
                 <div class="flex-1 flex flex-col">
                     <h3
@@ -750,7 +750,7 @@
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Trades</span>
                         <span id="stats-total-trades"
-                            class="font-mono text-lg font-bold text-text-main flash-target">0</span>
+                            class="font-mono text-base md:text-lg font-bold text-text-main flash-target">0</span>
                         <span class="text-[10px] text-gray-600">완료된 총 거래 횟수</span>
                     </div>
 
@@ -758,7 +758,7 @@
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
                         <span id="stats-win-rate"
-                            class="font-mono text-lg font-bold text-neon-green flash-target">0.00%</span>
+                            class="font-mono text-base md:text-lg font-bold text-neon-green flash-target">0.00%</span>
                         <span class="text-[10px] text-gray-600">수익 거래 승률</span>
                     </div>
 
@@ -766,7 +766,7 @@
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Daily Net PnL</span>
                         <span id="stats-daily-net"
-                            class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
+                            class="font-mono text-base md:text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
                         <span class="text-[10px] text-gray-600">오늘 하루 최종 순손익 (USDT)</span>
                     </div>
 
@@ -774,7 +774,7 @@
                     <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
                         <span class="text-[10px] text-gray-500 uppercase tracking-wider">Total Net PnL</span>
                         <span id="stats-total-net"
-                            class="font-mono text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
+                            class="font-mono text-base md:text-lg font-bold text-neon-green flash-target">+0.00 USDT</span>
                         <span class="text-[10px] text-gray-600">누적 최종 순손익 (USDT)</span>
                     </div>
                 </div>
@@ -893,7 +893,7 @@
             style="background:rgba(22,27,34,0.97);border-color:#30363d;color:#e6edf3;white-space:nowrap;"></div>
 
         <!-- BOTTOM: Terminal Module (12 cols) -->
-        <div class="col-span-12 glass-panel flex flex-col h-56 mt-2 mb-4 relative z-0">
+        <div class="col-span-12 glass-panel flex flex-col h-48 md:h-56 mt-2 mb-4 relative z-0" style="-webkit-overflow-scrolling: touch;">
             <div
                 class="flex justify-between items-center px-4 py-2 border-b border-navy-border bg-navy-900/80 rounded-t-xl z-20">
                 <div class="flex items-center gap-3">
@@ -1004,7 +1004,7 @@
     <!-- ════════════ Engine Tuning Modal ════════════ -->
     <div id="tuning-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
         style="background: rgba(13,17,23,0.85); backdrop-filter: blur(6px);">
-        <div class="glass-panel w-full max-w-5xl flex flex-col" style="max-height: 90vh;">
+        <div class="glass-panel w-full max-w-5xl flex flex-col max-h-[90vh] md:max-h-[85vh]">
 
             <!-- Modal Header (full-width) -->
             <div class="flex items-center justify-between px-5 py-4 border-b border-navy-border flex-shrink-0">
@@ -1021,7 +1021,7 @@
 
                 <!-- ══ LEFT: Parameter Input Panel ══ -->
                 <div class="flex flex-col border-b md:border-b-0 md:border-r border-navy-border min-h-0">
-                    <div class="px-5 py-5 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+                    <div class="px-3 py-4 md:px-5 md:py-5 overflow-y-auto custom-scrollbar flex-1 space-y-6">
                         <p class="text-sm font-mono text-gray-300 leading-relaxed">
                             전략 파라미터를 실시간으로 변경합니다. 저장 즉시 다음 사이클(최대 60초)에 반영됩니다.
                         </p>
@@ -1157,7 +1157,7 @@
 
                 <!-- ══ RIGHT: Tactical Grimoire ══ -->
                 <div class="tuning-right-panel flex flex-col min-h-0">
-                    <div class="px-5 py-5 overflow-y-auto custom-scrollbar flex-1 space-y-5">
+                    <div class="px-3 py-4 md:px-5 md:py-5 overflow-y-auto custom-scrollbar flex-1 space-y-5">
 
                         <!-- ── Preset Buttons ── -->
                         <div>
