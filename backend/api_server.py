@@ -516,6 +516,13 @@ async def async_trading_loop():
         try:
             current_time = time.time()
 
+            # ── [HOTFIX: Split Brain 방지] 외부에서 뇌(전략)가 포맷되었는지 감시 ──
+            global _active_strategy
+            if strategy_instance is not _active_strategy:
+                strategy_instance = _active_strategy
+                logger.info("[엔진 딥 리셋] 매매 루프: 새로운 뇌(TradingStrategy) 이식 완료.")
+                bot_global_state["logs"].append("🧠 [시스템] 엔진 코어 교체 감지: 새로운 AI 뇌로 실시간 교체 완료.")
+
             # ── [실시간 설정 동기화] 매 루프마다 DB → strategy_instance 강제 주입 (UI 변경 즉각 반영) ──
             try:
                 strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
