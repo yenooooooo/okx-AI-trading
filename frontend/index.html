@@ -1198,6 +1198,36 @@
                                         class="w-full bg-navy-900 border border-navy-border rounded p-2 text-red-300 text-sm font-mono focus:outline-none focus:border-red-500 text-center">
                                     <p class="text-[10px] font-mono text-gray-400 mt-1.5 leading-relaxed">연패 쿨다운 발동 후 신규 진입 차단 시간 (예: 900 = 15분)</p>
                                 </div>
+                                <!-- [Phase 14.1] Gate Bypass 스위치 (초단타 전용) -->
+                                <div class="col-span-2 p-3.5 rounded bg-red-500/5 border border-red-500/30 mt-2">
+                                    <h4 class="text-[11px] font-mono font-bold text-red-400 mb-3 flex items-center gap-1.5">
+                                        <span>⚠️</span> 초단타 전용 방어 관문 해제 (Gate Bypass)
+                                    </h4>
+                                    <p class="text-[9px] font-mono text-gray-500 mb-3 leading-relaxed">ON 시 해당 필터를 무시하고 진입을 허용합니다. 고빈도 스캘핑 전략 전용 — 일반 매매 시 사용 금지.</p>
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                        <label class="flex items-center gap-2.5 cursor-pointer p-2 rounded border border-red-500/20 hover:border-red-500/50 bg-navy-900/60 transition-all">
+                                            <input type="checkbox" id="config-bypass_macro" class="w-3.5 h-3.5 accent-red-500 cursor-pointer">
+                                            <div>
+                                                <span class="text-[11px] font-mono font-bold text-gray-200 block">1h 거시추세 무시</span>
+                                                <span class="text-[9px] font-mono text-gray-500">EMA200 역행 허용</span>
+                                            </div>
+                                        </label>
+                                        <label class="flex items-center gap-2.5 cursor-pointer p-2 rounded border border-red-500/20 hover:border-red-500/50 bg-navy-900/60 transition-all">
+                                            <input type="checkbox" id="config-bypass_disparity" class="w-3.5 h-3.5 accent-red-500 cursor-pointer">
+                                            <div>
+                                                <span class="text-[11px] font-mono font-bold text-gray-200 block">이격도(0.8%) 무시</span>
+                                                <span class="text-[9px] font-mono text-gray-500">EMA20 과도 이격 허용</span>
+                                            </div>
+                                        </label>
+                                        <label class="flex items-center gap-2.5 cursor-pointer p-2 rounded border border-red-500/20 hover:border-red-500/50 bg-navy-900/60 transition-all">
+                                            <input type="checkbox" id="config-bypass_indicator" class="w-3.5 h-3.5 accent-red-500 cursor-pointer">
+                                            <div>
+                                                <span class="text-[11px] font-mono font-bold text-gray-200 block">MACD/RSI 무시</span>
+                                                <span class="text-[9px] font-mono text-gray-500">RSI 범위 제한 해제</span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

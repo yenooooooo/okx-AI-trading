@@ -33,6 +33,11 @@ class TradingStrategy:
         self.kill_switch_active = False       # 킬스위치 발동 여부
         self.kill_switch_until = 0            # 킬스위치 해제 타임스탬프
 
+        # [v3.5] Gate Bypass 스위치 (초단타 전용 방어 관문 개별 해제)
+        self.bypass_macro = False       # True: 1h EMA200 거시 추세 필터 무시
+        self.bypass_disparity = False   # True: EMA20 이격도 0.8% 필터 무시
+        self.bypass_indicator = False   # True: RSI 범위 조건 무시 (MACD 방향만 사용)
+
     async def get_macro_ema_200(self, engine_api, symbol):
         """
         [Phase 1] 거시적 추세 파악용 1시간봉 200 EMA 조회 및 캐싱 (15분 유지)
@@ -182,7 +187,8 @@ class TradingStrategy:
         ema_20_val = latest['ema_20'] if 'ema_20' in latest and not pd.isna(latest['ema_20']) else current_price
         disparity_pct = abs((current_price - ema_20_val) / ema_20_val) * 100 if current_price and ema_20_val else 0.0
 
-        if disparity_pct >= 0.8:
+        # [v3.5] bypass_disparity: True 시 이격도 필터 무시
+        if not self.bypass_disparity and disparity_pct >= 0.8:
             return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 이격 (안전 이격거리 0.8% 초과)", None
 
         # Payload 패키징
@@ -209,21 +215,25 @@ class TradingStrategy:
         short_macd = (latest['macd'] < latest['macd_signal'])
         short_rsi = (45 <= latest['rsi'] <= 70)
 
+        # [v3.5] bypass_indicator: True 시 RSI 조건 무시, MACD 방향만으로 진입 판단
+        long_entry = long_macd and (self.bypass_indicator or long_rsi)
+        short_entry = short_macd and (self.bypass_indicator or short_rsi)
+
         # LONG 신호 판단
-        if long_macd and long_rsi:
+        if long_entry:
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
-            # [v2.1] 거시 추세 강제 필터: 1h EMA200 아래에서 LONG 절대 차단
-            if macro_ema_200 is not None and current_price is not None and current_price < macro_ema_200:
+            # [v2.1] 거시 추세 강제 필터: 1h EMA200 아래에서 LONG 절대 차단 ([v3.5] bypass_macro 해제 시 무시)
+            if not self.bypass_macro and macro_ema_200 is not None and current_price is not None and current_price < macro_ema_200:
                 return "HOLD", f"거시 추세 역행 차단 — 1h EMA200(${macro_ema_200:.2f}) 아래에서 LONG 금지", None
             return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향, ADX {adx_val:.1f}, 거래량 충족)", payload
 
         # SHORT 신호 판단
-        if short_macd and short_rsi:
+        if short_entry:
             if not volume_verified:
                 return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
-            # [v2.1] 거시 추세 강제 필터: 1h EMA200 위에서 SHORT 절대 차단
-            if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200:
+            # [v2.1] 거시 추세 강제 필터: 1h EMA200 위에서 SHORT 절대 차단 ([v3.5] bypass_macro 해제 시 무시)
+            if not self.bypass_macro and macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200:
                 return "HOLD", f"거시 추세 역행 차단 — 1h EMA200(${macro_ema_200:.2f}) 위에서 SHORT 금지", None
             return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향, ADX {adx_val:.1f}, 거래량 충족)", payload
 

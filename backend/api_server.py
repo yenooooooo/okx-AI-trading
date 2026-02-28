@@ -535,6 +535,13 @@ async def async_trading_loop():
                 strategy_instance.trailing_stop_rate = float(get_config('trailing_stop_rate') or 0.002)
                 strategy_instance.cooldown_losses_trigger = int(get_config('cooldown_losses_trigger') or 3)
                 strategy_instance.cooldown_duration_sec = int(get_config('cooldown_duration_sec') or 900)
+                # [Phase 14.1] Gate Bypass 플래그 동기화
+                _b_macro = get_config('bypass_macro')
+                if _b_macro is not None: strategy_instance.bypass_macro = (str(_b_macro).lower() == 'true')
+                _b_disp = get_config('bypass_disparity')
+                if _b_disp is not None: strategy_instance.bypass_disparity = (str(_b_disp).lower() == 'true')
+                _b_ind = get_config('bypass_indicator')
+                if _b_ind is not None: strategy_instance.bypass_indicator = (str(_b_ind).lower() == 'true')
             except Exception as _sync_err:
                 logger.error(f"[설정 동기화 오류] {_sync_err}")
 
@@ -1767,6 +1774,7 @@ async def reset_tuning_to_auto():
         "fee_margin", "hard_stop_loss_rate", "trailing_stop_activation",
         "trailing_stop_rate", "cooldown_losses_trigger", "cooldown_duration_sec",
         "risk_per_trade", "leverage",  # [누락된 핵심 파라미터 추가]
+        "bypass_macro", "bypass_disparity", "bypass_indicator",  # [Phase 14.1] Gate Bypass 플래그
     ]
     delete_configs(keys)
     _active_strategy = TradingStrategy()

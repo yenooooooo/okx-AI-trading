@@ -775,6 +775,10 @@ async function syncConfig() {
                 const { id, parse } = TUNING_INPUT_MAP[key];
                 const input = document.getElementById(id);
                 if (input) input.value = parse(val);
+            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator'].includes(key)) {
+                // [Phase 14.1] Gate Bypass 체크박스 동기화
+                const el = document.getElementById(`config-${key}`);
+                if (el) el.checked = (val === true || val === 'true');
             }
         }
         updateActiveTuningBadge();
@@ -831,7 +835,13 @@ async function saveTuningConfig() {
             if (isNaN(value)) throw new Error(`${key}: 유효하지 않은 숫자입니다.`);
             payloads.push({ key, value: String(value) });
         }
-        // 2. 10개 키 병렬 POST (Query Param 방식 — 백엔드 시그니처와 일치)
+        // [Phase 14.1] Gate Bypass 체크박스 3종 추가 저장
+        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator']) {
+            const el = document.getElementById(`config-${bkey}`);
+            if (!el) continue;
+            payloads.push({ key: bkey, value: el.checked.toString() });
+        }
+        // 2. 병렬 POST (Query Param 방식 — 백엔드 시그니처와 일치)
         await Promise.all(payloads.map(payload =>
             fetch(`${API_URL}/config?key=${encodeURIComponent(payload.key)}&value=${encodeURIComponent(payload.value)}`, {
                 method: 'POST'
