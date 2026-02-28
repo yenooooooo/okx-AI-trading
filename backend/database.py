@@ -92,6 +92,7 @@ def init_db():
         'fee_margin': '0.0015',
         'cooldown_losses_trigger': '3',
         'cooldown_duration_sec': '900',
+        'auto_scan_enabled': 'false',
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))

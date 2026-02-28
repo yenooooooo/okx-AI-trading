@@ -146,6 +146,39 @@ function updatePriceWithTickFlash(price) {
 
 // --- Status Sync ---
 
+// --- [CORE] Deep Sync 헬퍼 — 타겟 변경 시 모든 신경망 일괄 초기화 (단일 진실 소스) ---
+function executeDeepSync(newSymbol) {
+    // 1. 글로벌 심볼 즉각 갱신
+    currentSymbol = newSymbol;
+
+    // 2. 조준경 뱃지 갱신
+    const targetBadge = document.getElementById('hero-target-badge');
+    if (targetBadge) targetBadge.textContent = newSymbol;
+
+    // 3. Ghost Data 방지 — 가격 및 차트 즉시 초기화
+    const heroPriceEl = document.getElementById('hero-price');
+    if (heroPriceEl) heroPriceEl.textContent = '---';
+    if (candleSeries) candleSeries.setData([]);
+
+    // 4. 혼잣말 리셋
+    const feed = document.getElementById('monologue-feed');
+    if (feed) feed.innerHTML = `<div class="text-[11px] font-mono text-neon-green italic animate-pulse">🎯 [${newSymbol}] 조준 완료. 데이터 딥싱크(Deep Sync) 중...</div>`;
+
+    // 5. 그리드 버튼 UI 활성 상태 갱신
+    document.querySelectorAll('.target-coin-btn').forEach(btn => {
+        if (btn.dataset.symbol === newSymbol) {
+            btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-neon-green text-neon-green bg-neon-green/10';
+        } else {
+            btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
+        }
+    });
+
+    // 6. 신경망 재연결 — 웹소켓·차트·뇌 동시 갱신
+    initPriceWebSocket();
+    syncChart();
+    syncBrain();
+}
+
 async function syncBotStatus() {
     try {
         const response = await fetch(`${API_URL}/status`);
@@ -160,6 +193,15 @@ async function syncBotStatus() {
         const symbols = data.symbols || {};
         const firstSymbol = Object.keys(symbols)[0];
         const symbolData = firstSymbol ? symbols[firstSymbol] : null;
+
+        // --- Auto-Tracking: 백엔드 타겟 변경 자동 감지 → Deep Sync 트리거 ---
+        if (firstSymbol && firstSymbol !== currentSymbol) {
+            const posTypeEl = document.getElementById('pos-type');
+            const posType = posTypeEl ? posTypeEl.textContent.trim() : 'NONE';
+            if (!posType || posType === 'NONE') {
+                executeDeepSync(firstSymbol);
+            }
+        }
 
         const posCard = document.getElementById('active-position-card');
         const posNone = document.getElementById('position-none');
@@ -651,6 +693,14 @@ async function syncConfig() {
                 const display = document.getElementById('manual-lev-display');
                 if (input) input.value = val;
                 if (display) display.textContent = val + 'x';
+            } else if (key === 'auto_scan_enabled') {
+                const toggle = document.getElementById('auto-scan-toggle');
+                const track = document.getElementById('auto-scan-track');
+                const thumb = document.getElementById('auto-scan-thumb');
+                const enabled = val === true || val === 'true';
+                if (toggle) toggle.checked = enabled;
+                if (track) track.className = `block w-8 h-4 rounded-full border transition-colors ${enabled ? 'bg-neon-green/30 border-neon-green' : 'bg-navy-900 border-navy-border'}`;
+                if (thumb) thumb.className = `absolute top-0.5 w-3 h-3 rounded-full transition-all ${enabled ? 'bg-neon-green left-4' : 'bg-gray-500 left-0.5'}`;
             } else if (key === 'SHADOW_MODE_ENABLED') {
                 const toggle = document.getElementById('shadow-mode-toggle');
                 const enabled = val === true || val === 'true';
@@ -789,37 +839,39 @@ async function setTargetSymbol(newSymbol) {
     try {
         // 서버 상태 업데이트
         await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(JSON.stringify([newSymbol]))}`, { method: 'POST' });
-
-        // 클라이언트 상태 즉각 리셋 (Ghost Data 방지)
-        currentSymbol = newSymbol;
-        const heroPriceEl = document.getElementById('hero-price');
-        if (heroPriceEl) heroPriceEl.textContent = '---';
-        if (candleSeries) candleSeries.setData([]);
-        const feed = document.getElementById('monologue-feed');
-        if (feed) feed.innerHTML = `<div class="text-[11px] font-mono text-neon-green italic animate-pulse">🎯 [${newSymbol}] 조준 완료. 데이터 동기화 중...</div>`;
-
-        // 버튼 UI 활성 상태 갱신 (ticker-badge span은 innerHTML 방식이 아니므로 유지됨)
-        document.querySelectorAll('.target-coin-btn').forEach(btn => {
-            if (btn.dataset.symbol === newSymbol) {
-                btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-neon-green text-neon-green bg-neon-green/10';
-            } else {
-                btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
-            }
-        });
-
-        // 신경망 재연결 — 새 코인 데이터로 화면 전체 강제 새로고침
-        initPriceWebSocket();
-        syncChart();
-        syncBrain();
-        syncBotStatus();
-
-        // 토스트 알림
+        // UI 및 신경망 딥 싱크 — executeDeepSync 단일 진실 소스 활용 (DRY)
+        executeDeepSync(newSymbol);
         showToast('타겟 변경', `조준경이 ${newSymbol}로 전환되었습니다.`, 'INFO');
-
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] setTargetSymbol 실패:", error);
         showToast('오류', '타겟 변경에 실패했습니다.', 'ERROR');
     }
+}
+
+// --- AI 볼륨 스캐너 토글 ---
+async function toggleAutoScan(checked) {
+    const track = document.getElementById('auto-scan-track');
+    const thumb = document.getElementById('auto-scan-thumb');
+    if (track) track.className = `block w-8 h-4 rounded-full border transition-colors ${checked ? 'bg-neon-green/30 border-neon-green' : 'bg-navy-900 border-navy-border'}`;
+    if (thumb) thumb.className = `absolute top-0.5 w-3 h-3 rounded-full transition-all ${checked ? 'bg-neon-green left-4' : 'bg-gray-500 left-0.5'}`;
+    try {
+        await fetch(`${API_URL}/config?key=auto_scan_enabled&value=${checked}`, { method: 'POST' });
+        showToast('AI 스캐너', checked ? '볼륨 스캐너 활성화 — 15분마다 최적 코인 탐색' : '볼륨 스캐너 비활성화 — 수동 타겟 모드', checked ? 'INFO' : 'WARNING');
+    } catch (e) {
+        console.error('[ANTIGRAVITY 디버그] toggleAutoScan 실패:', e);
+    }
+}
+
+// --- 커스텀 알트코인 검색기 ---
+async function searchCustomTarget() {
+    const input = document.getElementById('custom-target-input');
+    if (!input) return;
+    const raw = input.value.trim().toUpperCase();
+    if (!raw) return;
+    // "XRP" → "XRP/USDT:USDT" / 이미 포맷된 값이면 그대로 사용
+    const formatted = raw.includes('/') ? raw : `${raw}/USDT:USDT`;
+    input.value = '';
+    await setTargetSymbol(formatted);
 }
 
 async function updateOrderType(typeStr) {
