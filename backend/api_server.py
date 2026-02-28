@@ -1190,7 +1190,8 @@ async def execute_test_order(direction: str = "LONG"):
         if not bot_global_state["is_running"]:
             return {"error": "시스템이 중지되어 있습니다. 먼저 가동해 주세요."}
             
-        symbol = list(bot_global_state["symbols"].keys())[0] if bot_global_state["symbols"] else "BTC/USDT:USDT"
+        _sym_conf = get_config('symbols')
+        symbol = _sym_conf[0] if isinstance(_sym_conf, list) and _sym_conf else "BTC/USDT:USDT"
 
         # 심볼이 아직 루프에서 초기화되지 않았으면 방어적으로 초기화
         if symbol not in bot_global_state["symbols"]:
@@ -1292,7 +1293,8 @@ async def execute_test_order(direction: str = "LONG"):
 async def close_paper_position():
     """[Shadow Mode] Paper 포지션 수동 강제 청산 엔드포인트"""
     try:
-        symbol = list(bot_global_state["symbols"].keys())[0] if bot_global_state["symbols"] else None
+        _sym_conf = get_config('symbols')
+        symbol = _sym_conf[0] if isinstance(_sym_conf, list) and _sym_conf else None
         if not symbol:
             return {"error": "활성 심볼이 없습니다."}
 

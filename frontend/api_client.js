@@ -611,9 +611,16 @@ async function syncConfig() {
                 if (input) input.value = val;
                 updateText('lev-val-display', val + 'x', false);
             } else if (key === 'symbols') {
-                const input = document.getElementById('config-symbols');
-                if (input && Array.isArray(val)) input.value = val.join(' | ');
-                if (Array.isArray(val) && val.length > 0) currentSymbol = val[0]; // 차트용 심볼 갱신
+                const activeSymbol = Array.isArray(val) && val.length > 0 ? val[0] : null;
+                if (activeSymbol) currentSymbol = activeSymbol;
+                // 타겟 그리드 버튼 활성 상태 동기화
+                document.querySelectorAll('.target-coin-btn').forEach(btn => {
+                    if (btn.dataset.symbol === activeSymbol) {
+                        btn.className = 'target-coin-btn text-xs py-2 rounded font-mono font-bold transition-all flex items-center justify-center border border-neon-green text-neon-green bg-neon-green/10';
+                    } else {
+                        btn.className = 'target-coin-btn text-xs py-2 rounded font-mono font-bold transition-all flex items-center justify-center border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
+                    }
+                });
             } else if (key === 'ENTRY_ORDER_TYPE') {
                 const btnMarket = document.getElementById('btn-market-type');
                 const btnLimit = document.getElementById('btn-limit-type');
@@ -772,21 +779,43 @@ async function updateConfigValue(key) {
     }
 }
 
-async function updateConfigSymbols() {
-    const btn = document.querySelector('[onclick="updateConfigSymbols()"]');
+async function setTargetSymbol(newSymbol) {
+    // 안전장치: 포지션 보유 중 타겟 변경 차단
+    const currentPos = document.getElementById('pos-type')?.textContent;
+    if (currentPos && currentPos.trim() !== 'NONE') {
+        showToast('변경 불가', '포지션 유지 중에는 타겟을 변경할 수 없습니다.', 'ERROR');
+        return;
+    }
     try {
-        const symbolsText = document.getElementById('config-symbols').value;
-        const symbols = symbolsText.split(/[,|]/).map(s => s.trim()).filter(s => s);
-        const symbolsJson = JSON.stringify(symbols);
-        const response = await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(symbolsJson)}`, { method: 'POST' });
-        await response.json();
-        if (symbols.length > 0) currentSymbol = symbols[0];
+        // 서버에 새 심볼 저장
+        await fetch(`${API_URL}/config?key=symbols&value=${encodeURIComponent(JSON.stringify([newSymbol]))}`, { method: 'POST' });
+
+        // 버튼 UI 활성 상태 갱신
+        document.querySelectorAll('.target-coin-btn').forEach(btn => {
+            if (btn.dataset.symbol === newSymbol) {
+                btn.className = 'target-coin-btn text-xs py-2 rounded font-mono font-bold transition-all flex items-center justify-center border border-neon-green text-neon-green bg-neon-green/10';
+            } else {
+                btn.className = 'target-coin-btn text-xs py-2 rounded font-mono font-bold transition-all flex items-center justify-center border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
+            }
+        });
+
+        // 글로벌 심볼 갱신
+        currentSymbol = newSymbol;
+
+        // 호가창·차트 즉시 전환
         initPriceWebSocket();
         syncChart();
-        flashBtn(btn, true);
+
+        // 혼잣말 리셋
+        const feed = document.getElementById('monologue-feed');
+        if (feed) feed.innerHTML = '<div class="text-[11px] font-mono text-neon-green italic animate-pulse">새로운 타겟 조준 완료. 데이터 동기화 중...</div>';
+
+        // 토스트 알림
+        showToast('타겟 변경', `조준경이 ${newSymbol}로 전환되었습니다.`, 'INFO');
+
     } catch (error) {
-        console.error("[ANTIGRAVITY 디버그] updateConfigSymbols 실패 (엔드포인트: /api/v1/config POST):", error);
-        flashBtn(btn, false);
+        console.error("[ANTIGRAVITY 디버그] setTargetSymbol 실패:", error);
+        showToast('오류', '타겟 변경에 실패했습니다.', 'ERROR');
     }
 }
 
