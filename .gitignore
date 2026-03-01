@@ -38,3 +38,5 @@ Thumbs.db
 dist/
 build/
 *.egg-info/
+"trading_data.db" 
+"__pycache__/" 

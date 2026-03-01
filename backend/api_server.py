@@ -27,9 +27,9 @@ def _sym_short(symbol: str) -> str:
 
 def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: int, payload: dict = None, is_test: bool = False) -> str:
     d_emoji = "📈" if direction == "LONG" else "📉"
-    test_tag = "  <b>[TEST]</b>" if is_test else ""
+    header = "👻 <b>PAPER TRADING</b>  |  가상 진입" if is_test else "⚡ <b>ANTIGRAVITY (LIVE)</b>  |  실전 진입"
     msg = (
-        f"⚡ <b>ANTIGRAVITY</b>  |  진입{test_tag}\n"
+        f"{header}\n"
         f"{_TG_LINE}\n"
         f"{d_emoji} <b>{direction}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
@@ -37,11 +37,9 @@ def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: 
         f"수량   │  <code>{amount}계약  ·  {leverage}x</code>\n"
     )
     if payload:
-        # [Phase 18.2] 텔레그램 HTML 파싱 에러(<, > 기호) 완벽 차단 방어막
         _ema = str(payload.get('ema_status', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
         _vol = str(payload.get('vol_multiplier', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
         _atr = str(payload.get('atr_sl_margin', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
-        
         msg += (
             f"{_TG_LINE}\n"
             f"[진입 근거 데이터]\n"
@@ -54,9 +52,9 @@ def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: 
 
 # [Phase 18.2] 스마트 지정가 대기 알림 함수 추가 (위 함수 바로 아래에 삽입)
 def _tg_pending(symbol: str, direction: str, price: float, amount: int, leverage: int, is_test: bool = False) -> str:
-    test_tag = "  <b>[TEST]</b>" if is_test else ""
+    header = "👻 <b>PAPER TRADING</b>  |  가상 지정가" if is_test else "⚡ <b>ANTIGRAVITY (LIVE)</b>  |  실전 지정가"
     return (
-        f"⚡ <b>ANTIGRAVITY</b>  |  지정가 대기{test_tag}\n"
+        f"{header}\n"
         f"{_TG_LINE}\n"
         f"⏳ <b>PENDING {direction}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
@@ -74,9 +72,9 @@ def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fe
     sign_gross = "+" if gross_pnl >= 0 else ""
     _reason_ko = {"STOP_LOSS": "하드 손절", "TRAILING_STOP_EXIT": "트레일링 익절"}
     reason_ko  = _reason_ko.get(reason, reason)
-    test_tag = "  <b>[TEST]</b>" if is_test else ""
+    header = "👻 <b>PAPER TRADING</b>  |  가상 청산" if is_test else "⚡ <b>ANTIGRAVITY (LIVE)</b>  |  실전 청산"
     return (
-        f"⚡ <b>ANTIGRAVITY</b>  |  청산{test_tag}\n"
+        f"{header}\n"
         f"{_TG_LINE}\n"
         f"{result_emoji} <b>{direction} {result_label}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
@@ -1015,11 +1013,15 @@ async def async_trading_loop():
                                             logger.info(partial_msg)
 
                                             # 텔레그램 분리 알림
+                                            _header_pt = "👻 PAPER TRADING | 가상 분할 익절" if _is_paper else "⚡ ANTIGRAVITY (LIVE) | 실전 분할 익절"
                                             partial_tg_msg = (
-                                                f"{_paper_tag}🎯 1차 분할 익절 완료\n"
-                                                f"코인: {symbol}\n"
+                                                f"{_header_pt}\n"
+                                                f"{_TG_LINE}\n"
+                                                f"🎯 <b>1차 분할 익절 완료</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+                                                f"{_TG_LINE}\n"
                                                 f"물량 50% 수익 실현 완료 💰\n"
-                                                f"🛡️ 본전 방어선(Breakeven) 작동 시작"
+                                                f"🛡️ 본전 방어선(Breakeven) 작동 시작\n"
+                                                f"{_TG_LINE}"
                                             )
                                             send_telegram_sync(partial_tg_msg)
 
