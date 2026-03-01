@@ -1196,31 +1196,43 @@ async function _hcTestWebSocket() {
     const results = [];
 
     // Test 1: Dashboard WebSocket
-    try {
-        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProto}//${location.host}/ws/dashboard`;
-        const result = await new Promise((resolve) => {
-            const t0 = performance.now();
-            const ws = new WebSocket(wsUrl);
-            const timeout = setTimeout(() => {
-                ws.close();
-                resolve({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'FAIL', latency_ms: 5000, details: '연결 시간 초과 (5초)' });
-            }, 5000);
-            ws.onopen = () => {
-                const latency = Math.round(performance.now() - t0);
-                clearTimeout(timeout);
-                ws.close();
-                resolve({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'OK', latency_ms: latency, details: `연결 성공 (${latency}ms)` });
-            };
-            ws.onerror = () => {
-                const latency = Math.round(performance.now() - t0);
-                clearTimeout(timeout);
-                resolve({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'FAIL', latency_ms: latency, details: `연결 실패 (${latency}ms)` });
-            };
+    // Vercel 환경에서는 HTTP 프록시만 지원 (/api/v1/*) — /ws/dashboard는 프록시 불가
+    // 현재 접속 호스트가 Vercel 도메인이면 직접 WS 테스트 대신 안내 메시지 표시
+    const isVercel = location.host.includes('vercel.app') || location.host.includes('vercel.com');
+    if (isVercel) {
+        results.push({
+            id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)',
+            status: 'WARN', latency_ms: 0,
+            details: 'Vercel 프록시 환경 — WS 직접 테스트 불가 (HTTP 프록시만 지원). 백엔드 Private WS 상태로 대체 확인.'
         });
-        results.push(result);
-    } catch (e) {
-        results.push({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'FAIL', latency_ms: 0, details: `오류: ${e.message}` });
+    } else {
+        // 직접 접속 환경 (AWS IP 등): 실제 WS 연결 테스트
+        try {
+            const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProto}//${location.host}/ws/dashboard`;
+            const result = await new Promise((resolve) => {
+                const t0 = performance.now();
+                const ws = new WebSocket(wsUrl);
+                const timeout = setTimeout(() => {
+                    ws.close();
+                    resolve({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'FAIL', latency_ms: 5000, details: '연결 시간 초과 (5초)' });
+                }, 5000);
+                ws.onopen = () => {
+                    const latency = Math.round(performance.now() - t0);
+                    clearTimeout(timeout);
+                    ws.close();
+                    resolve({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'OK', latency_ms: latency, details: `연결 성공 (${latency}ms)` });
+                };
+                ws.onerror = () => {
+                    const latency = Math.round(performance.now() - t0);
+                    clearTimeout(timeout);
+                    resolve({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'FAIL', latency_ms: latency, details: `연결 실패 (${latency}ms)` });
+                };
+            });
+            results.push(result);
+        } catch (e) {
+            results.push({ id: 'ws_dashboard', name: '대시보드 WebSocket (/ws/dashboard)', status: 'FAIL', latency_ms: 0, details: `오류: ${e.message}` });
+        }
     }
 
     // Test 2: OKX Public WebSocket (기존 연결 상태 확인)

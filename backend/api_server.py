@@ -3637,11 +3637,12 @@ async def run_health_check():
     _fail_cnt = sum(1 for _c in checks if _c["status"] == "FAIL")
     _warn_cnt = sum(1 for _c in checks if _c["status"] == "WARN")
 
+    import datetime as _hc_dt
     return {
         "checks": checks,
         "endpoints": _endpoints,
         "summary": {"ok": _ok_cnt, "fail": _fail_cnt, "warn": _warn_cnt, "total": len(checks)},
-        "timestamp": datetime.now().isoformat()
+        "timestamp": _hc_dt.datetime.now().isoformat()
     }
 
 
