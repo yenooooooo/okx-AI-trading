@@ -535,6 +535,9 @@ async def async_trading_loop():
     last_log_time = 0
     last_scan_time = 0  # 스캐너 마지막 작동 시간
     _circuit_breaker_last_warn = {}  # 서킷 브레이커 로그 쓰로틀 (심볼별 마지막 경고 시각)
+    # [Phase 20.3] 조용한 에러(Silent Failure) 추적용 카운터
+    consecutive_errors = 0
+
     while bot_global_state["is_running"]:
         try:
             current_time = time.time()
@@ -1315,15 +1318,39 @@ async def async_trading_loop():
                     logger.info(engine_msg)
                 last_log_time = current_time
 
+            # [Phase 20.3] 1회 사이클 무사 통과 시 에러 카운터 초기화
+            consecutive_errors = 0
+
             await asyncio.sleep(3)
 
+        except asyncio.CancelledError:
+            logger.info("⚠️ 매매 엔진 루프가 강제 취소되었습니다.")
+            break
+
         except Exception as e:
-            # 어떤 예외가 발생해도 루프를 절대 종료하지 않음 (Crash 방어)
-            err_msg = f"[오류] 매매 루프 예외 발생 - 3초 후 재시작: {str(e)}"
+            # [Phase 20.3] 연속 에러 감지 및 킬스위치 (뇌사 방어)
+            consecutive_errors += 1
+            logger.error(f"🚨 매매 루프 치명적 에러 발생 (누적 {consecutive_errors}회): {e}", exc_info=True)
+            err_msg = f"[오류] 매매 루프 예외 발생 (누적 {consecutive_errors}회) - 3초 후 재시작: {str(e)}"
             bot_global_state["logs"].append(err_msg)
-            logger.error(err_msg)
+
+            if consecutive_errors >= 3:
+                _sos_msg = (
+                    f"🚨 <b>[CRITICAL FATAL ERROR]</b> 🚨\n"
+                    f"{_TG_LINE}\n"
+                    f"봇의 뇌 구조에 치명적인 연속 에러가 3회 감지되었습니다.\n"
+                    f"추가적인 자산 손실(슬리피지/오작동)을 막기 위해\n"
+                    f"<b>매매 엔진을 강제 셧다운(Kill-Switch) 합니다.</b>\n"
+                    f"{_TG_LINE}\n"
+                    f"오류: <code>{str(e)[:100]}...</code>\n"
+                    f"조치: 서버 로그 확인 및 시스템 재가동 요망"
+                )
+                logger.critical("💀 [KILL-SWITCH] 메인 루프 뇌사 상태 감지. 봇 강제 종료!")
+                send_telegram_sync(_sos_msg)
+                bot_global_state["is_running"] = False
+                break
+
             await asyncio.sleep(3)
-            continue
 
 # ===== 기존 엔드포인트 (하위 호환) =====
 
