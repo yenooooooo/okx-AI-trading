@@ -970,7 +970,8 @@ async def async_trading_loop():
                         entry = bot_global_state["symbols"][symbol]["entry_price"]
                         position_side = bot_global_state["symbols"][symbol]["position"]
 
-                        if entry > 0 and current_price:
+                        # [BUGFIX] PENDING 상태에서는 entry_price=0이므로 entry > 0 가드를 우회하여 타임아웃 체크 도달 보장
+                        if (entry > 0 or position_side in ["PENDING_LONG", "PENDING_SHORT"]) and current_price:
                             # 레버리지 적용 (기본값 1)
                             leverage = bot_global_state["symbols"][symbol].get("leverage", 1)
 
@@ -986,17 +987,19 @@ async def async_trading_loop():
                                     bot_global_state["symbols"][symbol].get("lowest_price", current_price),
                                     current_price
                                 )
+                            else:
+                                pnl = 0.0  # PENDING 상태: 미체결이므로 PnL 0
 
                             bot_global_state["symbols"][symbol]["unrealized_pnl_percent"] = round(pnl, 2)
 
-                            # --- NEW: PENDING 상태(스마트 지정가)에서 체결 여부 및 시간 초과 확인 ---
+                            # --- PENDING 상태(스마트 지정가)에서 체결 여부 및 시간 초과 확인 ---
                             if position_side in ["PENDING_LONG", "PENDING_SHORT"]:
                                 pending_time = bot_global_state["symbols"][symbol].get("pending_order_time", 0)
                                 pending_id = bot_global_state["symbols"][symbol].get("pending_order_id")
                                 _is_paper_pending = bot_global_state["symbols"][symbol].get("is_paper", False)
-                                
+
                                 order_status = {}
-                                
+
                                 try:
                                     if _is_paper_pending:
                                         pending_target = bot_global_state["symbols"][symbol].get("pending_price", current_price)
