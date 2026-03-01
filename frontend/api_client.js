@@ -379,6 +379,26 @@ async function syncBotStatus() {
             }
         }
 
+        // 5. [Phase 25] Adaptive Shield 방어 티어 배지 실시간 렌더링
+        const tierBadge = document.getElementById('adaptive-tier-badge');
+        if (tierBadge) {
+            const tierName = data.adaptive_tier || '';
+            const tierMap = {
+                'CRITICAL': { emoji: '🔴', cls: 'border-red-500/50 bg-red-500/10 text-red-400', label: 'CRITICAL — 긴급 방어' },
+                'MICRO':    { emoji: '🟡', cls: 'border-yellow-500/50 bg-yellow-500/10 text-yellow-400', label: 'MICRO — 소액 보호' },
+                'STANDARD': { emoji: '🟢', cls: 'border-green-500/50 bg-green-500/10 text-green-400', label: 'STANDARD — 표준 운용' },
+                'GROWTH':   { emoji: '🔵', cls: 'border-blue-500/50 bg-blue-500/10 text-blue-400', label: 'GROWTH — 성장 추종' },
+            };
+            const t = tierMap[tierName];
+            if (t) {
+                tierBadge.textContent = `${t.emoji} ${t.label}`;
+                tierBadge.className = `inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border ${t.cls}`;
+            } else {
+                tierBadge.textContent = '— 티어 감지 중';
+                tierBadge.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border border-gray-600/50 bg-gray-800/50 text-gray-400';
+            }
+        }
+
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncBotStatus 실패 (엔드포인트: /api/v1/status):", error);
     }
@@ -606,6 +626,7 @@ function updateActiveTuningBadge() {
         scalper: ['⚡ 스캘퍼', 'text-neon-green border-neon-green/50 bg-neon-green/10'],
         iron_dome: ['🛡️ 아이언돔', 'text-orange-300 border-orange-500/50 bg-orange-500/10'],
         factory_reset: ['🏭 팩토리', 'text-gray-300 border-gray-500/50 bg-gray-500/10'],
+        micro_seed: ['💎 마이크로', 'text-emerald-300 border-emerald-500/50 bg-emerald-500/10'],
     };
 
     let matchedLabel = null;
@@ -696,6 +717,20 @@ const PRESET_CONFIGS = {
         bypass_disparity: 'true',
         bypass_indicator: 'true',
     },
+    // [Phase 24] 마이크로 시드 — $10~100 소액 계좌 최적화 (R:R 1:2 강제, 저빈도 고확률)
+    micro_seed: {
+        adx_threshold: 28.0,             // 강한 추세에서만 진입 (노이즈 제거)
+        adx_max: 50.0,                   // 강추세 허용 범위 확대
+        chop_threshold: 55.0,            // 횡보장 필터 강화 (명확한 추세만)
+        volume_surge_multiplier: 1.8,    // 볼륨 확인 강화
+        fee_margin: 0.002,               // 수수료 버퍼 확대 (소액 수수료 비중 높음)
+        hard_stop_loss_rate: 0.005,      // 0.5% SL 유지 (자본 보호)
+        trailing_stop_activation: 0.01,  // 1.0% 수익 후 트레일링 시작 (수익 충분히 성장)
+        trailing_stop_rate: 0.005,       // 0.5% 트레일링 거리 (넓은 호흡)
+        min_take_profit_rate: 0.01,      // 1.0% 최소 익절 목표 (R:R 1:2 강제)
+        cooldown_losses_trigger: 2,      // 2연패 시 쿨다운 (빠른 방어)
+        cooldown_duration_sec: 1800,     // 30분 쿨다운 (충분한 냉각)
+    },
 };
 
 // 리스크 온도계 — risk_per_trade 입력값에 따른 실시간 위험도 안내
@@ -738,6 +773,7 @@ const TUNING_INPUT_MAP = {
     'cooldown_losses_trigger': { id: 'tuning-cooldown-losses', parse: parseInt },
     'cooldown_duration_sec': { id: 'tuning-cooldown-duration', parse: parseInt },
     'disparity_threshold': { id: 'config-disparity_threshold', parse: parseFloat },  // [Phase 14.2] DB: % 단위 저장
+    'min_take_profit_rate': { id: 'tuning-min-tp-rate', parse: parseFloat },  // [Phase 24] 최소 익절 목표율
 };
 
 // --- Config Sync ---
@@ -839,8 +875,8 @@ async function syncConfig(symbol = null) {
                 const v = parseFloat(val);
                 if (slider) slider.value = v;
                 if (span) span.textContent = v.toFixed(1) + '%';
-            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled'].includes(key)) {
-                // [Phase 14.1] Gate Bypass 체크박스 동기화 + [Phase 23] Shadow Hunting
+            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled', 'auto_preset_enabled'].includes(key)) {
+                // [Phase 14.1] Gate Bypass 체크박스 동기화 + [Phase 23] Shadow Hunting + [Phase 25] Adaptive Shield
                 const el = document.getElementById(`config-${key}`);
                 if (el) el.checked = (val === true || val === 'true');
             }
@@ -873,7 +909,7 @@ async function applyPreset(presetName) {
     }
 
     // 2. [Phase 14.1/14.3] Gate Bypass 체크박스: 프리셋에 포함된 경우 강제 동기화
-    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled']) {
+    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled', 'auto_preset_enabled']) {
         if (!(bkey in config)) continue;
         const el = document.getElementById(`config-${bkey}`);
         if (!el) continue;
@@ -934,6 +970,17 @@ async function toggleShadowHunting(enabled) {
     }
 }
 
+// [Phase 25] Adaptive Shield 토글 — 잔고 기반 자동 방어 프리셋 ON/OFF
+async function toggleAutoPreset(enabled) {
+    try {
+        await fetch(`${API_URL}/config?key=auto_preset_enabled&value=${encodeURIComponent(enabled ? 'true' : 'false')}`, { method: 'POST' });
+        const label = enabled ? '활성화' : '비활성화';
+        showToast('Adaptive Shield', `자동 방어 프리셋이 ${label}되었습니다.`, 'SUCCESS');
+    } catch (e) {
+        console.error('[ANTIGRAVITY] toggleAutoPreset 실패:', e);
+    }
+}
+
 // [Phase 24] 매복 주문 수동 철수 — 사령관 즉시 개입
 async function abortPendingOrder() {
     if (!confirm("대기 중인 매복 주문을 즉시 취소하시겠습니까?")) return;
@@ -980,8 +1027,8 @@ async function saveTuningConfig() {
             if (isNaN(value)) throw new Error(`${key}: 유효하지 않은 숫자입니다.`);
             payloads.push({ key, value: String(value) });
         }
-        // [Phase 14.1] Gate Bypass 체크박스 추가 저장 (exit_only_mode, shadow_hunting_enabled 포함)
-        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled']) {
+        // [Phase 14.1] Gate Bypass 체크박스 추가 저장 (exit_only_mode, shadow_hunting_enabled, auto_preset_enabled 포함)
+        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled', 'auto_preset_enabled']) {
             const el = document.getElementById(`config-${bkey}`);
             if (!el) continue;
             payloads.push({ key: bkey, value: el.checked.toString() });

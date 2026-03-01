@@ -41,6 +41,9 @@ class TradingStrategy:
         self.bypass_disparity = False   # True: EMA20 이격도 필터 무시
         self.bypass_indicator = False   # True: RSI 범위 조건 무시 (MACD 방향만 사용)
 
+        # [Phase 24] 최소 익절 목표율 — 이 수익률 이전에는 트레일링 EXIT 금지 (R:R 강제)
+        self.min_take_profit_rate = 0.01  # 1.0% — SL 0.5% 대비 최소 R:R 1:2 보장
+
     async def get_macro_ema_200(self, engine_api, symbol):
         """
         [Phase 1] 거시적 추세 파악용 1시간봉 200 EMA 조회 및 캐싱 (15분 유지)
@@ -287,9 +290,13 @@ class TradingStrategy:
             else:
                 trailing_target = highest_price + trailing_distance_usdt
 
-            # 고점(저점) 대비 낙폭이 설정된 추적 거리 이상 떨어지면 청산
+            # [Phase 24] 최소 익절 목표 가드 — min_take_profit_rate 미달 시 트레일링 EXIT 차단
+            # 트레일링 추적은 하되, 수익률이 최소 목표에 도달하지 못했으면 청산하지 않음 (R:R 강제)
+            profit_rate = profit_usdt / entry_price if entry_price > 0 else 0.0
             if drawdown_usdt >= trailing_distance_usdt:
-                return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
+                if profit_rate >= self.min_take_profit_rate:
+                    return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
+                # min TP 미달: 트레일링 추적은 유지하되 EXIT는 보류 (수익이 더 성장할 기회 제공)
 
         return "KEEP", hard_sl_price, trailing_active, trailing_target
 

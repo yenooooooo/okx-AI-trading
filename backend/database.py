@@ -78,7 +78,7 @@ def init_db():
         'trailing_stop_activation': '0.003',
         'trailing_stop_rate': '0.002',
         'daily_max_loss_rate': '0.05',
-        'timeframe': '1m',
+        'timeframe': '15m',  # [Phase 24] 5m → 15m (소액 계좌 노이즈 필터링 강화)
         'leverage': '1',
         'telegram_enabled': 'false',
         'manual_override_enabled': 'false',
@@ -96,6 +96,9 @@ def init_db():
         'direction_mode': 'AUTO',  # [Phase 18.1] 방향 모드 (AUTO/LONG/SHORT)
         'exit_only_mode': 'false', # [Phase 19] 퇴근 모드 (Exit-Only)
         'shadow_hunting_enabled': 'false',  # [Phase 23] 그림자 사냥(Shadow Hunting) 모드
+        'min_take_profit_rate': '0.01',   # [Phase 24] 최소 익절 목표율 1.0% (R:R 1:2 강제)
+        'auto_preset_enabled': 'true',    # [Phase 25] Adaptive Shield 기본 활성화
+        '_current_adaptive_tier': '',     # [Phase 25] 현재 적용 중인 방어 티어
         # [Phase 21.2] 스트레스 테스트 바이패스 (값 = 활성화 타임스탬프, "0" = 비활성)
         'stress_bypass_kill_switch': '0',
         'stress_bypass_cooldown_loss': '0',

@@ -207,6 +207,62 @@ class LogList(list):
                 if _attempt == 1:
                     logger.error(f"DB 저장 최종 실패 (로그 유실): {e} | msg={msg[:80]}")
 
+# [Phase 25] Adaptive Shield — 잔고 기반 자동 방어 티어 정의
+BALANCE_TIERS = {
+    'CRITICAL': {
+        'max_balance': 20,
+        'config': {
+            'exit_only_mode': 'true', 'risk_per_trade': '0.005', 'leverage': '1',
+            'hard_stop_loss_rate': '0.003', 'trailing_stop_activation': '0.005',
+            'trailing_stop_rate': '0.003', 'min_take_profit_rate': '0.008',
+            'adx_threshold': '30.0', 'adx_max': '45.0', 'chop_threshold': '50.0',
+            'volume_surge_multiplier': '2.0', 'fee_margin': '0.002',
+            'cooldown_losses_trigger': '1', 'cooldown_duration_sec': '3600',
+            'daily_max_loss_rate': '0.03',
+        },
+        'emoji': '🔴', 'description': '긴급 방어 — 신규 진입 차단, 기존 포지션만 관리',
+    },
+    'MICRO': {
+        'max_balance': 100,
+        'config': {
+            'exit_only_mode': 'false', 'risk_per_trade': '0.01', 'leverage': '1',
+            'hard_stop_loss_rate': '0.005', 'trailing_stop_activation': '0.01',
+            'trailing_stop_rate': '0.005', 'min_take_profit_rate': '0.01',
+            'adx_threshold': '28.0', 'adx_max': '50.0', 'chop_threshold': '55.0',
+            'volume_surge_multiplier': '1.8', 'fee_margin': '0.002',
+            'cooldown_losses_trigger': '2', 'cooldown_duration_sec': '1800',
+            'daily_max_loss_rate': '0.05',
+        },
+        'emoji': '🟡', 'description': '소액 보호 — R:R 1:2 강제, 저빈도 고확률',
+    },
+    'STANDARD': {
+        'max_balance': 500,
+        'config': {
+            'exit_only_mode': 'false', 'risk_per_trade': '0.015', 'leverage': '1',
+            'hard_stop_loss_rate': '0.008', 'trailing_stop_activation': '0.005',
+            'trailing_stop_rate': '0.003', 'min_take_profit_rate': '0.008',
+            'adx_threshold': '30.0', 'adx_max': '45.0', 'chop_threshold': '55.0',
+            'volume_surge_multiplier': '2.0', 'fee_margin': '0.002',
+            'cooldown_losses_trigger': '2', 'cooldown_duration_sec': '1800',
+            'daily_max_loss_rate': '0.05',
+        },
+        'emoji': '🟢', 'description': '표준 운용 — 정밀 스나이퍼 진입',
+    },
+    'GROWTH': {
+        'max_balance': float('inf'),
+        'config': {
+            'exit_only_mode': 'false', 'risk_per_trade': '0.02', 'leverage': '1',
+            'hard_stop_loss_rate': '0.010', 'trailing_stop_activation': '0.005',
+            'trailing_stop_rate': '0.004', 'min_take_profit_rate': '0.008',
+            'adx_threshold': '25.0', 'adx_max': '60.0', 'chop_threshold': '58.0',
+            'volume_surge_multiplier': '1.3', 'fee_margin': '0.001',
+            'cooldown_losses_trigger': '4', 'cooldown_duration_sec': '600',
+            'daily_max_loss_rate': '0.07',
+        },
+        'emoji': '🔵', 'description': '성장 추세 추종 — 넓은 트레일링, 수익 극대화',
+    },
+}
+
 # 전역 상태 (다중 심볼 지원)
 bot_global_state = {
     "is_running": False,
@@ -575,6 +631,68 @@ async def execute_entry_order(engine_api, symbol: str, signal: str, trade_amount
     return executed_price, pending_order_id
 
 
+# [Phase 25] Adaptive Shield: 잔고 기반 자동 방어 티어 전환
+async def _auto_tune_by_balance(curr_bal):
+    """잔고 규모에 따라 전략 파라미터를 자동 전환하여 자본 보호 극대화"""
+    # 1. 기능 활성화 여부 체크
+    if str(get_config('auto_preset_enabled') or 'false').lower() != 'true':
+        return
+
+    # 2. 현재 티어 판정 (잔고 구간별)
+    new_tier = None
+    for tier_name in ['CRITICAL', 'MICRO', 'STANDARD', 'GROWTH']:
+        if curr_bal <= BALANCE_TIERS[tier_name]['max_balance']:
+            new_tier = tier_name
+            break
+
+    current_tier = bot_global_state.get("adaptive_tier", "")
+
+    # 3. 히스테리시스 5%: 경계값 근처 진동 방지 (예: $100에서 $98↔$102 반복 전환 차단)
+    if current_tier and current_tier != new_tier:
+        threshold = BALANCE_TIERS[current_tier]['max_balance']
+        if threshold != float('inf') and threshold > 0:
+            if abs(curr_bal - threshold) / threshold < 0.05:
+                return  # 경계값 5% 이내 → 전환 보류
+
+    # 4. 티어 변경 없으면 스킵
+    if new_tier == current_tier:
+        return
+
+    # 5. 포지션 보유 중이면 전환 보류 (mid-trade 파라미터 변경 방지)
+    any_position = any(
+        s.get("position", "NONE") != "NONE"
+        for s in bot_global_state["symbols"].values()
+    )
+    if any_position:
+        return
+
+    # 6. 새 티어 적용: DB에 일괄 저장
+    tier_config = BALANCE_TIERS[new_tier]['config']
+    for key, value in tier_config.items():
+        set_config(key, str(value))
+
+    # 7. 상태 기록
+    bot_global_state["adaptive_tier"] = new_tier
+    set_config('_current_adaptive_tier', new_tier)
+
+    tier_info = BALANCE_TIERS[new_tier]
+    msg = f"{tier_info['emoji']} [Adaptive Shield] 방어 등급 전환: {current_tier or 'INIT'} → {new_tier} | 잔고: ${curr_bal:.2f} | {tier_info['description']}"
+    bot_global_state["logs"].append(msg)
+    logger.info(msg)
+
+    # 텔레그램 알림
+    _tg_adaptive = (
+        f"{tier_info['emoji']} <b>Adaptive Shield 방어 등급 전환</b>\n"
+        f"{_TG_LINE}\n"
+        f"전환: <b>{current_tier or 'INIT'} → {new_tier}</b>\n"
+        f"잔고: <b>${curr_bal:.2f}</b>\n"
+        f"{_TG_LINE}\n"
+        f"{tier_info['description']}\n"
+        f"risk: {tier_config['risk_per_trade']} | SL: {tier_config['hard_stop_loss_rate']} | daily_max: {tier_config['daily_max_loss_rate']}"
+    )
+    send_telegram_sync(_tg_adaptive)
+
+
 async def async_trading_loop():
     """다중 심볼 백그라운드 매매 루프"""
     global bot_global_state, ai_brain_state, _trading_task, _active_strategy
@@ -647,6 +765,9 @@ async def async_trading_loop():
             # 잔고 실시간 연동
             curr_bal = await asyncio.to_thread(engine_api.get_usdt_balance)
             bot_global_state["balance"] = round(curr_bal, 2)
+
+            # [Phase 25] Adaptive Shield: 잔고 기반 자동 방어 티어 전환
+            await _auto_tune_by_balance(curr_bal)
 
             # 설정된 심볼 목록 로드
             symbols_config = get_config('symbols')
@@ -733,6 +854,7 @@ async def async_trading_loop():
                             "starvation_reasons": {},
                             "last_starvation_report": _time.time(),
                             "last_analyzed_candle_ts": 0,
+                            "last_signal_candle_ts": 0,  # [Phase 24] 캔들 단위 진입 시그널 중복 방지
                             # [Phase 22.1] 동적 지정가 방어막(Dynamic Limit TP/SL) 기억 장치
                             "active_tp_order_id": None,
                             "active_sl_order_id": None,
@@ -762,13 +884,16 @@ async def async_trading_loop():
                         if _b_disp is not None: strategy_instance.bypass_disparity = (str(_b_disp).lower() == 'true')
                         _b_ind = get_config('bypass_indicator', symbol)
                         if _b_ind is not None: strategy_instance.bypass_indicator = (str(_b_ind).lower() == 'true')
+                        # [Phase 24] 최소 익절 목표율 로드 (R:R 강제)
+                        strategy_instance.min_take_profit_rate = float(get_config('min_take_profit_rate', symbol) or 0.01)
                         # [Phase 19] 퇴근 모드 로드
                         _exit_only = str(get_config('exit_only_mode', symbol)).lower() == 'true'
                     except Exception as _sym_sync_err:
                         logger.error(f"[{symbol}] 코인별 설정 동기화 오류: {_sym_sync_err}")
 
-                    # OHLCV 데이터 수집 (5분봉, limit=200: ADX/MACD 지표 충분한 캔들 확보)
-                    ohlcv = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, "5m", limit=200)
+                    # [Phase 24] OHLCV 데이터 수집 — 타임프레임 DB 설정 가능화 (기본 15m)
+                    _tf = str(get_config('timeframe', symbol) or '15m')
+                    ohlcv = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, _tf, limit=200)
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     current_price = await asyncio.to_thread(engine_api.get_current_price, symbol)
 
@@ -1432,6 +1557,13 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
+                        # [Phase 24] 캔들 단위 진입 시그널 중복 방지 — 같은 캔들에서 재평가 스킵
+                        _cur_candle_ts = int(df['timestamp'].iloc[-1])
+                        _last_signal_ts = bot_global_state["symbols"][symbol].get("last_signal_candle_ts", 0)
+                        if _last_signal_ts == _cur_candle_ts:
+                            continue  # 이미 이 캔들에서 시그널 평가 완료 → 다음 캔들까지 대기
+                        bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
+
                         # [Phase 19] 퇴근 모드 작동 시 신규 진입 강제 차단
                         if _exit_only:
                             continue
@@ -2144,6 +2276,7 @@ async def fetch_current_status():
         "balance": bot_global_state["balance"],
         "symbols": bot_global_state["symbols"],
         "active_target": active_target,
+        "adaptive_tier": bot_global_state.get("adaptive_tier", str(get_config('_current_adaptive_tier') or '')),
         "engine_status": {
             "mode": engine_mode,
             "risk": active_risk,
@@ -2441,6 +2574,7 @@ async def reset_tuning_to_auto():
         "risk_per_trade", "leverage",  # [누락된 핵심 파라미터 추가]
         "disparity_threshold",  # [Phase 14.2] 이격도 동적 한계치
         "bypass_macro", "bypass_disparity", "bypass_indicator",  # [Phase 14.1] Gate Bypass 플래그
+        "min_take_profit_rate",  # [Phase 24] 최소 익절 목표율
     ]
     delete_configs(keys)
     _active_strategy = TradingStrategy()
@@ -2457,7 +2591,8 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
         if not engine or not engine.exchange:
             return {"error": "거래소 연결 실패"}
 
-        ohlcv = await asyncio.to_thread(engine.exchange.fetch_ohlcv, symbol, "5m", limit=limit)
+        _bt_tf = str(get_config('timeframe') or '15m')
+        ohlcv = await asyncio.to_thread(engine.exchange.fetch_ohlcv, symbol, _bt_tf, limit=limit)
         
         # 샌드박스 환경 등에서 데이터가 아예 안 들어올 경우를 대비한 가상 데이터 생성 로직
         if not ohlcv or len(ohlcv) == 0:
