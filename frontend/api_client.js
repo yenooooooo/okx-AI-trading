@@ -834,12 +834,9 @@ async function syncConfig(symbol = null) {
                 const v = parseFloat(val);
                 if (slider) slider.value = v;
                 if (span) span.textContent = v.toFixed(1) + '%';
-            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator'].includes(key)) {
+            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode'].includes(key)) {
                 // [Phase 14.1] Gate Bypass 체크박스 동기화
                 const el = document.getElementById(`config-${key}`);
-                if (el) el.checked = (val === true || val === 'true');
-            } else if (key === 'exit_only_mode') {
-                const el = document.getElementById('config-exit_only_mode');
                 if (el) el.checked = (val === true || val === 'true');
             }
         }
@@ -871,7 +868,7 @@ async function applyPreset(presetName) {
     }
 
     // 2. [Phase 14.1/14.3] Gate Bypass 체크박스: 프리셋에 포함된 경우 강제 동기화
-    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator']) {
+    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode']) {
         if (!(bkey in config)) continue;
         const el = document.getElementById(`config-${bkey}`);
         if (!el) continue;
@@ -888,8 +885,6 @@ async function applyPreset(presetName) {
 async function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
-    // 모달이 열릴 때 배경(body) 스크롤 차단
-    document.body.style.overflow = 'hidden';
     // [Phase 18.1] 현재 심볼의 전용 설정값을 즉시 로드하여 입력창 갱신
     await syncConfig(currentSymbol);
 }
@@ -936,8 +931,6 @@ async function onModalSymbolChange(newSymbol) {
 function closeTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.add('hidden');
-    // 모달이 닫힐 때 배경(body) 스크롤 복구
-    document.body.style.overflow = '';
 }
 
 async function saveTuningConfig() {
@@ -955,7 +948,7 @@ async function saveTuningConfig() {
             if (isNaN(value)) throw new Error(`${key}: 유효하지 않은 숫자입니다.`);
             payloads.push({ key, value: String(value) });
         }
-        // [Phase 14.1] Gate Bypass 체크박스 3종 추가 저장
+        // [Phase 14.1] Gate Bypass 체크박스 추가 저장 (exit_only_mode 포함)
         for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode']) {
             const el = document.getElementById(`config-${bkey}`);
             if (!el) continue;
@@ -1037,8 +1030,6 @@ function flashBtn(btn, success) {
         btn.className = origClass;
     }, 2000);
 }
-
-
 
 async function setTargetSymbol(newSymbol) {
     // 사전 차단: 포지션 보유 중 타겟 변경 강력 차단
@@ -2043,9 +2034,6 @@ function _renderHistoryTable(bodyId, rows) {
 async function openHistoryModal() {
     const modal = document.getElementById('history-modal');
     if (!modal) return;
-    
-    // 모달이 열릴 때 배경(body) 스크롤 차단
-    document.body.style.overflow = 'hidden';
 
     // 로딩 상태 초기화
     const dailyBody = document.getElementById('history-daily-body');
@@ -2073,8 +2061,6 @@ async function openHistoryModal() {
 function closeHistoryModal() {
     const modal = document.getElementById('history-modal');
     if (modal) modal.classList.add('hidden');
-    // 모달이 닫힐 때 배경(body) 스크롤 복구
-    document.body.style.overflow = '';
 }
 
 function switchHistoryTab(tab) {
