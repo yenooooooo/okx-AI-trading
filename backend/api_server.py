@@ -3421,71 +3421,87 @@ async def run_health_check():
     """[Phase 33] 프론트-백엔드-거래소 연결 상태 종합 점검 (읽기 전용, 사이드이펙트 없음)"""
     checks = []
 
-    # ── Check 1: OKX REST API ──
-    _t0 = _time.time()
     try:
-        if _engine and _engine.exchange:
-            await asyncio.to_thread(_engine.exchange.fetch_balance)
+        # ── Check 1: OKX REST API ──
+        _t0 = _time.time()
+        try:
+            if _engine and _engine.exchange:
+                await asyncio.to_thread(_engine.exchange.fetch_balance)
+                _lat = round((_time.time() - _t0) * 1000, 1)
+                checks.append({
+                    "id": "okx_rest", "name": "OKX REST API",
+                    "status": "OK", "latency_ms": _lat,
+                    "details": f"fetch_balance 성공 ({_lat}ms)"
+                })
+            else:
+                checks.append({
+                    "id": "okx_rest", "name": "OKX REST API",
+                    "status": "FAIL", "latency_ms": 0,
+                    "details": "OKXEngine 미초기화"
+                })
+        except Exception as _e:
             _lat = round((_time.time() - _t0) * 1000, 1)
             checks.append({
                 "id": "okx_rest", "name": "OKX REST API",
-                "status": "OK", "latency_ms": _lat,
-                "details": f"fetch_balance 성공 ({_lat}ms)"
+                "status": "FAIL", "latency_ms": _lat,
+                "details": f"연결 실패: {str(_e)[:100]}"
             })
-        else:
+
+        # ── Check 2: OKX Private WebSocket ──
+        try:
+            _ws_alive = bool(_private_ws_task and not _private_ws_task.done())
             checks.append({
-                "id": "okx_rest", "name": "OKX REST API",
-                "status": "FAIL", "latency_ms": 0,
-                "details": "OKXEngine 미초기화"
+                "id": "okx_private_ws", "name": "OKX Private WebSocket",
+                "status": "OK" if _ws_alive else "WARN",
+                "latency_ms": 0,
+                "details": "positions 채널 수신 중" if _ws_alive else "Private WS 비활성 또는 재연결 대기"
             })
-    except Exception as _e:
-        _lat = round((_time.time() - _t0) * 1000, 1)
-        checks.append({
-            "id": "okx_rest", "name": "OKX REST API",
-            "status": "FAIL", "latency_ms": _lat,
-            "details": f"연결 실패: {str(_e)[:100]}"
-        })
+        except Exception as _e:
+            checks.append({
+                "id": "okx_private_ws", "name": "OKX Private WebSocket",
+                "status": "WARN", "latency_ms": 0,
+                "details": f"상태 확인 실패: {str(_e)[:100]}"
+            })
 
-    # ── Check 2: OKX Private WebSocket ──
-    _ws_alive = bool(_private_ws_task and not _private_ws_task.done())
-    checks.append({
-        "id": "okx_private_ws", "name": "OKX Private WebSocket",
-        "status": "OK" if _ws_alive else "WARN",
-        "latency_ms": 0,
-        "details": "positions 채널 수신 중" if _ws_alive else "Private WS 비활성 또는 재연결 대기"
-    })
-
-    # ── Check 3: Telegram Bot ──
-    from notifier import _telegram_app, TELEGRAM_BOT_TOKEN
-    _t0 = _time.time()
-    try:
-        _tg_ok = False
-        _tg_name = ""
-        if _telegram_app and _telegram_app.bot:
-            _me = await _telegram_app.bot.get_me()
-            _tg_ok = True
-            _tg_name = f"@{_me.username}" if _me else ""
-        elif TELEGRAM_BOT_TOKEN:
-            import httpx
-            _url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
-            async with httpx.AsyncClient(timeout=5.0) as _client:
-                _resp = await _client.get(_url)
-                if _resp.status_code == 200 and _resp.json().get("ok"):
-                    _tg_ok = True
-                    _tg_name = "@" + _resp.json()["result"].get("username", "")
-        _lat = round((_time.time() - _t0) * 1000, 1)
+        # ── Check 3: Telegram Bot ──
+        _t0 = _time.time()
+        try:
+            from notifier import _telegram_app as _tg_app, TELEGRAM_BOT_TOKEN as _tg_token
+            _tg_ok = False
+            _tg_name = ""
+            if _tg_app and _tg_app.bot:
+                _me = await _tg_app.bot.get_me()
+                _tg_ok = True
+                _tg_name = f"@{_me.username}" if _me else ""
+            elif _tg_token:
+                import httpx
+                _url = f"https://api.telegram.org/bot{_tg_token}/getMe"
+                async with httpx.AsyncClient(timeout=5.0) as _client:
+                    _resp = await _client.get(_url)
+                    if _resp.status_code == 200 and _resp.json().get("ok"):
+                        _tg_ok = True
+                        _tg_name = "@" + _resp.json()["result"].get("username", "")
+            _lat = round((_time.time() - _t0) * 1000, 1)
+            checks.append({
+                "id": "telegram", "name": "Telegram Bot",
+                "status": "OK" if _tg_ok else "FAIL",
+                "latency_ms": _lat,
+                "details": f"{_tg_name} 응답 ({_lat}ms)" if _tg_ok else "텔레그램 미연결"
+            })
+        except Exception as _e:
+            _lat = round((_time.time() - _t0) * 1000, 1)
+            checks.append({
+                "id": "telegram", "name": "Telegram Bot",
+                "status": "FAIL", "latency_ms": _lat,
+                "details": f"연결 실패: {str(_e)[:100]}"
+            })
+    except Exception as _top_err:
+        # 최상위 방어막: Check 1-3 중 try-except로 잡히지 않은 예외를 여기서 처리
+        logger.error(f"[Phase 33] health_check 초기화 구간 예외: {_top_err}")
         checks.append({
-            "id": "telegram", "name": "Telegram Bot",
-            "status": "OK" if _tg_ok else "FAIL",
-            "latency_ms": _lat,
-            "details": f"{_tg_name} 응답 ({_lat}ms)" if _tg_ok else "텔레그램 미연결"
-        })
-    except Exception as _e:
-        _lat = round((_time.time() - _t0) * 1000, 1)
-        checks.append({
-            "id": "telegram", "name": "Telegram Bot",
-            "status": "FAIL", "latency_ms": _lat,
-            "details": f"연결 실패: {str(_e)[:100]}"
+            "id": "init_error", "name": "초기화 오류",
+            "status": "FAIL", "latency_ms": 0,
+            "details": f"예외 발생: {str(_top_err)[:150]}"
         })
 
     # ── Check 4: SQLite Database ──
