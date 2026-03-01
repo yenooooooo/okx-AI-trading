@@ -1295,6 +1295,10 @@ async def async_trading_loop():
                 except Exception as e:
                     logger.warning(f"[{symbol}] 루프 처리 중 오류 (다음 루프 계속): {e}")
 
+                # [Phase 20.4] API Rate Limit 방어용 스마트 스로틀링 (코인 간 0.5초 휴식)
+                # 다중 코인 감시 시 거래소 서버 폭격(HTTP 429 에러) 방지
+                await asyncio.sleep(0.5)
+
             # 5초마다 엔진 맥박(Pulse) 로그 출력
             current_time = time.time()
             if current_time - last_log_time >= 5:
@@ -1321,7 +1325,8 @@ async def async_trading_loop():
             # [Phase 20.3] 1회 사이클 무사 통과 시 에러 카운터 초기화
             consecutive_errors = 0
 
-            await asyncio.sleep(3)
+            # [Phase 20.4] 코인 간 0.5초씩 이미 쉬었으므로 메인 루프 휴식은 1초로 유지
+            await asyncio.sleep(1)
 
         except asyncio.CancelledError:
             logger.info("⚠️ 매매 엔진 루프가 강제 취소되었습니다.")
