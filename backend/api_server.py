@@ -771,6 +771,14 @@ async def async_trading_loop():
                     # ── [Phase 1] 거시적 추세(1h EMA200) 데이터 수집 (비동기, 캐시 적용) ──
                     macro_ema_200 = await strategy_instance.get_macro_ema_200(engine_api, symbol)
 
+                    # [Phase 21.2] 스트레스 바이패스: check_entry_signal 호출 전 인메모리 상태 패치
+                    # strategy.py 내부(line 154, 179)에서 직접 차단하므로 호출 직전에 무력화해야 실제 적용됨
+                    if _is_bypass_active('stress_bypass_cooldown_loss'):
+                        strategy_instance.loss_cooldown_until = 0
+                    if _is_bypass_active('stress_bypass_daily_loss'):
+                        strategy_instance.kill_switch_active = False
+                        strategy_instance.kill_switch_until = 0
+
                     # 매매 시그널 및 AI 판단 상태 평가 (거시적 필터 적용)
                     signal, analysis_msg, payload = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
 
