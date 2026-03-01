@@ -374,10 +374,30 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     if prev_pos == "NONE" or prev_entry <= 0:
         return  # 처리할 포지션 없음
 
+    # [Phase 22.4] 고아 주문(Orphan Orders) 청소: 포지션 종료 시 허공에 남은 잔여 거미줄 일괄 취소
+    _tp_id = sym_state.get("active_tp_order_id")
+    _sl_id = sym_state.get("active_sl_order_id")
+
+    if _tp_id or _sl_id:
+        logger.info(f"[{symbol}] 🧹 포지션 종료 감지. 잔여 거미줄(고아 주문) 청소 시작...")
+        for _oid in [_tp_id, _sl_id]:
+            if _oid:
+                try:
+                    await asyncio.to_thread(engine_api.exchange.cancel_order, _oid, symbol)
+                    logger.info(f"[{symbol}] 🗑️ 잔여 거미줄 찢기 완료 (ID: {_oid})")
+                except Exception as clear_err:
+                    # 이미 체결되었거나 취소된 경우 자연스러운 현상이므로 패스
+                    logger.warning(f"[{symbol}] 잔여 거미줄 취소 실패(이미 소멸됨): {clear_err}")
+
     # ── 즉시 상태 초기화 (같은 사이클 중복 감지 방지) ──────────────────────
     sym_state["position"]              = "NONE"
     sym_state["entry_price"]           = 0.0
     sym_state["last_exit_time"]        = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
+    # [Phase 22.4] 뇌 구조(기억 장치) 거미줄 데이터 완전 삭제
+    sym_state["active_tp_order_id"]    = None
+    sym_state["active_sl_order_id"]    = None
+    sym_state["last_placed_tp_price"]  = 0.0
+    sym_state["last_placed_sl_price"]  = 0.0
     sym_state["unrealized_pnl_percent"] = 0.0
     sym_state["unrealized_pnl"]        = 0.0
     sym_state["take_profit_price"]     = "대기중"  # [Phase 16] 문자열 통일
@@ -713,6 +733,11 @@ async def async_trading_loop():
                             "starvation_reasons": {},
                             "last_starvation_report": _time.time(),
                             "last_analyzed_candle_ts": 0,
+                            # [Phase 22.1] 동적 지정가 방어막(Dynamic Limit TP/SL) 기억 장치
+                            "active_tp_order_id": None,
+                            "active_sl_order_id": None,
+                            "last_placed_tp_price": 0.0,
+                            "last_placed_sl_price": 0.0,
                         }
 
                     # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
@@ -1168,6 +1193,44 @@ async def async_trading_loop():
                                             logger.error(f"[{symbol}] 1차 타겟 도달 처리 실패: {partial_err}")
                                 # --- End of Partial TP 조건 체크 ---
 
+                                # [Phase 22.3] 0.05% 스마트 갱신 (Smart Amend) 엔진
+                                # 실시간으로 변동된 본전 방어선 및 트레일링 스탑(real_sl)을 추적하여 거래소 거미줄 위치를 수정함
+                                if not bot_global_state["symbols"][symbol].get("is_paper", False):
+                                    _current_ideal_sl = float(bot_global_state["symbols"][symbol].get("real_sl", 0.0))
+                                    _last_sl = float(bot_global_state["symbols"][symbol].get("last_placed_sl_price", 0.0))
+                                    _active_sl_id = bot_global_state["symbols"][symbol].get("active_sl_order_id")
+
+                                    # 이상적인 손절가(real_sl)가 존재하고, 기존에 걸어둔 손절가가 있을 경우 비교
+                                    if _current_ideal_sl > 0 and _last_sl > 0 and _active_sl_id:
+                                        # 오차율 계산 (절대값(목표가 - 기존가) / 기존가)
+                                        _diff_ratio = abs(_current_ideal_sl - _last_sl) / _last_sl
+
+                                        # 0.05% 이상 목표가가 변동되었을 때만 거래소 주문 갱신 (API Rate Limit 및 DDoS 오인 방어)
+                                        if _diff_ratio >= 0.0005:
+                                            try:
+                                                # 1. 기존 거미줄(주문) 취소
+                                                await asyncio.to_thread(engine_api.exchange.cancel_order, _active_sl_id, symbol)
+
+                                                # 2. 새로운 위치에 거미줄(주문) 생성 (CCXT Stop-Market 규격)
+                                                _close_side = "sell" if position_side == "LONG" else "buy"
+                                                _amt = float(bot_global_state["symbols"][symbol]["contracts"])
+                                                _params_sl = {"reduceOnly": True, "stopLossPrice": _current_ideal_sl}
+
+                                                new_sl_order = await asyncio.to_thread(
+                                                    engine_api.exchange.create_order,
+                                                    symbol, 'market', _close_side, _amt, None, _params_sl
+                                                )
+
+                                                # 3. 뇌 구조(기억 장치) 업데이트
+                                                bot_global_state["symbols"][symbol]["active_sl_order_id"] = new_sl_order['id']
+                                                bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _current_ideal_sl
+
+                                                logger.info(f"[{symbol}] 🕸️ 방어막 위치 스마트 갱신 완료 | 기존: {_last_sl} ➔ 변경: {_current_ideal_sl} (오차율: {_diff_ratio*100:.3f}%)")
+
+                                            except Exception as amend_err:
+                                                # 이미 거래소에서 체결되었거나 취소된 경우 무시하고 다음 사이클에서 동기화되도록 예외 처리
+                                                logger.warning(f"[{symbol}] ⚠️ 방어막 갱신 중 예외 발생 (이미 체결되었을 가능성): {amend_err}")
+
                                 if action != "KEEP":
                                     # 1. 청산 실행 (Paper/Real 분기)
                                     try:
@@ -1248,6 +1311,18 @@ async def async_trading_loop():
                                         logger.info(msg)
                                         send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, action, is_test=_is_paper))
 
+                                        # [Phase 22.4] 메인 엔진 자체 청산 시 잔여 거미줄(고아 주문) 일괄 청소
+                                        _act_tp = bot_global_state["symbols"][symbol].get("active_tp_order_id")
+                                        _act_sl = bot_global_state["symbols"][symbol].get("active_sl_order_id")
+                                        if _act_tp or _act_sl:
+                                            logger.info(f"[{symbol}] 🧹 메인 로직 청산 발동. 잔여 거미줄 청소 시작...")
+                                            for _oid in [_act_tp, _act_sl]:
+                                                if _oid:
+                                                    try:
+                                                        await asyncio.to_thread(engine_api.exchange.cancel_order, _oid, symbol)
+                                                    except Exception:
+                                                        pass  # 에러 무시 (안전 종료)
+
                                         # 4. 프론트엔드 포지션 초기화
                                         # [Phase 20.1] 상태 변경 시 자물쇠 잠금
                                         async with state_lock:
@@ -1262,6 +1337,11 @@ async def async_trading_loop():
                                             bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
                                             bot_global_state["symbols"][symbol]["is_paper"] = False  # 플래그 리셋
                                             bot_global_state["symbols"][symbol]["entry_timestamp"] = 0.0  # [Race Condition Fix]
+                                            # [Phase 22.4] 거미줄 기억 장치 리셋
+                                            bot_global_state["symbols"][symbol]["active_tp_order_id"] = None
+                                            bot_global_state["symbols"][symbol]["active_sl_order_id"] = None
+                                            bot_global_state["symbols"][symbol]["last_placed_tp_price"] = 0.0
+                                            bot_global_state["symbols"][symbol]["last_placed_sl_price"] = 0.0
 
                                         # [v2.1] 연패 쿨다운 카운터 업데이트 (Paper도 카운트하여 전략 검증)
                                         is_loss = (pnl_amount < 0)
@@ -1452,6 +1532,44 @@ async def async_trading_loop():
                                     bot_global_state["logs"].append(entry_msg)
                                     logger.info(entry_msg)
                                     send_telegram_sync(_tg_entry(symbol, signal, executed_price, trade_amount, trade_leverage, payload=payload, is_test=_is_shadow_entry))
+
+                                    # [Phase 22.2] 진입 직후 거래소 서버에 초기 거미줄(Limit TP / Stop SL) 투척
+                                    if not _is_shadow_entry:  # 페이퍼 모드가 아닐 때만 실제 주문 전송
+                                        try:
+                                            _entry_p = float(bot_global_state["symbols"][symbol]["entry_price"])
+                                            _amt = float(bot_global_state["symbols"][symbol]["contracts"])
+                                            _close_side = "sell" if signal == "LONG" else "buy"
+
+                                            # 초기 익절가 (+1% / -1%)
+                                            _init_tp = _entry_p * 1.01 if signal == "LONG" else _entry_p * 0.99
+                                            # 초기 손절가 (-1% / +1%)
+                                            _init_sl = _entry_p * 0.99 if signal == "LONG" else _entry_p * 1.01
+
+                                            # CCXT 규격에 맞춘 Reduce-Only 파라미터
+                                            _params_tp = {"reduceOnly": True}
+                                            _params_sl = {"reduceOnly": True, "stopLossPrice": _init_sl}
+
+                                            # Limit TP (지정가 익절) 전송
+                                            tp_order = await asyncio.to_thread(
+                                                engine_api.exchange.create_order,
+                                                symbol, 'limit', _close_side, _amt, _init_tp, _params_tp
+                                            )
+
+                                            # Stop-Market SL (조건부 시장가 손절) 전송
+                                            sl_order = await asyncio.to_thread(
+                                                engine_api.exchange.create_order,
+                                                symbol, 'market', _close_side, _amt, None, _params_sl
+                                            )
+
+                                            # 뇌 구조(기억 장치)에 영수증 번호와 가격 각인
+                                            bot_global_state["symbols"][symbol]["active_tp_order_id"] = tp_order['id']
+                                            bot_global_state["symbols"][symbol]["active_sl_order_id"] = sl_order['id']
+                                            bot_global_state["symbols"][symbol]["last_placed_tp_price"] = _init_tp
+                                            bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _init_sl
+
+                                            logger.info(f"[{symbol}] 🕸️ 거래소 초기 방어막 전송 완료 | TP: {_init_tp:.4f} / SL: {_init_sl:.4f}")
+                                        except Exception as limit_err:
+                                            logger.error(f"[{symbol}] 🚨 초기 방어막(Limit/Stop) 전송 실패. 거래소 수동 확인 요망: {limit_err}")
 
                             except Exception as e:
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
