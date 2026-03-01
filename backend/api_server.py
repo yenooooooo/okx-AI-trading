@@ -2840,6 +2840,7 @@ async def run_full_diagnostic():
         # 매매 루프와 동일한 레버리지 결정 로직 (manual_override → manual_leverage, 아닐 시 leverage)
         _diag_manual = str(get_config('manual_override_enabled')).lower() == 'true'
         leverage_cfg = max(1, int(get_config('manual_leverage' if _diag_manual else 'leverage') or 1))
+        _diag_shadow = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
         trade_feasibility = []
         all_feasible = True
         for sym in symbols_cfg:
@@ -2860,11 +2861,19 @@ async def run_full_diagnostic():
             except Exception:
                 all_feasible = False
                 trade_feasibility.append({"symbol": sym, "feasible": False, "error": "시장 데이터 조회 실패"})
+        # 섀도우 모드일 때: 실제 증거금 불필요(Paper) → WARN으로 완화
+        if all_feasible:
+            _feas_status = "PASS"
+        elif _diag_shadow:
+            _feas_status = "WARN"
+        else:
+            _feas_status = "FAIL"
+        _shadow_tag = " [👻 Shadow — Paper 모드라 실거래 미검증]" if _diag_shadow else ""
         results.append({
             "id": "trade_feasibility", "name": "매매 가능성 (잔고×레버리지)",
-            "status": "PASS" if all_feasible else "FAIL",
-            "message": f"전체 {len(symbols_cfg)}개 심볼 {'매매 가능' if all_feasible else '일부 증거금 부족'} ({'수동' if _diag_manual else '자동'}모드 레버리지 {leverage_cfg}x)",
-            "details": {"mode": "manual" if _diag_manual else "auto", "leverage": leverage_cfg, "balance": round(usdt_total, 2), "symbols": trade_feasibility}
+            "status": _feas_status,
+            "message": f"전체 {len(symbols_cfg)}개 심볼 {'매매 가능' if all_feasible else '일부 증거금 부족'} ({'수동' if _diag_manual else '자동'}모드 레버리지 {leverage_cfg}x){_shadow_tag}",
+            "details": {"mode": "manual" if _diag_manual else "auto", "shadow_mode": _diag_shadow, "leverage": leverage_cfg, "balance": round(usdt_total, 2), "symbols": trade_feasibility}
         })
     except Exception as e:
         results.append({
@@ -2987,11 +2996,19 @@ async def run_full_diagnostic():
             except Exception:
                 all_sizing_ok = False
                 sizing_results.append({"symbol": sym, "contracts": 0, "feasible": False})
+        # 섀도우 모드일 때: Paper 매매라 실 증거금 불필요 → WARN으로 완화
+        if all_sizing_ok:
+            _sz_status = "PASS"
+        elif _diag_shadow:
+            _sz_status = "WARN"
+        else:
+            _sz_status = "FAIL"
+        _sz_shadow_tag = " [👻 Paper 모드 — 가상 체결]" if _diag_shadow else ""
         results.append({
             "id": "position_sizing", "name": "포지션 사이징 시뮬레이션",
-            "status": "PASS" if all_sizing_ok else "FAIL",
-            "message": f"{_sizing_mode} | risk={risk_cfg}, leverage={leverage_cfg}x — {'전체 심볼 1계약 이상' if all_sizing_ok else '일부 증거금 초과'}",
-            "details": {"mode": _sizing_mode, "risk_per_trade": risk_cfg, "symbols": sizing_results}
+            "status": _sz_status,
+            "message": f"{_sizing_mode} | risk={risk_cfg}, leverage={leverage_cfg}x — {'전체 심볼 1계약 이상' if all_sizing_ok else '증거금 초과 (실전 시 주문 거부 가능)'}{_sz_shadow_tag}",
+            "details": {"mode": _sizing_mode, "shadow_mode": _diag_shadow, "risk_per_trade": risk_cfg, "symbols": sizing_results}
         })
     except Exception as e:
         results.append({
