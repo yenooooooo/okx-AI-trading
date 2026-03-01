@@ -363,6 +363,7 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     # ── 즉시 상태 초기화 (같은 사이클 중복 감지 방지) ──────────────────────
     sym_state["position"]              = "NONE"
     sym_state["entry_price"]           = 0.0
+    sym_state["last_exit_time"]        = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
     sym_state["unrealized_pnl_percent"] = 0.0
     sym_state["unrealized_pnl"]        = 0.0
     sym_state["take_profit_price"]     = "대기중"  # [Phase 16] 문자열 통일
@@ -857,10 +858,18 @@ async def async_trading_loop():
                                 
                                 try:
                                     if _is_paper_pending:
-                                        # [Shadow Mode] OKX API 완벽 바이패스 및 가상 체결 시뮬레이션
-                                        # 테스트를 위해 스마트 지정가도 다음 사이클(3초)에 즉시 체결된 것으로 간주
                                         pending_target = bot_global_state["symbols"][symbol].get("pending_price", current_price)
-                                        order_status = {'status': 'closed', 'average': pending_target, 'filled': 1}
+                                        # [Phase 19.3] 3초 즉시 체결 버그 수정 -> 가격 도달 시에만 현실적 체결
+                                        is_filled = False
+                                        if position_side == "PENDING_LONG" and current_price <= pending_target:
+                                            is_filled = True
+                                        elif position_side == "PENDING_SHORT" and current_price >= pending_target:
+                                            is_filled = True
+
+                                        if is_filled:
+                                            order_status = {'status': 'closed', 'average': pending_target, 'filled': 1}
+                                        else:
+                                            order_status = {'status': 'open', 'filled': 0}
                                     else:
                                         # [실전 모드] OKX에서 실제 주문 상태 조회
                                         order_status = await asyncio.to_thread(engine_api.exchange.fetch_order, pending_id, symbol)
@@ -1112,6 +1121,7 @@ async def async_trading_loop():
                                         # 4. 프론트엔드 포지션 초기화
                                         bot_global_state["symbols"][symbol]["position"] = "NONE"
                                         bot_global_state["symbols"][symbol]["entry_price"] = 0.0
+                                        bot_global_state["symbols"][symbol]["last_exit_time"] = time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
                                         bot_global_state["symbols"][symbol]["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
                                         bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
                                         bot_global_state["symbols"][symbol]["real_sl"] = 0.0
@@ -1144,6 +1154,11 @@ async def async_trading_loop():
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
                         # [Phase 19] 퇴근 모드 작동 시 신규 진입 강제 차단
                         if _exit_only:
+                            continue
+
+                        # [Phase 19.3] 60초 호흡 고르기 (동일 캔들 무한 단타 방지)
+                        last_exit = bot_global_state["symbols"][symbol].get("last_exit_time", 0)
+                        if time.time() - last_exit < 60:
                             continue
 
                         # 현재 사이클 최신 상태 기준 — 다른 심볼에 포지션이 있으면 진입 차단
@@ -1457,6 +1472,7 @@ async def close_paper_position():
         # 상태 초기화
         sym_state["position"] = "NONE"
         sym_state["entry_price"] = 0.0
+        sym_state["last_exit_time"] = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
         sym_state["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
         sym_state["stop_loss_price"] = 0.0
         sym_state["real_sl"] = 0.0
