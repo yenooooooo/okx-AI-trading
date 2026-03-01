@@ -1508,33 +1508,28 @@ async def async_trading_loop():
                                     logger.info(f"🐸 [Shadow Hunting] 청개구리 모드 가동 중. 시그널을 역이용합니다.")
                                     _original_direction = signal
                                     _hard_sl_rate = strategy_instance.hard_stop_loss_rate
-                                    # [Phase 23.6 - Route B Fix] Maker 강제 + 현실적 체결 거리 조정
-                                    # SL까지의 거리(0.5%)만큼, 현재가 반대 방향에 Maker 거미줄을 친다.
-                                    # (x2는 5분 안에 1% 이동 필요 → 타임아웃으로 취소되는 문제 수정)
+                                    # [Phase 23 원복] SL 가격에 역방향 지정가 투척 — OKX 선물에서 즉시 체결됨
+                                    # postOnly 제거: OKX 선물은 SL 레벨 지정가를 정상 체결 처리함
                                     if _original_direction == "LONG":
-                                        _original_hard_sl = current_price * (1 - _hard_sl_rate)
+                                        # 원래 LONG → SHORT로 역전: 현재가 아래 SL 지점에 매도 지정가
+                                        _shadow_limit_price = round(current_price * (1 - _hard_sl_rate), 4)
                                         signal = "SHORT"
-                                        _sl_distance = abs(current_price - _original_hard_sl)
-                                        # 숏 진입: 현재가보다 sl_distance(≈0.5%) 위에 매도 지정가 → Maker 보장
-                                        _shadow_limit_price = round(current_price + _sl_distance, 4)
                                     else:
-                                        _original_hard_sl = current_price * (1 + _hard_sl_rate)
+                                        # 원래 SHORT → LONG으로 역전: 현재가 위 SL 지점에 매수 지정가
+                                        _shadow_limit_price = round(current_price * (1 + _hard_sl_rate), 4)
                                         signal = "LONG"
-                                        _sl_distance = abs(current_price - _original_hard_sl)
-                                        # 롱 진입: 현재가보다 sl_distance(≈0.5%) 아래에 매수 지정가 → Maker 보장
-                                        _shadow_limit_price = round(current_price - _sl_distance, 4)
-                                    logger.info(f"🎯 [Shadow Hunting] 원래 방향: {_original_direction} -> 타겟 방향: {signal}")
-                                    logger.info(f"🕸️ [Shadow Hunting] Maker 타점: ${_shadow_limit_price:,.4f} (현재가 대비 ±${_sl_distance:.4f})")
+                                    logger.info(f"🎯 [Shadow Hunting] 원래 방향: {_original_direction} -> 역방향: {signal}")
+                                    logger.info(f"🕸️ [Shadow Hunting] 역방향 타점: ${_shadow_limit_price:,.4f}")
                                     try:
                                         if signal == "LONG":
                                             _sh_order = await asyncio.to_thread(
                                                 engine_api.exchange.create_limit_buy_order,
-                                                symbol, trade_amount, _shadow_limit_price, {"postOnly": True}
+                                                symbol, trade_amount, _shadow_limit_price, {}
                                             )
                                         else:
                                             _sh_order = await asyncio.to_thread(
                                                 engine_api.exchange.create_limit_sell_order,
-                                                symbol, trade_amount, _shadow_limit_price, {"postOnly": True}
+                                                symbol, trade_amount, _shadow_limit_price, {}
                                             )
                                         executed_price = _shadow_limit_price
                                         pending_order_id = _sh_order.get('id')
