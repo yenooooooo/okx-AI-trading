@@ -1520,8 +1520,13 @@ async def async_trading_loop():
                                         signal = "LONG"
                                     logger.info(f"🎯 [Shadow Hunting] 원래 방향: {_original_direction} -> 역방향: {signal}")
                                     logger.info(f"🕸️ [Shadow Hunting] 역방향 타점: ${_shadow_limit_price:,.4f}")
+                                    # ── [Shadow Mode] Paper 모드 시 CCXT 완전 바이패스 (실거래 절대 금지) ──
+                                    _sh_is_paper = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
                                     try:
-                                        if signal == "LONG":
+                                        if _sh_is_paper:
+                                            # Paper 모드: 가상 주문 ID 생성, 실거래소 API 호출 없음
+                                            _sh_order = {'id': f"paper_sh_{int(_time.time() * 1000)}"}
+                                        elif signal == "LONG":
                                             _sh_order = await asyncio.to_thread(
                                                 engine_api.exchange.create_limit_buy_order,
                                                 symbol, trade_amount, _shadow_limit_price, {}
