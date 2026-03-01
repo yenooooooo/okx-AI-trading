@@ -378,29 +378,57 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     avg_fill_price = prev_entry  # fallback
     pnl_pct        = 0.0
 
-    # ── OKX 체결 영수증(Trades) 조회 (최대 3회 시도) ─────────────────────────
-    # positions-history는 API 반영 지연이 있으므로, 즉시 반영되는 fetch_my_trades 사용
-    history_found = False
-    for attempt in range(3):
-        try:
-            await asyncio.sleep(1.0 + attempt * 0.5)
-            trades = await asyncio.to_thread(engine_api.exchange.fetch_my_trades, symbol, limit=20)
-            closing_side = 'sell' if prev_pos == 'LONG' else 'buy'
-            recent_closes = [t for t in trades if t.get('side') == closing_side]
+    # ── OKX 체결 영수증(Trades) 조회 (최대 6회, 약 12초 대기) ─────────────────────────
+    # [Phase 20.5] 수동청산 영수증 확보 로직 확장 (최대 6회, 약 12초 대기)
+    since_ts = int((_time.time() - 120) * 1000)  # 최근 2분 이내 체결 내역 조회
+    pnl = 0.0
+    fee = 0.0
+    found_receipt = False
 
-            if recent_closes:
-                order_id       = recent_closes[-1].get('order')
-                matching       = [t for t in recent_closes if t.get('order') == order_id]
-                
-                pnl_amount, total_gross, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching, prev_entry)
-                
-                history_found = True
+    for attempt in range(6):
+        try:
+            trades = await asyncio.to_thread(engine_api.exchange.fetch_my_trades, symbol, since=since_ts)
+            if trades:
+                # 최신 체결 내역 확인
+                latest_trade = trades[-1]
+                pnl = float(latest_trade.get('info', {}).get('pnl', 0.0))
+                fee = float(latest_trade.get('fee', {}).get('cost', 0.0))
+                found_receipt = True
+                logger.info(f"[{symbol}] 🧾 수동청산 영수증 확보 성공 (시도: {attempt+1}/6) | PnL: {pnl}, Fee: {fee}")
                 break
         except Exception as e:
-            logger.error(f"[수동청산 감지] {symbol} 체결 영수증 조회 오류(시도 {attempt+1}): {e}")
+            logger.warning(f"[{symbol}] 영수증 조회 에러 (시도: {attempt+1}/6): {e}")
 
-    if not history_found:
-        logger.warning(f"[수동청산 감지] {symbol} 체결 영수증 없음 - PnL 0 으로 기록")
+        await asyncio.sleep(2.0)  # 2초 간격 폴링
+
+    # [Phase 20.5] 12초 대기 후에도 영수증이 없다면 '가상 영수증(Estimated PnL)' 직접 발급
+    if not found_receipt:
+        logger.warning(f"[{symbol}] ⚠️ 거래소 응답 지연으로 영수증 확보 실패. 가상 수익(Estimated PnL) 추정 계산 실행!")
+        try:
+            # sym_state["entry_price"]는 이미 0.0으로 초기화됨 → prev_entry 사용
+            entry_p = prev_entry
+            amount  = float(prev_contracts)
+            _fallback_price = (sym_state.get("current_price", 0)
+                               or await asyncio.to_thread(engine_api.get_current_price, symbol)
+                               or prev_entry)
+
+            if entry_p > 0:
+                if prev_pos == "LONG":
+                    pnl = (_fallback_price - entry_p) * amount
+                else:
+                    pnl = (entry_p - _fallback_price) * amount
+
+                fee = (entry_p * amount * 0.0005) + (_fallback_price * amount * 0.0005)
+                pnl = pnl - fee
+                logger.info(f"[{symbol}] 🧮 가상 영수증 발급 완료 | 추정 PnL: {pnl:.4f}, 추정 Fee: {fee:.4f}")
+        except Exception as calc_err:
+            logger.error(f"[{symbol}] 🚨 가상 수익 추정마저 실패: {calc_err}")
+            pnl = 0.0
+
+    # [Phase 20.5] 하위 호환 변수 매핑 (기존 DB 저장 및 PnL% 계산 로직과 연결)
+    pnl_amount = pnl
+    total_gross = pnl + fee
+    total_fee   = fee
 
     if avg_fill_price == 0:
         avg_fill_price = await asyncio.to_thread(engine_api.get_current_price, symbol) or prev_entry
