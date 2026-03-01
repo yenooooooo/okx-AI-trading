@@ -258,7 +258,7 @@ async function syncBotStatus() {
             if (trailingActive && trailingTarget > 0) {
                 updateText('pos-tp-expect', 'Trailing Active 🎯');
             } else {
-                updateText('pos-tp-expect', '목표가 산출 중');
+                updateText('pos-tp-expect', '1차 익절 대기 중 ⏳');
             }
 
             updateNumberText('pos-sl', realSl > 0 ? realSl : 0);
