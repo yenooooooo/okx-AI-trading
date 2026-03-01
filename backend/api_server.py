@@ -2837,7 +2837,9 @@ async def run_full_diagnostic():
     # ── 2. 잔고 & 레버리지 → 매매 가능성 (심볼별) ──
     try:
         symbols_cfg = get_config('symbols') or ['BTC/USDT:USDT']
-        leverage_cfg = max(1, int(get_config('leverage') or 1))
+        # 매매 루프와 동일한 레버리지 결정 로직 (manual_override → manual_leverage, 아닐 시 leverage)
+        _diag_manual = str(get_config('manual_override_enabled')).lower() == 'true'
+        leverage_cfg = max(1, int(get_config('manual_leverage' if _diag_manual else 'leverage') or 1))
         trade_feasibility = []
         all_feasible = True
         for sym in symbols_cfg:
@@ -2861,8 +2863,8 @@ async def run_full_diagnostic():
         results.append({
             "id": "trade_feasibility", "name": "매매 가능성 (잔고×레버리지)",
             "status": "PASS" if all_feasible else "FAIL",
-            "message": f"전체 {len(symbols_cfg)}개 심볼 {'매매 가능' if all_feasible else '일부 증거금 부족'} (레버리지 {leverage_cfg}x)",
-            "details": {"leverage": leverage_cfg, "balance": round(usdt_total, 2), "symbols": trade_feasibility}
+            "message": f"전체 {len(symbols_cfg)}개 심볼 {'매매 가능' if all_feasible else '일부 증거금 부족'} ({'수동' if _diag_manual else '자동'}모드 레버리지 {leverage_cfg}x)",
+            "details": {"mode": "manual" if _diag_manual else "auto", "leverage": leverage_cfg, "balance": round(usdt_total, 2), "symbols": trade_feasibility}
         })
     except Exception as e:
         results.append({
@@ -2958,6 +2960,7 @@ async def run_full_diagnostic():
         risk_cfg = float(get_config('risk_per_trade') or 0.01)
         sizing_results = []
         all_sizing_ok = True
+        _sizing_mode = "수동 USDT" if _diag_manual else "정률법"
         for sym in symbols_cfg:
             try:
                 mkt = _engine.exchange.market(sym) if _engine and _engine.exchange else {}
@@ -2965,9 +2968,15 @@ async def run_full_diagnostic():
                 px = float(bot_global_state["symbols"].get(sym, {}).get("current_price", 0))
                 if px <= 0 and _engine:
                     px = await asyncio.to_thread(_engine.get_current_price, sym) or 0
-                sim_strat = TradingStrategy(initial_seed=usdt_total)
-                contracts = sim_strat.calculate_position_size_dynamic(usdt_total, px, leverage_cfg, cs, risk_cfg)
-                margin_needed = (cs * px * contracts) / leverage_cfg
+                # 매매 루프와 동일한 사이징 로직 분기
+                if _diag_manual:
+                    seed_usdt = max(1.0, float(get_config('manual_amount') or 10))
+                    notional = seed_usdt * leverage_cfg
+                    contracts = max(1, round(notional / (px * cs))) if px > 0 else 0
+                else:
+                    sim_strat = TradingStrategy(initial_seed=usdt_total)
+                    contracts = sim_strat.calculate_position_size_dynamic(usdt_total, px, leverage_cfg, cs, risk_cfg)
+                margin_needed = (cs * px * contracts) / leverage_cfg if leverage_cfg > 0 else float('inf')
                 ok = contracts >= 1 and margin_needed <= usdt_total * 0.95
                 if not ok:
                     all_sizing_ok = False
@@ -2981,8 +2990,8 @@ async def run_full_diagnostic():
         results.append({
             "id": "position_sizing", "name": "포지션 사이징 시뮬레이션",
             "status": "PASS" if all_sizing_ok else "FAIL",
-            "message": f"risk={risk_cfg}, leverage={leverage_cfg}x — {'전체 심볼 1계약 이상' if all_sizing_ok else '일부 0계약'}",
-            "details": {"risk_per_trade": risk_cfg, "symbols": sizing_results}
+            "message": f"{_sizing_mode} | risk={risk_cfg}, leverage={leverage_cfg}x — {'전체 심볼 1계약 이상' if all_sizing_ok else '일부 증거금 초과'}",
+            "details": {"mode": _sizing_mode, "risk_per_trade": risk_cfg, "symbols": sizing_results}
         })
     except Exception as e:
         results.append({
