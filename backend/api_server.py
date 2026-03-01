@@ -215,6 +215,8 @@ bot_global_state = {
     "logs": LogList(["[봇] 시스템 코어 초기화 완료 - API 브릿지 대기 중"]),
     "stress_inject": None,
 }
+# [Phase 20.1] 동시성 충돌 방어용 절대 자물쇠 (Mutex Lock)
+state_lock = asyncio.Lock()
 
 ai_brain_state = {
     "symbols": {}  # symbol별 뇌 상태
@@ -1116,17 +1118,19 @@ async def async_trading_loop():
                                         send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, action, is_test=_is_paper))
 
                                         # 4. 프론트엔드 포지션 초기화
-                                        bot_global_state["symbols"][symbol]["position"] = "NONE"
-                                        bot_global_state["symbols"][symbol]["entry_price"] = 0.0
-                                        bot_global_state["symbols"][symbol]["last_exit_time"] = time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
-                                        bot_global_state["symbols"][symbol]["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
-                                        bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
-                                        bot_global_state["symbols"][symbol]["real_sl"] = 0.0
-                                        bot_global_state["symbols"][symbol]["trailing_active"] = False
-                                        bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
-                                        bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
-                                        bot_global_state["symbols"][symbol]["is_paper"] = False  # 플래그 리셋
-                                        bot_global_state["symbols"][symbol]["entry_timestamp"] = 0.0  # [Race Condition Fix]
+                                        # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+                                        async with state_lock:
+                                            bot_global_state["symbols"][symbol]["position"] = "NONE"
+                                            bot_global_state["symbols"][symbol]["entry_price"] = 0.0
+                                            bot_global_state["symbols"][symbol]["last_exit_time"] = time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
+                                            bot_global_state["symbols"][symbol]["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
+                                            bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
+                                            bot_global_state["symbols"][symbol]["real_sl"] = 0.0
+                                            bot_global_state["symbols"][symbol]["trailing_active"] = False
+                                            bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
+                                            bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+                                            bot_global_state["symbols"][symbol]["is_paper"] = False  # 플래그 리셋
+                                            bot_global_state["symbols"][symbol]["entry_timestamp"] = 0.0  # [Race Condition Fix]
 
                                         # [v2.1] 연패 쿨다운 카운터 업데이트 (Paper도 카운트하여 전략 검증)
                                         is_loss = (pnl_amount < 0)
@@ -1224,12 +1228,14 @@ async def async_trading_loop():
                                 if order_type == 'Smart Limit':
                                     _is_shadow_pending = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
                                     _paper_tag_p = "[👻 PAPER] " if _is_shadow_pending else ""
-                                    bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
-                                    bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
-                                    bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
-                                    bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
-                                    bot_global_state["symbols"][symbol]["pending_price"] = executed_price
-                                    bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pending
+                                    # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+                                    async with state_lock:
+                                        bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
+                                        bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
+                                        bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
+                                        bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
+                                        bot_global_state["symbols"][symbol]["pending_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pending
 
                                     entry_emoji = "⏳"
                                     entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
@@ -1241,14 +1247,16 @@ async def async_trading_loop():
                                 else:
                                     _is_shadow_entry = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
                                     _paper_tag = "[👻 PAPER] " if _is_shadow_entry else ""
-                                    bot_global_state["symbols"][symbol]["position"] = signal
-                                    bot_global_state["symbols"][symbol]["entry_price"] = executed_price
-                                    bot_global_state["symbols"][symbol]["highest_price"] = executed_price
-                                    bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
-                                    bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
-                                    bot_global_state["symbols"][symbol]["contracts"] = trade_amount
-                                    bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
-                                    bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
+                                    # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+                                    async with state_lock:
+                                        bot_global_state["symbols"][symbol]["position"] = signal
+                                        bot_global_state["symbols"][symbol]["entry_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["highest_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
+                                        bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                                        bot_global_state["symbols"][symbol]["contracts"] = trade_amount
+                                        bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
+                                        bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
 
                                     entry_emoji = "📈" if signal == "LONG" else "📉"
                                     entry_msg = f"{_paper_tag}{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
@@ -1373,27 +1381,31 @@ async def execute_test_order(direction: str = "LONG"):
                 import time
                 _is_shadow_pend_test = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
                 _paper_tag_pt = "[👻 PAPER] " if _is_shadow_pend_test else ""
-                bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
-                bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
-                bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
-                bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
-                bot_global_state["symbols"][symbol]["pending_price"] = executed_price
-                bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
-                bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pend_test
+                # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+                async with state_lock:
+                    bot_global_state["symbols"][symbol]["position"] = "PENDING_" + signal
+                    bot_global_state["symbols"][symbol]["pending_order_id"] = pending_order_id
+                    bot_global_state["symbols"][symbol]["pending_order_time"] = time.time()
+                    bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
+                    bot_global_state["symbols"][symbol]["pending_price"] = executed_price
+                    bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                    bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pend_test
 
                 entry_emoji = "⏳📈" if signal == "LONG" else "⏳📉"
                 test_msg = f"{_paper_tag_pt}{entry_emoji} [{symbol}] 테스트 {signal} 스마트 지정가 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 | {trade_leverage}x"
             else:
                 _is_shadow_test = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
                 _paper_tag = "[👻 PAPER] " if _is_shadow_test else ""
-                bot_global_state["symbols"][symbol]["position"] = signal
-                bot_global_state["symbols"][symbol]["entry_price"] = executed_price or current_price
-                bot_global_state["symbols"][symbol]["highest_price"] = executed_price or current_price
-                bot_global_state["symbols"][symbol]["lowest_price"] = executed_price or current_price
-                bot_global_state["symbols"][symbol]["contracts"] = trade_amount
-                bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
-                bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
-                bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_test
+                # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+                async with state_lock:
+                    bot_global_state["symbols"][symbol]["position"] = signal
+                    bot_global_state["symbols"][symbol]["entry_price"] = executed_price or current_price
+                    bot_global_state["symbols"][symbol]["highest_price"] = executed_price or current_price
+                    bot_global_state["symbols"][symbol]["lowest_price"] = executed_price or current_price
+                    bot_global_state["symbols"][symbol]["contracts"] = trade_amount
+                    bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
+                    bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+                    bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_test
 
                 entry_emoji = "📈" if signal == "LONG" else "📉"
                 test_msg = f"{_paper_tag}{entry_emoji} [{symbol}] 테스트 {signal} 강제 진입 성공! (수량: {trade_amount}계약, 레버리지: {trade_leverage}x)"
@@ -1466,24 +1478,26 @@ async def close_paper_position():
         logger.info(msg)
         send_telegram_sync(f"[👻 PAPER] {emoji} 수동 청산\n코인: {symbol} {position_side}\n체결가: ${current_price:.2f}\n순수익: {pnl_amount:+.4f} USDT ({pnl_percent:+.2f}%)")
 
-        # 상태 초기화
-        sym_state["position"] = "NONE"
-        sym_state["entry_price"] = 0.0
-        sym_state["last_exit_time"] = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
-        sym_state["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
-        sym_state["stop_loss_price"] = 0.0
-        sym_state["real_sl"] = 0.0
-        sym_state["trailing_active"] = False
-        sym_state["trailing_target"] = 0.0
-        sym_state["partial_tp_executed"] = False
-        sym_state["is_paper"] = False
+        # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+        async with state_lock:
+            # 상태 초기화
+            sym_state["position"] = "NONE"
+            sym_state["entry_price"] = 0.0
+            sym_state["last_exit_time"] = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
+            sym_state["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
+            sym_state["stop_loss_price"] = 0.0
+            sym_state["real_sl"] = 0.0
+            sym_state["trailing_active"] = False
+            sym_state["trailing_target"] = 0.0
+            sym_state["partial_tp_executed"] = False
+            sym_state["is_paper"] = False
 
-        # [Phase 19] 강제 청산 시 봇 재진입 방지를 위해 자동매매 엔진 자체를 STOP 상태로 전환
-        bot_global_state["is_running"] = False
-        stop_msg = "[시스템] 강제 청산(Paper) 감지: 봇 무한 재진입 방지를 위해 자동매매를 일시 중지(STOP) 합니다."
-        bot_global_state["logs"].append(stop_msg)
-        logger.info(stop_msg)
-        send_telegram_sync(_tg_system(False))
+            # [Phase 19] 강제 청산 시 봇 재진입 방지를 위해 자동매매 엔진 자체를 STOP 상태로 전환
+            bot_global_state["is_running"] = False
+            stop_msg = "[시스템] 강제 청산(Paper) 감지: 봇 무한 재진입 방지를 위해 자동매매를 일시 중지(STOP) 합니다."
+            bot_global_state["logs"].append(stop_msg)
+            logger.info(stop_msg)
+            send_telegram_sync(_tg_system(False))
 
         return {"status": "success", "message": msg}
 
@@ -1614,21 +1628,23 @@ async def toggle_bot_action():
     """봇 시작/중지"""
     global bot_global_state, _trading_task
 
-    if bot_global_state["is_running"]:
-        bot_global_state["is_running"] = False
-        msg = "[봇] 명령 수신: 시스템 가동 중지 (STOP)"
-        bot_global_state["logs"].append(msg)
-        logger.info(msg)
-        send_telegram_sync(_tg_system(False))
-    else:
-        bot_global_state["is_running"] = True
-        msg = "[봇] 명령 수신: 시스템 가동 시작 (START)!"
-        bot_global_state["logs"].append(msg)
-        logger.info(msg)
-        send_telegram_sync(_tg_system(True))
-        # 중복 태스크 방지: 이전 태스크가 완료된 경우에만 새 태스크 생성
-        if _trading_task is None or _trading_task.done():
-            _trading_task = asyncio.create_task(async_trading_loop())
+    # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+    async with state_lock:
+        if bot_global_state["is_running"]:
+            bot_global_state["is_running"] = False
+            msg = "[봇] 명령 수신: 시스템 가동 중지 (STOP)"
+            bot_global_state["logs"].append(msg)
+            logger.info(msg)
+            send_telegram_sync(_tg_system(False))
+        else:
+            bot_global_state["is_running"] = True
+            msg = "[봇] 명령 수신: 시스템 가동 시작 (START)!"
+            bot_global_state["logs"].append(msg)
+            logger.info(msg)
+            send_telegram_sync(_tg_system(True))
+            # 중복 태스크 방지: 이전 태스크가 완료된 경우에만 새 태스크 생성
+            if _trading_task is None or _trading_task.done():
+                _trading_task = asyncio.create_task(async_trading_loop())
 
     return {"is_running": bot_global_state["is_running"]}
 
