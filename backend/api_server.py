@@ -1463,6 +1463,13 @@ async def close_paper_position():
         sym_state["partial_tp_executed"] = False
         sym_state["is_paper"] = False
 
+        # [Phase 19] 강제 청산 시 봇 재진입 방지를 위해 자동매매 엔진 자체를 STOP 상태로 전환
+        bot_global_state["is_running"] = False
+        stop_msg = "[시스템] 강제 청산(Paper) 감지: 봇 무한 재진입 방지를 위해 자동매매를 일시 중지(STOP) 합니다."
+        bot_global_state["logs"].append(stop_msg)
+        logger.info(stop_msg)
+        send_telegram_sync(_tg_system(False))
+
         return {"status": "success", "message": msg}
 
     except Exception as e:
