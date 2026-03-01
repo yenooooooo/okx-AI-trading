@@ -888,6 +888,8 @@ async function applyPreset(presetName) {
 async function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
+    // 모달이 열릴 때 배경(body) 스크롤 차단
+    document.body.style.overflow = 'hidden';
     // [Phase 18.1] 현재 심볼의 전용 설정값을 즉시 로드하여 입력창 갱신
     await syncConfig(currentSymbol);
 }
@@ -934,6 +936,8 @@ async function onModalSymbolChange(newSymbol) {
 function closeTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.add('hidden');
+    // 모달이 닫힐 때 배경(body) 스크롤 복구
+    document.body.style.overflow = '';
 }
 
 async function saveTuningConfig() {
@@ -2039,6 +2043,9 @@ function _renderHistoryTable(bodyId, rows) {
 async function openHistoryModal() {
     const modal = document.getElementById('history-modal');
     if (!modal) return;
+    
+    // 모달이 열릴 때 배경(body) 스크롤 차단
+    document.body.style.overflow = 'hidden';
 
     // 로딩 상태 초기화
     const dailyBody = document.getElementById('history-daily-body');
@@ -2066,6 +2073,8 @@ async function openHistoryModal() {
 function closeHistoryModal() {
     const modal = document.getElementById('history-modal');
     if (modal) modal.classList.add('hidden');
+    // 모달이 닫힐 때 배경(body) 스크롤 복구
+    document.body.style.overflow = '';
 }
 
 function switchHistoryTab(tab) {
