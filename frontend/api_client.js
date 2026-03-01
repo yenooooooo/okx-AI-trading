@@ -1960,32 +1960,36 @@ async function fetchLiveTickers() {
 
 // --- Init & Intervals (Parallel Optimization) ---
 async function initializeApp() {
-    // 순차적 페칭 대신 Promise.all을 활용해 병렬 스레드로 대기 시간 단축
-    initPriceWebSocket(); // 웹소켓 즉각 연결
+    // [Phase 18.2] 부팅 시퀀스 교정: 백엔드에서 현재 타겟(Symbol)을 가장 먼저 알아옴
+    await syncConfig();
+
+    // 이제 currentSymbol이 비트코인이 아닌 '실제 타겟'으로 맞춰졌으므로 차트와 소켓 연결
+    initPriceWebSocket();
     initChart();
-    initTerminalScroll(); // Smart Auto-Scroll 스크롤 감지 이벤트 바인딩
+    initTerminalScroll();
+
+    // 나머지 신경망 데이터 병렬 동기화
     await Promise.all([
-        syncConfig(),
         syncBotStatus(),
         syncBrain(),
         syncStats(),
         syncChart(),
         updateLogs(),
         syncSystemHealth(),
-        fetchAndRenderHeatmap(),  // 히트맵 초기 렌더링
-        fetchLiveTickers(),       // 실시간 등락률 뱃지 초기 렌더링
+        fetchAndRenderHeatmap(),
+        fetchLiveTickers(),
     ]);
 
     // 초기 렌더링 후 타이머 설정
     setInterval(syncBotStatus, 1000);
-    setInterval(syncBrain, 3000);       // Brain (RSI/MACD/price) - status와 분리
+    setInterval(syncBrain, 3000);
     setInterval(syncChart, 5000);
     setInterval(syncStats, 5000);
     setInterval(updateLogs, 3000);
-    setInterval(syncConfig, 30000);     // 외부 설정 변경 자동 반영
-    setInterval(syncSystemHealth, 5000); // 헬스 체크 (5초 — 매매 뇌 부하 최소화)
-    setInterval(fetchAndRenderHeatmap, 60000); // 히트맵 1분마다 갱신
-    setInterval(fetchLiveTickers, 5000);       // 등락률 뱃지 5초마다 갱신
+    setInterval(syncConfig, 30000);
+    setInterval(syncSystemHealth, 5000);
+    setInterval(fetchAndRenderHeatmap, 60000);
+    setInterval(fetchLiveTickers, 5000);
 }
 
 // Start

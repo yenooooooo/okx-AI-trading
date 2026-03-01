@@ -37,15 +37,34 @@ def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: 
         f"수량   │  <code>{amount}계약  ·  {leverage}x</code>\n"
     )
     if payload:
+        # [Phase 18.2] 텔레그램 HTML 파싱 에러(<, > 기호) 완벽 차단 방어막
+        _ema = str(payload.get('ema_status', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+        _vol = str(payload.get('vol_multiplier', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+        _atr = str(payload.get('atr_sl_margin', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
+        
         msg += (
             f"{_TG_LINE}\n"
             f"[진입 근거 데이터]\n"
-            f"📈 1h 추세: {payload.get('ema_status', 'N/A')}\n"
-            f"🔥 거래량 폭발: {payload.get('vol_multiplier', 'N/A')}\n"
-            f"🛡️ ATR 방어선: {payload.get('atr_sl_margin', 'N/A')}\n"
+            f"📈 1h 추세: {_ema}\n"
+            f"🔥 거래량 폭발: {_vol}\n"
+            f"🛡️ ATR 방어선: {_atr}\n"
         )
     msg += f"{_TG_LINE}"
     return msg
+
+# [Phase 18.2] 스마트 지정가 대기 알림 함수 추가 (위 함수 바로 아래에 삽입)
+def _tg_pending(symbol: str, direction: str, price: float, amount: int, leverage: int, is_test: bool = False) -> str:
+    test_tag = "  <b>[TEST]</b>" if is_test else ""
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  지정가 대기{test_tag}\n"
+        f"{_TG_LINE}\n"
+        f"⏳ <b>PENDING {direction}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{_TG_LINE}\n"
+        f"목표가 │  <code>${price:,.2f}</code>\n"
+        f"수량   │  <code>{amount}계약  ·  {leverage}x</code>\n"
+        f"상태   │  5분 내 미체결 시 자동 취소\n"
+        f"{_TG_LINE}"
+    )
 
 def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fee: float, net_pnl: float, pnl_pct: float, reason: str) -> str:
     is_profit = pnl_pct >= 0
@@ -1187,11 +1206,14 @@ async def async_trading_loop():
                                     bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
                                     bot_global_state["symbols"][symbol]["pending_price"] = executed_price
                                     bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pending
-                                    
+
                                     entry_emoji = "⏳"
                                     entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
                                     bot_global_state["logs"].append(entry_msg)
                                     logger.info(entry_msg)
+
+                                    # [Phase 18.2] 스마트 지정가 접수 시 텔레그램 알림 즉시 발송
+                                    send_telegram_sync(_tg_pending(symbol, signal, executed_price, trade_amount, trade_leverage, is_test=_is_shadow_pending))
                                 else:
                                     _is_shadow_entry = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
                                     _paper_tag = "[👻 PAPER] " if _is_shadow_entry else ""
