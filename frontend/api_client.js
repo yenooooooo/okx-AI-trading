@@ -1155,6 +1155,9 @@ async function _hcPingSweep(progressEl) {
         { path: '/ohlcv?symbol=BTC/USDT:USDT&limit=1', name: '차트 데이터 (ohlcv)' },
         { path: '/stress_bypass', name: '바이패스 (stress_bypass)' },
         { path: '/history_stats', name: '기간별 통계 (history_stats)' },
+        { path: '/diagnostic', name: '시스템 진단 (diagnostic)' },
+        { path: '/health_check', name: '연결 점검 (health_check)' },
+        { path: '/export_csv', name: 'CSV 내보내기 (export_csv)' },
     ];
 
     const results = [];
