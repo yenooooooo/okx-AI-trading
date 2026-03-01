@@ -253,7 +253,8 @@ class TradingStrategy:
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False):
         """
         파산 방지 핵심 모듈 — 하드코딩 제거 및 UI 튜닝 파라미터(%) 직결 완료
-        반환값: (action, real_sl, trailing_active, trailing_target)
+        반환값: (action, effective_sl, trailing_active, trailing_target)
+        [Phase 26] effective_sl = max(hard_sl, trailing_target) 병합으로 거래소 SL이 트레일링을 자동 추적
         """
         # ── 손절가 및 수익/낙폭 계산 ──
         if position_side == "LONG":
@@ -298,7 +299,19 @@ class TradingStrategy:
                     return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
                 # min TP 미달: 트레일링 추적은 유지하되 EXIT는 보류 (수익이 더 성장할 기회 제공)
 
-        return "KEEP", hard_sl_price, trailing_active, trailing_target
+        # ── 3. [Phase 26] effective_sl 병합: 트레일링 타겟을 거래소 SL에 반영 ──
+        # 트레일링 활성 + 최소 익절 조건 충족 시, SL을 트레일링 타겟으로 상향
+        # → 기존 SL 스마트 갱신 메커니즘이 자동으로 거래소 주문을 트레일링 위치로 이동
+        effective_sl = hard_sl_price
+        if trailing_active and trailing_target > 0:
+            profit_rate = profit_usdt / entry_price if entry_price > 0 else 0.0
+            if profit_rate >= self.min_take_profit_rate:
+                if position_side == "LONG":
+                    effective_sl = max(hard_sl_price, trailing_target)
+                else:
+                    effective_sl = min(hard_sl_price, trailing_target)
+
+        return "KEEP", effective_sl, trailing_active, trailing_target
 
     def recalculate_shadow_risk(self, shadow_entry_price: float, direction: str, current_atr: float):
         """

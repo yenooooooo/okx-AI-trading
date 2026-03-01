@@ -1345,6 +1345,38 @@ async def async_trading_loop():
                                             )
                                             send_telegram_sync(partial_tg_msg)
 
+                                            # [Phase 26] 분할 익절 후 거래소 거미줄 재생성 (계약수 + 가격 동기화)
+                                            # 기존 TP/SL은 원래 계약수로 걸려있으므로 취소 후 잔여 계약수로 재배치
+                                            if not _is_paper:
+                                                try:
+                                                    _old_tp_id = bot_global_state["symbols"][symbol].get("active_tp_order_id")
+                                                    _old_sl_id = bot_global_state["symbols"][symbol].get("active_sl_order_id")
+                                                    for _oid in [_old_tp_id, _old_sl_id]:
+                                                        if _oid:
+                                                            try:
+                                                                await asyncio.to_thread(engine_api.exchange.cancel_order, _oid, symbol)
+                                                            except Exception:
+                                                                pass
+
+                                                    # SL 재생성 (잔여 계약수 + 본전 방어가)
+                                                    _remaining = float(bot_global_state["symbols"][symbol]["contracts"])
+                                                    _close_side_re = "sell" if position_side == "LONG" else "buy"
+                                                    _params_sl_re = {"reduceOnly": True, "stopLossPrice": breakeven_sl}
+                                                    new_sl_re = await asyncio.to_thread(
+                                                        engine_api.exchange.create_order,
+                                                        symbol, 'market', _close_side_re, _remaining, None, _params_sl_re
+                                                    )
+                                                    bot_global_state["symbols"][symbol]["active_sl_order_id"] = new_sl_re['id']
+                                                    bot_global_state["symbols"][symbol]["last_placed_sl_price"] = breakeven_sl
+
+                                                    # TP 제거 (트레일링 모드에서는 SL이 익절 역할을 겸함)
+                                                    bot_global_state["symbols"][symbol]["active_tp_order_id"] = None
+                                                    bot_global_state["symbols"][symbol]["last_placed_tp_price"] = 0.0
+
+                                                    logger.info(f"[{symbol}] 🕸️ 분할 익절 후 거미줄 재배치 완료 | 잔여: {_remaining}계약 | SL: {breakeven_sl}")
+                                                except Exception as reweb_err:
+                                                    logger.warning(f"[{symbol}] ⚠️ 분할 익절 후 거미줄 재배치 예외: {reweb_err}")
+
                                         except Exception as partial_err:
                                             logger.error(f"[{symbol}] 1차 타겟 도달 처리 실패: {partial_err}")
                                 # --- End of Partial TP 조건 체크 ---
@@ -1386,6 +1418,35 @@ async def async_trading_loop():
                                             except Exception as amend_err:
                                                 # 이미 거래소에서 체결되었거나 취소된 경우 무시하고 다음 사이클에서 동기화되도록 예외 처리
                                                 logger.warning(f"[{symbol}] ⚠️ 방어막 갱신 중 예외 발생 (이미 체결되었을 가능성): {amend_err}")
+
+                                # [Phase 26] TP 스마트 갱신 — SL과 동일한 Cancel+Recreate 패턴
+                                # 1차 타겟 미도달 상태에서만 작동 (분할 익절 후에는 TP 주문 없음, SL이 겸임)
+                                if not bot_global_state["symbols"][symbol].get("is_paper", False):
+                                    _is_partial_done_tp = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
+                                    _active_tp_id = bot_global_state["symbols"][symbol].get("active_tp_order_id")
+
+                                    if not _is_partial_done_tp and _active_tp_id:
+                                        _target_offset_tp = (entry * 0.0015) + (current_atr * 0.5)
+                                        _ideal_tp = (entry + _target_offset_tp) if position_side == "LONG" else (entry - _target_offset_tp)
+                                        _last_tp = float(bot_global_state["symbols"][symbol].get("last_placed_tp_price", 0.0))
+
+                                        if _last_tp > 0:
+                                            _diff_ratio_tp = abs(_ideal_tp - _last_tp) / _last_tp
+                                            if _diff_ratio_tp >= 0.0005:
+                                                try:
+                                                    await asyncio.to_thread(engine_api.exchange.cancel_order, _active_tp_id, symbol)
+                                                    _close_side_tp = "sell" if position_side == "LONG" else "buy"
+                                                    _amt_tp = float(bot_global_state["symbols"][symbol]["contracts"])
+                                                    _params_tp_amend = {"reduceOnly": True}
+                                                    new_tp_order = await asyncio.to_thread(
+                                                        engine_api.exchange.create_order,
+                                                        symbol, 'limit', _close_side_tp, _amt_tp, round(_ideal_tp, 4), _params_tp_amend
+                                                    )
+                                                    bot_global_state["symbols"][symbol]["active_tp_order_id"] = new_tp_order['id']
+                                                    bot_global_state["symbols"][symbol]["last_placed_tp_price"] = round(_ideal_tp, 4)
+                                                    logger.info(f"[{symbol}] 🕸️ 익절 거미줄 스마트 갱신 | {_last_tp:.4f} ➔ {_ideal_tp:.4f} (오차율: {_diff_ratio_tp*100:.3f}%)")
+                                                except Exception as tp_amend_err:
+                                                    logger.warning(f"[{symbol}] ⚠️ 익절 거미줄 갱신 예외: {tp_amend_err}")
 
                                 if action != "KEEP":
                                     # 1. 청산 실행 (Paper/Real 분기)
@@ -1763,10 +1824,13 @@ async def async_trading_loop():
                                             _amt = float(bot_global_state["symbols"][symbol]["contracts"])
                                             _close_side = "sell" if signal == "LONG" else "buy"
 
-                                            # 초기 익절가 (+1% / -1%)
-                                            _init_tp = _entry_p * 1.01 if signal == "LONG" else _entry_p * 0.99
-                                            # 초기 손절가 (-1% / +1%)
-                                            _init_sl = _entry_p * 0.99 if signal == "LONG" else _entry_p * 1.01
+                                            # [Phase 26] 초기 익절가: UI 표시 공식과 100% 동일 (수수료 0.15% + ATR * 50%)
+                                            _entry_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else float(_entry_p * 0.01)
+                                            _target_offset = (_entry_p * 0.0015) + (_entry_atr * 0.5)
+                                            _init_tp = round(_entry_p + _target_offset, 4) if signal == "LONG" else round(_entry_p - _target_offset, 4)
+                                            # [Phase 26] 초기 손절가: 튜닝 패널 hard_stop_loss_rate 설정 직결
+                                            _sl_rate = strategy_instance.hard_stop_loss_rate
+                                            _init_sl = round(_entry_p * (1 - _sl_rate), 4) if signal == "LONG" else round(_entry_p * (1 + _sl_rate), 4)
 
                                             # CCXT 규격에 맞춘 Reduce-Only 파라미터
                                             _params_tp = {"reduceOnly": True}
