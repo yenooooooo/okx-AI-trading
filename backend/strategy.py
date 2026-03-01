@@ -293,6 +293,23 @@ class TradingStrategy:
 
         return "KEEP", hard_sl_price, trailing_active, trailing_target
 
+    def recalculate_shadow_risk(self, shadow_entry_price: float, direction: str, current_atr: float):
+        """
+        [Phase 23 - Gemini Architect Logic]
+        그림자 사냥 체결 시, 새로운 꼬리 진입가를 기준으로 방어막(SL/TP) 재계산.
+        Returns (new_hard_sl, new_trailing_activation)
+        """
+        sl_margin = shadow_entry_price * 0.005  # 손절 0.5% 타이트
+
+        if direction == "LONG":
+            new_hard_sl = shadow_entry_price - sl_margin
+            new_trailing_activation = shadow_entry_price + (current_atr * 1.5)
+        else:
+            new_hard_sl = shadow_entry_price + sl_margin
+            new_trailing_activation = shadow_entry_price - (current_atr * 1.5)
+
+        return new_hard_sl, new_trailing_activation
+
     def record_trade_result(self, is_loss):
         """
         [v2.1] 청산 결과를 연패 카운터에 반영

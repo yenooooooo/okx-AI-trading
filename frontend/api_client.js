@@ -834,8 +834,8 @@ async function syncConfig(symbol = null) {
                 const v = parseFloat(val);
                 if (slider) slider.value = v;
                 if (span) span.textContent = v.toFixed(1) + '%';
-            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode'].includes(key)) {
-                // [Phase 14.1] Gate Bypass 체크박스 동기화
+            } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled'].includes(key)) {
+                // [Phase 14.1] Gate Bypass 체크박스 동기화 + [Phase 23] Shadow Hunting
                 const el = document.getElementById(`config-${key}`);
                 if (el) el.checked = (val === true || val === 'true');
             }
@@ -868,7 +868,7 @@ async function applyPreset(presetName) {
     }
 
     // 2. [Phase 14.1/14.3] Gate Bypass 체크박스: 프리셋에 포함된 경우 강제 동기화
-    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode']) {
+    for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled']) {
         if (!(bkey in config)) continue;
         const el = document.getElementById(`config-${bkey}`);
         if (!el) continue;
@@ -920,6 +920,15 @@ async function setDirectionMode(mode) {
     }
 }
 
+// [Phase 23] 그림자 사냥(Shadow Hunting) 모드 토글 — 백엔드 즉시 저장
+async function toggleShadowHunting(enabled) {
+    try {
+        await fetch(`${API_URL}/config?key=shadow_hunting_enabled&value=${encodeURIComponent(enabled ? 'true' : 'false')}`, { method: 'POST' });
+    } catch (e) {
+        console.error('[ANTIGRAVITY] toggleShadowHunting 실패:', e);
+    }
+}
+
 // [Phase 18.1] 모달 심볼 드롭다운 변경 핸들러 — 해당 코인의 과거 기억 즉시 로드
 async function onModalSymbolChange(newSymbol) {
     if (!newSymbol) return;
@@ -948,8 +957,8 @@ async function saveTuningConfig() {
             if (isNaN(value)) throw new Error(`${key}: 유효하지 않은 숫자입니다.`);
             payloads.push({ key, value: String(value) });
         }
-        // [Phase 14.1] Gate Bypass 체크박스 추가 저장 (exit_only_mode 포함)
-        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode']) {
+        // [Phase 14.1] Gate Bypass 체크박스 추가 저장 (exit_only_mode, shadow_hunting_enabled 포함)
+        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled']) {
             const el = document.getElementById(`config-${bkey}`);
             if (!el) continue;
             payloads.push({ key: bkey, value: el.checked.toString() });

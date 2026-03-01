@@ -738,6 +738,8 @@ async def async_trading_loop():
                             "active_sl_order_id": None,
                             "last_placed_tp_price": 0.0,
                             "last_placed_sl_price": 0.0,
+                            # [Phase 23] 그림자 사냥 포지션 여부 추적
+                            "is_shadow_hunting": False,
                         }
 
                     # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
@@ -1042,6 +1044,15 @@ async def async_trading_loop():
                                         bot_global_state["logs"].append(entry_msg)
                                         logger.info(entry_msg)
                                         send_telegram_sync(_tg_entry(symbol, real_side, executed_price, trade_amount, trade_leverage, payload=None, is_test=_is_paper_pending))
+
+                                        # [Phase 23] Shadow Hunting 체결 시 리스크 재계산
+                                        if bot_global_state["symbols"][symbol].get("is_shadow_hunting", False):
+                                            _sh_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else float(executed_price * 0.01)
+                                            _sh_new_sl, _sh_new_act = strategy_instance.recalculate_shadow_risk(executed_price, real_side, _sh_atr)
+                                            strategy_instance.hard_stop_loss_rate = abs(_sh_new_sl - executed_price) / executed_price
+                                            strategy_instance.trailing_stop_activation = abs(_sh_new_act - executed_price) / executed_price
+                                            bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False  # 재계산 완료, 플래그 리셋
+                                            logger.info(f"[{symbol}] 🐸 Shadow Hunting 체결! 리스크 재계산 완료 | 신규 SL: {_sh_new_sl:.4f} | 트레일링 발동선: {_sh_new_act:.4f}")
                                         
                                     elif status in ['canceled', 'rejected'] or (time.time() - pending_time > 300):
                                         # 취소되었거나 5분 초과 시 -> 주문 취소 및 PENDING 해제 (고스트 오더 방지)
@@ -1477,10 +1488,47 @@ async def async_trading_loop():
                                 order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')
                                 ema_20_val = float(df['ema_20'].iloc[-1]) if 'ema_20' in df.columns and not pd.isna(df['ema_20'].iloc[-1]) else current_price
 
-                                # [DRY] 단일 헬퍼로 주문 실행
-                                executed_price, pending_order_id = await execute_entry_order(
-                                    engine_api, symbol, signal, trade_amount, order_type, current_price, ema_20_val
-                                )
+                                # [Phase 23] Shadow Hunting 인터셉트 — execute_entry_order 호출 전 시그널 가로채기
+                                _shadow_hunting = str(get_config('shadow_hunting_enabled') or 'false').lower() == 'true'
+                                _is_shadow_hunt_order = False
+                                if _shadow_hunting:
+                                    logger.info(f"🐸 [Shadow Hunting] 청개구리 모드 가동 중. 시그널을 역이용합니다.")
+                                    _original_direction = signal
+                                    _hard_sl_rate = strategy_instance.hard_stop_loss_rate
+                                    # 원래 방향의 손절가(hard_sl)를 그림자 진입 지정가로 사용
+                                    if _original_direction == "LONG":
+                                        _shadow_limit_price = round(current_price * (1 - _hard_sl_rate), 4)
+                                        signal = "SHORT"
+                                    else:
+                                        _shadow_limit_price = round(current_price * (1 + _hard_sl_rate), 4)
+                                        signal = "LONG"
+                                    logger.info(f"🎯 [Shadow Hunting] 원래 방향: {_original_direction} -> 타겟 방향: {signal}")
+                                    logger.info(f"🕸️ [Shadow Hunting] 휩쏘 꼬리 대기: {_shadow_limit_price}에 지정가 주문 투척")
+                                    try:
+                                        if signal == "LONG":
+                                            _sh_order = await asyncio.to_thread(
+                                                engine_api.exchange.create_limit_buy_order,
+                                                symbol, trade_amount, _shadow_limit_price, {"postOnly": True}
+                                            )
+                                        else:
+                                            _sh_order = await asyncio.to_thread(
+                                                engine_api.exchange.create_limit_sell_order,
+                                                symbol, trade_amount, _shadow_limit_price, {"postOnly": True}
+                                            )
+                                        executed_price = _shadow_limit_price
+                                        pending_order_id = _sh_order.get('id')
+                                        order_type = 'Smart Limit'  # PENDING 분기 강제 진입
+                                        _is_shadow_hunt_order = True
+                                        logger.info(f"[{symbol}] 🕸️ Shadow Hunting 지정가 투척 완료 | 방향: {signal} | 가격: {_shadow_limit_price} | ID: {pending_order_id}")
+                                    except Exception as _sh_err:
+                                        logger.error(f"[{symbol}] 🐸 Shadow Hunting 주문 실패: {_sh_err}")
+                                        continue  # 실패 시 이번 사이클 스킵
+
+                                if not _is_shadow_hunt_order:
+                                    # [DRY] 단일 헬퍼로 주문 실행 (Shadow Hunting이 아닐 때만)
+                                    executed_price, pending_order_id = await execute_entry_order(
+                                        engine_api, symbol, signal, trade_amount, order_type, current_price, ema_20_val
+                                    )
 
                                 # 포지션 상태 업데이트 (Smart Limit인 경우 PENDING 상태로 대기)
                                 if order_type == 'Smart Limit':
@@ -1494,6 +1542,8 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["pending_amount"] = trade_amount
                                         bot_global_state["symbols"][symbol]["pending_price"] = executed_price
                                         bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pending
+                                        # [Phase 23] 그림자 사냥 포지션 여부 각인
+                                        bot_global_state["symbols"][symbol]["is_shadow_hunting"] = _is_shadow_hunt_order
 
                                     entry_emoji = "⏳"
                                     entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"

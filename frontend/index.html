@@ -1257,6 +1257,17 @@
                             <div class="w-9 h-5 bg-navy-900 border border-navy-border rounded-full peer peer-checked:border-orange-400 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4 peer-checked:after:bg-orange-400"></div>
                         </label>
                     </div>
+                    <!-- [Phase 23] 그림자 사냥 (Shadow Hunting) 모드 -->
+                    <div class="mt-3 p-3 rounded border border-fuchsia-500/30 bg-fuchsia-500/5 flex justify-between items-center transition-all hover:border-fuchsia-500/50">
+                        <div>
+                            <span class="text-[11px] font-mono font-bold text-fuchsia-400 flex items-center gap-1.5"><span class="animate-pulse">🐸</span> 그림자 사냥 (Shadow Hunting)</span>
+                            <span class="text-[9px] font-mono text-gray-500 block mt-0.5">AI 시그널을 역이용. 손절가 위치에 역방향 지정가(Post-Only)를 투척해 휩쏘 꼬리를 낚습니다.</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="config-shadow_hunting_enabled" class="sr-only peer" onchange="toggleShadowHunting(this.checked)">
+                            <div class="w-9 h-5 bg-navy-900 border border-navy-border rounded-full peer peer-checked:border-fuchsia-400 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4 peer-checked:after:bg-fuchsia-400"></div>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- ══ Sections 2 & 3: 2-column grid ══ -->
