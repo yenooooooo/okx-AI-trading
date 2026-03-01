@@ -235,6 +235,11 @@ async function syncBotStatus() {
                 posSymbolEl.classList.remove('hidden');
             }
 
+            // [Phase 24] PENDING 상태 시 철거 버튼 노출 / 아닐 시 숨김
+            const _isPending = symbolData.position && symbolData.position.startsWith('PENDING');
+            const _abortBtn = document.getElementById('btn-abort-pending');
+            if (_abortBtn) _abortBtn.classList.toggle('hidden', !_isPending);
+
             // 웹소켓(priceWs)이 연결되어 있을 때는 REST API 구형 가격/수익률 데이터 표시는 무시.
             // (단, 포지션 유무, 진입가, 목표가 등 고정데이터는 계속 연동)
             updateText('pos-type', symbolData.position);
@@ -926,6 +931,24 @@ async function toggleShadowHunting(enabled) {
         await fetch(`${API_URL}/config?key=shadow_hunting_enabled&value=${encodeURIComponent(enabled ? 'true' : 'false')}`, { method: 'POST' });
     } catch (e) {
         console.error('[ANTIGRAVITY] toggleShadowHunting 실패:', e);
+    }
+}
+
+// [Phase 24] 매복 주문 수동 철수 — 사령관 즉시 개입
+async function abortPendingOrder() {
+    if (!confirm("대기 중인 매복 주문을 즉시 취소하시겠습니까?")) return;
+    try {
+        const response = await fetch(`${API_URL}/cancel_pending`, { method: 'POST' });
+        const result = await response.json();
+        if (result.status === 'success') {
+            showToast('매복 철거 성공', '대기 주문이 정상적으로 취소되었습니다.', 'SUCCESS');
+            syncBotStatus();
+        } else {
+            showToast('철거 실패', result.message, 'ERROR');
+        }
+    } catch (error) {
+        console.error('[ANTIGRAVITY] abortPendingOrder 오류:', error);
+        showToast('오류', '서버와 통신할 수 없습니다.', 'ERROR');
     }
 }
 

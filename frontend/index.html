@@ -875,6 +875,12 @@
                     <p class="text-[9px] text-gray-600 mt-2 leading-snug">
                         안내: 거래소 호가창(0.1s)과 봇의 감지 주기(1s) 간 미세 틱 차이가 발생할 수 있습니다.
                     </p>
+
+                    <!-- [Phase 24] 매복 대기 주문 수동 철수 버튼 (PENDING 상태일 때만 노출) -->
+                    <button id="btn-abort-pending" onclick="abortPendingOrder()"
+                        class="hidden mt-3 w-full py-2 text-xs font-mono font-bold rounded border border-yellow-500 text-yellow-400 bg-yellow-500/10 hover:bg-yellow-500/25 transition tracking-widest">
+                        🟡 대기 주문 철거 (Abort Pending)
+                    </button>
                 </div>
             </div>
 

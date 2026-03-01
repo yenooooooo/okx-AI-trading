@@ -1989,6 +1989,56 @@ async def close_paper_position():
     except Exception as e:
         return {"error": f"서버 오류: {str(e)}"}
 
+@app_server.post("/api/v1/cancel_pending")
+async def manual_cancel_pending():
+    """[Phase 24] 사령관 수동 개입: 대기 중인 지정가(매복) 주문 즉시 철거"""
+    try:
+        _sym_conf = get_config('symbols')
+        symbol = _sym_conf[0] if isinstance(_sym_conf, list) and _sym_conf else None
+        if not symbol:
+            return {"status": "error", "message": "활성 심볼이 없습니다."}
+
+        sym_state = bot_global_state["symbols"].get(symbol, {})
+        position = sym_state.get("position", "NONE")
+
+        if not position.startswith("PENDING"):
+            return {"status": "error", "message": "현재 대기 중인 주문이 없습니다."}
+
+        pending_id = sym_state.get("pending_order_id")
+        _is_paper = sym_state.get("is_paper", False)
+
+        # 1. 거래소에 취소 요청 (Paper 모드가 아닐 때만 실제 API 호출)
+        if pending_id and not _is_paper and _engine and _engine.exchange:
+            try:
+                await asyncio.to_thread(_engine.exchange.cancel_order, pending_id, symbol)
+            except Exception as cancel_err:
+                logger.warning(f"[{symbol}] 수동 취소 요청 실패 (이미 취소되었을 수 있음): {cancel_err}")
+
+        # 2. 상태 초기화
+        async with state_lock:
+            bot_global_state["symbols"][symbol]["position"] = "NONE"
+            bot_global_state["symbols"][symbol]["pending_order_id"] = None
+            bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False
+
+        # 3. 가시성 보고
+        _abort_msg = f"🟡 [{symbol}] 수동 철수: 사령관 명령으로 대기 주문({pending_id})을 즉시 철거했습니다."
+        bot_global_state["logs"].append(_abort_msg)
+        logger.warning(_abort_msg)
+        save_log("WARNING", _abort_msg)
+        send_telegram_sync(
+            f"🟡 <b>수동 철수 명령 수신</b>\n"
+            f"────────────────────────\n"
+            f"사령관 개입: 대기 중인 덫을 철거하고 관망합니다.\n"
+            f"• 심볼: <b>{symbol}</b>\n"
+            f"• 주문 ID: <code>{pending_id}</code>"
+        )
+
+        return {"status": "success", "message": "대기 주문이 성공적으로 철거되었습니다."}
+    except Exception as e:
+        logger.error(f"수동 취소 실패: {e}")
+        return {"status": "error", "message": str(e)}
+
+
 @app_server.post("/api/v1/inject_stress")
 async def inject_stress(type: str):
     """[Phase 3] 스트레스 주입기 — 킬스위치/쿨다운 소방훈련"""
