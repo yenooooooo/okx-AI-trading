@@ -1069,7 +1069,20 @@ async def async_trading_loop():
                                         cancel_msg = f"{_paper_tag}⏱️ [{symbol}] 지정가 5분 미체결 취소 완료 → 봇이 새로운 최적의 타점을 즉시 재탐색합니다."
                                         bot_global_state["logs"].append(cancel_msg)
                                         logger.info(cancel_msg)
-                                        
+                                        # [Phase 23.5] Shadow Hunting 철수 전용 알림
+                                        if bot_global_state["symbols"][symbol].get("is_shadow_hunting", False):
+                                            bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False
+                                            _sh_fail_msg = f"🐸 [{symbol}] 그림자 사냥 실패 — 꼬리가 잡히지 않아 작전 철수합니다."
+                                            bot_global_state["logs"].append(_sh_fail_msg)
+                                            save_log("WARNING", _sh_fail_msg)
+                                            send_telegram_sync(
+                                                f"🐸 <b>그림자 사냥 철수</b>\n"
+                                                f"────────────────────────\n"
+                                                f"5분 내 휩쏘 꼬리가 잡히지 않았습니다.\n"
+                                                f"• 심볼: <b>{symbol}</b>\n"
+                                                f"✅ 주문 취소 완료. 봇이 재탐색합니다."
+                                            )
+
                                 except Exception as order_err:
                                     logger.error(f"[{symbol}] 스마트 지정가 체결 상태 조회 실패: {order_err}")
                             # --- End of PENDING 상태 체크 ---
@@ -1520,6 +1533,19 @@ async def async_trading_loop():
                                         order_type = 'Smart Limit'  # PENDING 분기 강제 진입
                                         _is_shadow_hunt_order = True
                                         logger.info(f"[{symbol}] 🕸️ Shadow Hunting 지정가 투척 완료 | 방향: {signal} | 가격: {_shadow_limit_price} | ID: {pending_order_id}")
+                                        # [Phase 23.5] 가시성 확보 — UI 터미널 + 텔레그램 즉시 보고
+                                        _sh_ui_msg = f"🐸 [그림자 사냥] 매복 지정가 투척 | {symbol} | {signal} | 타겟: ${_shadow_limit_price:,.4f} | 5분 대기"
+                                        bot_global_state["logs"].append(_sh_ui_msg)
+                                        save_log("INFO", _sh_ui_msg)
+                                        _sh_tg_msg = (
+                                            f"🐸 <b>그림자 사냥 (Shadow Hunting)</b>\n"
+                                            f"────────────────────────\n"
+                                            f"전략이 휩쏘 꼬리 사냥을 시작합니다.\n"
+                                            f"• 원래 신호: <b>{_original_direction}</b> 반전 → <b>{signal}</b>\n"
+                                            f"• 매복 가격: <b>${_shadow_limit_price:,.4f}</b>\n"
+                                            f"⏳ 5분 내 미체결 시 자동 철수합니다."
+                                        )
+                                        send_telegram_sync(_sh_tg_msg)
                                     except Exception as _sh_err:
                                         logger.error(f"[{symbol}] 🐸 Shadow Hunting 주문 실패: {_sh_err}")
                                         continue  # 실패 시 이번 사이클 스킵
