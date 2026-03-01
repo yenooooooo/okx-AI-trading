@@ -937,14 +937,6 @@ async def async_trading_loop():
                                 if pd.isna(current_atr) or current_atr <= 0:
                                     current_atr = float(entry * 0.01)
 
-                                # [Phase 17] 소액 시드(1계약) 강제 전량 청산 방어 (1-Contract Curse Bypass)
-                                # 진입 수량이 1.0 계약 이하일 경우, 반익절을 시도하면 전량 매도되므로
-                                # 선제적으로 partial_tp_executed 상태를 True로 덮어씌워 즉시 트레일링 추적 모드로 직행시킴.
-                                current_pos_amt = float(bot_global_state["symbols"][symbol].get("contracts", 1.0))
-                                if current_pos_amt <= 1.0 and not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
-                                    logger.info(f"[{symbol}] 🛡️ 소액 시드(1계약) 포지션 감지. 반익절(Partial TP) 스킵 및 트레일링 스탑 직행.")
-                                    bot_global_state["symbols"][symbol]["partial_tp_executed"] = True
-
                                 # [v2.2 DRY] evaluate_risk_management Tuple 언패킹 — 이중 계산 완전 제거
                                 # (action, real_sl, trailing_active, trailing_target)를 단일 소스(strategy.py)에서만 계산
                                 partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
@@ -972,7 +964,7 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["take_profit_price"] = "🚀 트레일링 대기"
 
                                 # --- [Step 2] 50% 분할 익절 (Partial TP) 조건 체크 ---
-                                if not partial_tp_executed:
+                                if not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
                                     # [v2.1] 발동 조건: 수수료 마진 0.15% + ATR*0.5 이상 수익 구간
                                     partial_tp_threshold = (entry * 0.0015) + (current_atr * 0.5)
                                     if position_side == "LONG":
@@ -983,28 +975,33 @@ async def async_trading_loop():
                                     if partial_profit >= partial_tp_threshold:
                                         try:
                                             full_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
-                                            half_contracts = max(1, full_contracts // 2)
                                             _is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
                                             _paper_tag = "[👻 PAPER] " if _is_paper else ""
 
-                                            # 시장가 절반 청산 (Reduce-Only) — Paper면 바이패스
-                                            if not _is_paper:
-                                                if position_side == "LONG":
-                                                    partial_order = await asyncio.to_thread(
-                                                        engine_api.exchange.create_market_sell_order,
-                                                        symbol, half_contracts,
-                                                        {"reduceOnly": True}
-                                                    )
-                                                else:
-                                                    partial_order = await asyncio.to_thread(
-                                                        engine_api.exchange.create_market_buy_order,
-                                                        symbol, half_contracts,
-                                                        {"reduceOnly": True}
-                                                    )
+                                            if full_contracts > 1:
+                                                half_contracts = max(1, full_contracts // 2)
+                                                # 시장가 절반 청산 (Reduce-Only) — Paper면 바이패스
+                                                if not _is_paper:
+                                                    if position_side == "LONG":
+                                                        partial_order = await asyncio.to_thread(
+                                                            engine_api.exchange.create_market_sell_order,
+                                                            symbol, half_contracts,
+                                                            {"reduceOnly": True}
+                                                        )
+                                                    else:
+                                                        partial_order = await asyncio.to_thread(
+                                                            engine_api.exchange.create_market_buy_order,
+                                                            symbol, half_contracts,
+                                                            {"reduceOnly": True}
+                                                        )
+                                                bot_global_state["symbols"][symbol]["contracts"] = full_contracts - half_contracts
+                                                qty_msg = f"물량 50% ({half_contracts}계약) 수익 실현 완료 | 잔여: {bot_global_state['symbols'][symbol]['contracts']}계약"
+                                            else:
+                                                # [Phase 19.4 교정] 1계약일 경우 매도는 스킵하되, 목표가에 도달했으므로 방어선과 트레일링은 정상 발동
+                                                qty_msg = "소액(1계약) 포지션으로 분할 매도 스킵, 수익 보존(본전 방어) 모드 직행"
 
-                                            # 상태 업데이트
+                                            # 상태 업데이트 (공통)
                                             bot_global_state["symbols"][symbol]["partial_tp_executed"] = True
-                                            bot_global_state["symbols"][symbol]["contracts"] = full_contracts - half_contracts
 
                                             # 본전 방어선 갱신 (프론트엔드 표시용)
                                             if position_side == "LONG":
@@ -1014,28 +1011,28 @@ async def async_trading_loop():
                                             bot_global_state["symbols"][symbol]["real_sl"] = breakeven_sl
 
                                             partial_msg = (
-                                                f"{_paper_tag}🎯 [{symbol}] {position_side} 1차 분할 익절 완료 💰\n"
-                                                f"물량 50% ({half_contracts}계약) 시장가 첣음 | 잔여: {bot_global_state['symbols'][symbol]['contracts']}계약\n"
+                                                f"{_paper_tag}🎯 [{symbol}] {position_side} 1차 타겟 도달 완료 💰\n"
+                                                f"{qty_msg}\n"
                                                 f"🛡️ 본전 방어선(Breakeven) 시작: ${breakeven_sl}"
                                             )
                                             bot_global_state["logs"].append(partial_msg)
                                             logger.info(partial_msg)
 
                                             # 텔레그램 분리 알림
-                                            _header_pt = "👻 PAPER TRADING | 가상 분할 익절" if _is_paper else "⚡ ANTIGRAVITY (LIVE) | 실전 분할 익절"
+                                            _header_pt = "👻 PAPER TRADING | 가상 1차 타겟 도달" if _is_paper else "⚡ ANTIGRAVITY (LIVE) | 실전 1차 타겟 도달"
                                             partial_tg_msg = (
                                                 f"{_header_pt}\n"
                                                 f"{_TG_LINE}\n"
-                                                f"🎯 <b>1차 분할 익절 완료</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+                                                f"🎯 <b>1차 타겟 도달 완료</b>  ·  <code>{_sym_short(symbol)}</code>\n"
                                                 f"{_TG_LINE}\n"
-                                                f"물량 50% 수익 실현 완료 💰\n"
+                                                f"{qty_msg}\n"
                                                 f"🛡️ 본전 방어선(Breakeven) 작동 시작\n"
                                                 f"{_TG_LINE}"
                                             )
                                             send_telegram_sync(partial_tg_msg)
 
                                         except Exception as partial_err:
-                                            logger.error(f"[{symbol}] 50% 분할 익절 실패: {partial_err}")
+                                            logger.error(f"[{symbol}] 1차 타겟 도달 처리 실패: {partial_err}")
                                 # --- End of Partial TP 조건 체크 ---
 
                                 if action != "KEEP":
