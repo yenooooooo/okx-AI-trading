@@ -212,7 +212,7 @@ BALANCE_TIERS = {
     'CRITICAL': {
         'max_balance': 20,
         'config': {
-            'exit_only_mode': 'true', 'risk_per_trade': '0.005', 'leverage': '1',
+            'exit_only_mode': 'true', 'risk_per_trade': '0.005',
             'hard_stop_loss_rate': '0.003', 'trailing_stop_activation': '0.005',
             'trailing_stop_rate': '0.003', 'min_take_profit_rate': '0.008',
             'adx_threshold': '30.0', 'adx_max': '45.0', 'chop_threshold': '50.0',
@@ -225,7 +225,7 @@ BALANCE_TIERS = {
     'MICRO': {
         'max_balance': 100,
         'config': {
-            'exit_only_mode': 'false', 'risk_per_trade': '0.01', 'leverage': '1',
+            'exit_only_mode': 'false', 'risk_per_trade': '0.01',
             'hard_stop_loss_rate': '0.005', 'trailing_stop_activation': '0.01',
             'trailing_stop_rate': '0.005', 'min_take_profit_rate': '0.01',
             'adx_threshold': '28.0', 'adx_max': '50.0', 'chop_threshold': '55.0',
@@ -238,7 +238,7 @@ BALANCE_TIERS = {
     'STANDARD': {
         'max_balance': 500,
         'config': {
-            'exit_only_mode': 'false', 'risk_per_trade': '0.015', 'leverage': '1',
+            'exit_only_mode': 'false', 'risk_per_trade': '0.015',
             'hard_stop_loss_rate': '0.008', 'trailing_stop_activation': '0.005',
             'trailing_stop_rate': '0.003', 'min_take_profit_rate': '0.008',
             'adx_threshold': '30.0', 'adx_max': '45.0', 'chop_threshold': '55.0',
@@ -251,7 +251,7 @@ BALANCE_TIERS = {
     'GROWTH': {
         'max_balance': float('inf'),
         'config': {
-            'exit_only_mode': 'false', 'risk_per_trade': '0.02', 'leverage': '1',
+            'exit_only_mode': 'false', 'risk_per_trade': '0.02',
             'hard_stop_loss_rate': '0.010', 'trailing_stop_activation': '0.005',
             'trailing_stop_rate': '0.004', 'min_take_profit_rate': '0.008',
             'adx_threshold': '25.0', 'adx_max': '60.0', 'chop_threshold': '58.0',
