@@ -93,6 +93,7 @@ def init_db():
         'cooldown_losses_trigger': '3',
         'cooldown_duration_sec': '900',
         'auto_scan_enabled': 'false',
+        'direction_mode': 'AUTO',  # [Phase 18.1] 방향 모드 (AUTO/LONG/SHORT)
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))
@@ -140,26 +141,31 @@ def get_trades(limit: int = 100, symbol: str = None) -> List[Dict]:
 
     return [dict(row) for row in rows]
 
-def get_config(key: str = None) -> Any:
-    """설정 조회"""
+def get_config(key: str = None, symbol: str = "GLOBAL") -> Any:
+    """설정 조회. symbol 지정 시 심볼 전용 값 우선, 없으면 GLOBAL 값으로 Fallback (하위 호환 100% 보장)"""
     conn = get_connection()
     cursor = conn.cursor()
 
     if key:
-        cursor.execute('SELECT value FROM bot_config WHERE key = ?', (key,))
+        # 1차: 심볼 전용 키 (`SYMBOL::KEY`) 조회
+        actual_key = f"{symbol}::{key}" if symbol != "GLOBAL" else key
+        cursor.execute('SELECT value FROM bot_config WHERE key = ?', (actual_key,))
         row = cursor.fetchone()
+        # 2차: 심볼 전용 키가 없으면 GLOBAL 키로 Fallback (기존 동작 완전 보존)
+        if not row and symbol != "GLOBAL":
+            cursor.execute('SELECT value FROM bot_config WHERE key = ?', (key,))
+            row = cursor.fetchone()
         conn.close()
         if row:
             value = row[0]
-            # JSON 파싱 시도
             try:
                 return json.loads(value)
             except (json.JSONDecodeError, TypeError):
                 return value
         return None
     else:
-        # 모든 설정 반환
-        cursor.execute('SELECT key, value FROM bot_config')
+        # 모든 설정 반환 (심볼 접두 키 `SYMBOL::KEY` 제외하여 GLOBAL 설정만 반환)
+        cursor.execute("SELECT key, value FROM bot_config WHERE key NOT LIKE '%::%'")
         rows = cursor.fetchall()
         conn.close()
         config = {}
@@ -170,10 +176,13 @@ def get_config(key: str = None) -> Any:
                 config[row[0]] = row[1]
         return config
 
-def set_config(key: str, value: Any):
-    """설정 저장"""
+def set_config(key: str, value: Any, symbol: str = "GLOBAL"):
+    """설정 저장. symbol 지정 시 `SYMBOL::KEY` 형식으로 심볼 전용 저장 (GLOBAL이면 기존 방식)"""
     conn = get_connection()
     cursor = conn.cursor()
+
+    # 저장 키 합성 (심볼 전용이면 `SYMBOL::KEY` 형식)
+    actual_key = f"{symbol}::{key}" if symbol != "GLOBAL" else key
 
     # JSON 변환
     if isinstance(value, (list, dict)):
@@ -182,7 +191,7 @@ def set_config(key: str, value: Any):
         value = str(value)
 
     cursor.execute('INSERT OR REPLACE INTO bot_config (key, value, updated_at) VALUES (?, ?, ?)',
-                   (key, value, datetime.now()))
+                   (actual_key, value, datetime.now()))
     conn.commit()
     conn.close()
 

@@ -8,6 +8,7 @@ import time as _time
 import uvicorn
 import pandas as pd
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
@@ -523,29 +524,9 @@ async def async_trading_loop():
                 logger.info("[엔진 딥 리셋] 매매 루프: 새로운 뇌(TradingStrategy) 이식 완료.")
                 bot_global_state["logs"].append("🧠 [시스템] 엔진 코어 교체 감지: 새로운 AI 뇌로 실시간 교체 완료.")
 
-            # ── [실시간 설정 동기화] 매 루프마다 DB → strategy_instance 강제 주입 (UI 변경 즉각 반영) ──
+            # ── [Phase 18.1] 전역 설정 동기화 (일일 최대 손실률만 루프 단위로 유지) ──
             try:
                 strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
-                strategy_instance.adx_threshold = float(get_config('adx_threshold') or 25.0)
-                strategy_instance.adx_max = float(get_config('adx_max') or 40.0)
-                strategy_instance.chop_threshold = float(get_config('chop_threshold') or 61.8)
-                strategy_instance.volume_surge_multiplier = float(get_config('volume_surge_multiplier') or 1.5)
-                strategy_instance.fee_margin = float(get_config('fee_margin') or 0.0015)
-                strategy_instance.hard_stop_loss_rate = float(get_config('hard_stop_loss_rate') or 0.005)
-                strategy_instance.trailing_stop_activation = float(get_config('trailing_stop_activation') or 0.003)
-                strategy_instance.trailing_stop_rate = float(get_config('trailing_stop_rate') or 0.002)
-                strategy_instance.cooldown_losses_trigger = int(get_config('cooldown_losses_trigger') or 3)
-                strategy_instance.cooldown_duration_sec = int(get_config('cooldown_duration_sec') or 900)
-                # [Phase 14.2] 이격도 동적 한계치 동기화 (DB: % 단위 → 뇌: 비율 단위로 변환)
-                _disp_th = get_config('disparity_threshold')
-                if _disp_th is not None: strategy_instance.disparity_threshold = float(_disp_th) / 100.0
-                # [Phase 14.1] Gate Bypass 플래그 동기화
-                _b_macro = get_config('bypass_macro')
-                if _b_macro is not None: strategy_instance.bypass_macro = (str(_b_macro).lower() == 'true')
-                _b_disp = get_config('bypass_disparity')
-                if _b_disp is not None: strategy_instance.bypass_disparity = (str(_b_disp).lower() == 'true')
-                _b_ind = get_config('bypass_indicator')
-                if _b_ind is not None: strategy_instance.bypass_indicator = (str(_b_ind).lower() == 'true')
             except Exception as _sync_err:
                 logger.error(f"[설정 동기화 오류] {_sync_err}")
 
@@ -662,6 +643,29 @@ async def async_trading_loop():
                             "trailing_target": 0.0,
                             "entry_timestamp": 0.0,  # [Race Condition Fix] 진입 시각 기록 — Grace Period 계산용
                         }
+
+                    # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
+                    try:
+                        strategy_instance.adx_threshold = float(get_config('adx_threshold', symbol) or 25.0)
+                        strategy_instance.adx_max = float(get_config('adx_max', symbol) or 40.0)
+                        strategy_instance.chop_threshold = float(get_config('chop_threshold', symbol) or 61.8)
+                        strategy_instance.volume_surge_multiplier = float(get_config('volume_surge_multiplier', symbol) or 1.5)
+                        strategy_instance.fee_margin = float(get_config('fee_margin', symbol) or 0.0015)
+                        strategy_instance.hard_stop_loss_rate = float(get_config('hard_stop_loss_rate', symbol) or 0.005)
+                        strategy_instance.trailing_stop_activation = float(get_config('trailing_stop_activation', symbol) or 0.003)
+                        strategy_instance.trailing_stop_rate = float(get_config('trailing_stop_rate', symbol) or 0.002)
+                        strategy_instance.cooldown_losses_trigger = int(get_config('cooldown_losses_trigger', symbol) or 3)
+                        strategy_instance.cooldown_duration_sec = int(get_config('cooldown_duration_sec', symbol) or 900)
+                        _disp_th = get_config('disparity_threshold', symbol)
+                        if _disp_th is not None: strategy_instance.disparity_threshold = float(_disp_th) / 100.0
+                        _b_macro = get_config('bypass_macro', symbol)
+                        if _b_macro is not None: strategy_instance.bypass_macro = (str(_b_macro).lower() == 'true')
+                        _b_disp = get_config('bypass_disparity', symbol)
+                        if _b_disp is not None: strategy_instance.bypass_disparity = (str(_b_disp).lower() == 'true')
+                        _b_ind = get_config('bypass_indicator', symbol)
+                        if _b_ind is not None: strategy_instance.bypass_indicator = (str(_b_ind).lower() == 'true')
+                    except Exception as _sym_sync_err:
+                        logger.error(f"[{symbol}] 코인별 설정 동기화 오류: {_sym_sync_err}")
 
                     # OHLCV 데이터 수집 (5분봉, limit=200: ADX/MACD 지표 충분한 캔들 확보)
                     ohlcv = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, "5m", limit=200)
@@ -901,6 +905,14 @@ async def async_trading_loop():
                                 if pd.isna(current_atr) or current_atr <= 0:
                                     current_atr = float(entry * 0.01)
 
+                                # [Phase 17] 소액 시드(1계약) 강제 전량 청산 방어 (1-Contract Curse Bypass)
+                                # 진입 수량이 1.0 계약 이하일 경우, 반익절을 시도하면 전량 매도되므로
+                                # 선제적으로 partial_tp_executed 상태를 True로 덮어씌워 즉시 트레일링 추적 모드로 직행시킴.
+                                current_pos_amt = float(bot_global_state["symbols"][symbol].get("contracts", 1.0))
+                                if current_pos_amt <= 1.0 and not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
+                                    logger.info(f"[{symbol}] 🛡️ 소액 시드(1계약) 포지션 감지. 반익절(Partial TP) 스킵 및 트레일링 스탑 직행.")
+                                    bot_global_state["symbols"][symbol]["partial_tp_executed"] = True
+
                                 # [v2.2 DRY] evaluate_risk_management Tuple 언패킹 — 이중 계산 완전 제거
                                 # (action, real_sl, trailing_active, trailing_target)를 단일 소스(strategy.py)에서만 계산
                                 partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
@@ -1118,6 +1130,13 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            # [Phase 18.1] 방향 모드 필터 (LONG/SHORT/AUTO) — 코인별 독립 설정
+                            _direction_mode = str(get_config('direction_mode', symbol) or 'AUTO').upper()
+                            if _direction_mode == 'LONG' and signal != 'LONG':
+                                continue  # LONG 전용 모드: SHORT 신호 차단
+                            if _direction_mode == 'SHORT' and signal != 'SHORT':
+                                continue  # SHORT 전용 모드: LONG 신호 차단
+
                             msg = f"[{symbol}] {signal} 진입 신호 — 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
                             bot_global_state["logs"].append(msg)
                             logger.info(msg)
@@ -1125,7 +1144,8 @@ async def async_trading_loop():
                             try:
                                 # 수동 오버라이드 or [v2.2] ATR 기반 동적 포지션 사이징
                                 manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
-                                trade_leverage = max(1, min(100, int(get_config('manual_leverage' if manual_override else 'leverage') or 1)))
+                                # [Phase 18.1] 코인별 레버리지 로드 (심볼 전용 우선, GLOBAL Fallback)
+                                trade_leverage = max(1, min(100, int(get_config('manual_leverage' if manual_override else 'leverage', symbol) or 1)))
                                 try:
                                     contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
                                 except Exception:
@@ -1138,7 +1158,8 @@ async def async_trading_loop():
                                     trade_amount = max(1, round(notional / (current_price * contract_size)))
                                 else:
                                     # [v2.3] 정률법 기반 동적 사이징 적용 (UI 연동 · 증거금 부족 패치)
-                                    _risk_rate = float(get_config('risk_per_trade') or 0.02)
+                                    # [Phase 18.1] 코인별 리스크 비율 로드 (심볼 전용 우선, GLOBAL Fallback)
+                                    _risk_rate = float(get_config('risk_per_trade', symbol) or 0.02)
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
                                         curr_bal, current_price, trade_leverage, contract_size, _risk_rate
                                     )
@@ -1772,17 +1793,25 @@ async def export_csv():
 
 
 @app_server.get("/api/v1/config")
-async def fetch_config():
-    """현재 봇 설정 조회"""
-    config = get_config()
-    return config
+async def fetch_config(symbol: Optional[str] = None):
+    """현재 봇 설정 조회. symbol 지정 시 해당 심볼 전용값 우선 반환 (GLOBAL Fallback 포함)"""
+    base_config = get_config()  # GLOBAL 전체 (symbol:: 접두 키 제외)
+    if symbol and symbol != "GLOBAL":
+        # 심볼 전용 설정 해결: 각 키에 대해 심볼 전용값 우선, 없으면 GLOBAL값 사용
+        resolved = {}
+        for key in base_config:
+            sym_val = get_config(key, symbol)
+            resolved[key] = sym_val if sym_val is not None else base_config[key]
+        return resolved
+    return base_config
 
 @app_server.post("/api/v1/config")
-async def update_config(key: str, value: str):
-    """봇 설정 변경 (실시간 적용) — UI 연동 컨퍼메이션 로깅 포함"""
+async def update_config(key: str, value: str, symbol: str = "GLOBAL"):
+    """봇 설정 변경 (실시간 적용). symbol 지정 시 해당 심볼 전용으로 저장, 미지정 시 GLOBAL"""
     try:
-        set_config(key, value)
-        log_msg = f"[UI 연동 성공 \U0001f7e2] '{key}' 설정이 '{value}'(으)로 뇌 구조에 완벽히 적용되었습니다."
+        set_config(key, value, symbol)
+        sym_tag = f"[{symbol}] " if symbol != "GLOBAL" else ""
+        log_msg = f"[UI 연동 성공 \U0001f7e2] {sym_tag}'{key}' 설정이 '{value}'(으)로 뇌 구조에 완벽히 적용되었습니다."
         bot_global_state["logs"].append(log_msg)
         logger.info(log_msg)
         return {"success": True, "message": f"{key} 업데이트 완료"}

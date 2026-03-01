@@ -156,6 +156,12 @@ async function executeDeepSync(newSymbol) {
     // 2. 조준경 뱃지 갱신
     const targetBadge = document.getElementById('hero-target-badge');
     if (targetBadge) targetBadge.textContent = newSymbol;
+    // [Phase 18.1] 좌측 패널 심볼 배지 즉시 갱신
+    const leftSymBadge = document.getElementById('left-panel-symbol-badge');
+    if (leftSymBadge) leftSymBadge.textContent = newSymbol.split(':')[0];
+    // [Phase 18.1] 모달 심볼 드롭다운 동기화
+    const modalSymSel = document.getElementById('modal-target-symbol');
+    if (modalSymSel) modalSymSel.value = newSymbol;
 
     // 3. Ghost Data 방지 — 가격 및 차트 즉시 초기화
     const heroPriceEl = document.getElementById('hero-price');
@@ -669,6 +675,7 @@ const PRESET_CONFIGS = {
         trailing_stop_rate: 0.002, cooldown_losses_trigger: 3, cooldown_duration_sec: 900,
     },
     // [Phase 14.3] 초단타 광기 모드 — 모든 방어 관문 해제 + 틱 단위 익절
+    // [Phase 18.1] risk_per_trade / leverage 는 시드 보호 설정으로 프리셋에서 완전 제거 (PROTECTED_KEYS)
     frenzy: {
         adx_threshold: 15.0,            // 추세 기준 대폭 완화 (낮은 ADX도 진입 허용)
         chop_threshold: 60.0,           // 횡보 허용치 증가
@@ -679,7 +686,6 @@ const PRESET_CONFIGS = {
         trailing_stop_rate: 0.001,      // 고점 대비 0.1% 낙폭 시 틱 익절 (비율: 0.001)
         cooldown_losses_trigger: 3,     // 3연패 시 쿨다운
         cooldown_duration_sec: 300,     // 5분 휴식 (초단타 특성상 짧게)
-        risk_per_trade: 1.0,            // 소액 1% 리스크 (UI % 단위)
         // ── Gate Bypass: 3개 방어 관문 전면 해제 ──
         bypass_macro: 'true',
         bypass_disparity: 'true',
@@ -709,8 +715,12 @@ function updateRiskThermometer(value) {
     }
 }
 
+// [Phase 18.1] 프리셋이 절대 변경해서는 안 되는 시드 보호 설정 키 집합
+const PRESET_PROTECTED_KEYS = new Set(['risk_per_trade', 'leverage']);
+
 // 튜닝 파라미터 맵 — syncConfig() 와 saveTuningConfig() 공유 단일 진실 소스
 const TUNING_INPUT_MAP = {
+    'leverage': { id: 'config-leverage', parse: parseInt },  // [Phase 18.1] 모달 Section 1으로 이관
     'risk_per_trade': { id: 'config-risk_per_trade', parse: v => parseFloat(v) / 100 },
     'adx_threshold': { id: 'tuning-adx-threshold', parse: parseFloat },
     'adx_max': { id: 'tuning-adx-max', parse: parseFloat },
@@ -726,25 +736,40 @@ const TUNING_INPUT_MAP = {
 };
 
 // --- Config Sync ---
-async function syncConfig() {
+// [Phase 18.1] symbol 파라미터 지원: 심볼 전용 설정을 로드하여 모달 입력창 일괄 갱신
+async function syncConfig(symbol = null) {
     try {
-        const response = await fetch(`${API_URL}/config`);
+        const url = symbol ? `${API_URL}/config?symbol=${encodeURIComponent(symbol)}` : `${API_URL}/config`;
+        const response = await fetch(url);
         const configs = await response.json();
         for (const [key, val] of Object.entries(configs)) {
             if (key === 'risk_per_trade') {
-                const input = document.getElementById('config-risk-rate');
                 const tuningInput = document.getElementById('config-risk_per_trade');
                 const v = parseFloat(val) * 100;
-                if (input) input.value = v;
                 if (tuningInput) { tuningInput.value = v.toFixed(1); updateRiskThermometer(v); }
                 updateText('risk-val-display', v.toFixed(1) + '%', false);
+                // [Phase 18.1] 좌측 패널 리스크 배지 갱신
+                const leftRiskBadge = document.getElementById('left-panel-risk-badge');
+                if (leftRiskBadge) leftRiskBadge.textContent = v.toFixed(1) + '%';
             } else if (key === 'leverage') {
                 const input = document.getElementById('config-leverage');
-                if (input) input.value = val;
-                updateText('lev-val-display', val + 'x', false);
+                if (input) { input.value = parseInt(val); input.dispatchEvent(new Event('input')); }
+                updateText('lev-val-display', parseInt(val) + 'x', false);
+                // [Phase 18.1] 좌측 패널 레버리지 배지 갱신
+                const leftLevBadge = document.getElementById('left-panel-lev-badge');
+                if (leftLevBadge) leftLevBadge.textContent = parseInt(val) + 'x';
+            } else if (key === 'direction_mode') {
+                // [Phase 18.1] 방향 모드 버튼 UI 동기화
+                _applyDirectionModeUI(String(val).toUpperCase());
             } else if (key === 'symbols') {
                 const activeSymbol = Array.isArray(val) && val.length > 0 ? val[0] : null;
                 if (activeSymbol) currentSymbol = activeSymbol;
+                // [Phase 18.1] 좌측 패널 심볼 배지 갱신
+                const leftSymBadge = document.getElementById('left-panel-symbol-badge');
+                if (leftSymBadge && activeSymbol) leftSymBadge.textContent = activeSymbol.split(':')[0];
+                // [Phase 18.1] 모달 심볼 드롭다운 동기화
+                const modalSymSel = document.getElementById('modal-target-symbol');
+                if (modalSymSel && activeSymbol) modalSymSel.value = activeSymbol;
                 // 타겟 그리드 버튼 활성 상태 동기화
                 document.querySelectorAll('.target-coin-btn').forEach(btn => {
                     if (btn.dataset.symbol === activeSymbol) {
@@ -827,7 +852,9 @@ async function applyPreset(presetName) {
     if (!config) return;
 
     // 1. 숫자/범위 인풋: TUNING_INPUT_MAP 기준으로 ID 해석 → 값 주입 + 애니메이션 + input 이벤트
+    // [Phase 18.1] PRESET_PROTECTED_KEYS(risk_per_trade, leverage)는 절대 건드리지 않음
     for (const [key, { id }] of Object.entries(TUNING_INPUT_MAP)) {
+        if (PRESET_PROTECTED_KEYS.has(key)) continue;  // 시드 보호 설정 격리
         if (!(key in config)) continue;
         const input = document.getElementById(id);
         if (!input) continue;
@@ -858,8 +885,46 @@ async function applyPreset(presetName) {
 async function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
-    // 모달 오픈 시 서버에서 최신 설정값을 즉시 가져와 입력창 갱신
-    await syncConfig();
+    // [Phase 18.1] 현재 심볼의 전용 설정값을 즉시 로드하여 입력창 갱신
+    await syncConfig(currentSymbol);
+}
+
+// [Phase 18.1] 방향 모드 UI 적용 헬퍼 (DRY)
+function _applyDirectionModeUI(mode) {
+    document.querySelectorAll('.direction-mode-btn').forEach(btn => {
+        const isActive = btn.dataset.mode === mode;
+        if (isActive) {
+            btn.classList.add('dir-active');
+            if (mode === 'LONG') {
+                btn.className = 'direction-mode-btn dir-active flex-1 py-2 text-[10px] font-mono font-bold rounded border border-neon-green text-neon-green bg-neon-green/10 transition';
+            } else if (mode === 'SHORT') {
+                btn.className = 'direction-mode-btn dir-active flex-1 py-2 text-[10px] font-mono font-bold rounded border border-neon-red text-neon-red bg-neon-red/10 transition';
+            } else {
+                btn.className = 'direction-mode-btn dir-active flex-1 py-2 text-[10px] font-mono font-bold rounded border border-neon-green text-neon-green bg-neon-green/10 transition';
+            }
+        } else {
+            btn.classList.remove('dir-active');
+            btn.className = 'direction-mode-btn flex-1 py-2 text-[10px] font-mono font-bold rounded border border-navy-border text-gray-500 transition hover:border-gray-400 hover:text-gray-300';
+        }
+    });
+}
+
+// [Phase 18.1] 방향 모드 버튼 클릭 핸들러 — UI 즉시 반영 + 백엔드 저장 (코인별)
+async function setDirectionMode(mode) {
+    _applyDirectionModeUI(mode);
+    try {
+        const saveSymbol = currentSymbol || 'GLOBAL';
+        await fetch(`${API_URL}/config?key=direction_mode&value=${encodeURIComponent(mode)}&symbol=${encodeURIComponent(saveSymbol)}`, { method: 'POST' });
+    } catch (e) {
+        console.error('[ANTIGRAVITY] setDirectionMode 실패:', e);
+    }
+}
+
+// [Phase 18.1] 모달 심볼 드롭다운 변경 핸들러 — 해당 코인의 과거 기억 즉시 로드
+async function onModalSymbolChange(newSymbol) {
+    if (!newSymbol) return;
+    await setTargetSymbol(newSymbol);
+    await syncConfig(newSymbol);
 }
 
 
@@ -871,6 +936,9 @@ function closeTuningModal() {
 async function saveTuningConfig() {
     const btn = document.querySelector('#tuning-modal button[onclick="saveTuningConfig()"]');
     try {
+        // [Phase 18.1] 현재 감시 심볼로 코인별 독립 저장 (GLOBAL Fallback 포함)
+        const saveSymbol = currentSymbol || 'GLOBAL';
+
         // 1. 유효성 검사 & payload 조립 (TUNING_INPUT_MAP 단일 진실 소스 활용)
         const payloads = [];
         for (const [key, { id, parse }] of Object.entries(TUNING_INPUT_MAP)) {
@@ -886,9 +954,14 @@ async function saveTuningConfig() {
             if (!el) continue;
             payloads.push({ key: bkey, value: el.checked.toString() });
         }
-        // 2. 병렬 POST (Query Param 방식 — 백엔드 시그니처와 일치)
+        // [Phase 18.1] 방향 모드 저장
+        const activeDir = document.querySelector('.direction-mode-btn.dir-active');
+        const dirMode = activeDir ? activeDir.dataset.mode : 'AUTO';
+        payloads.push({ key: 'direction_mode', value: dirMode });
+
+        // 2. 병렬 POST (Query Param 방식 + 심볼 전용 저장)
         await Promise.all(payloads.map(payload =>
-            fetch(`${API_URL}/config?key=${encodeURIComponent(payload.key)}&value=${encodeURIComponent(payload.value)}`, {
+            fetch(`${API_URL}/config?key=${encodeURIComponent(payload.key)}&value=${encodeURIComponent(payload.value)}&symbol=${encodeURIComponent(saveSymbol)}`, {
                 method: 'POST'
             })
         ));
