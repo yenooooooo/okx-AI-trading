@@ -66,7 +66,7 @@ def _tg_pending(symbol: str, direction: str, price: float, amount: int, leverage
         f"{_TG_LINE}"
     )
 
-def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fee: float, net_pnl: float, pnl_pct: float, reason: str) -> str:
+def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fee: float, net_pnl: float, pnl_pct: float, reason: str, is_test: bool = False) -> str:
     is_profit = pnl_pct >= 0
     result_emoji = "✅" if is_profit else "🔴"
     result_label = "익절" if is_profit else "손절"
@@ -74,8 +74,9 @@ def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fe
     sign_gross = "+" if gross_pnl >= 0 else ""
     _reason_ko = {"STOP_LOSS": "하드 손절", "TRAILING_STOP_EXIT": "트레일링 익절"}
     reason_ko  = _reason_ko.get(reason, reason)
+    test_tag = "  <b>[TEST]</b>" if is_test else ""
     return (
-        f"⚡ <b>ANTIGRAVITY</b>  |  청산\n"
+        f"⚡ <b>ANTIGRAVITY</b>  |  청산{test_tag}\n"
         f"{_TG_LINE}\n"
         f"{result_emoji} <b>{direction} {result_label}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
         f"{_TG_LINE}\n"
@@ -1104,7 +1105,7 @@ async def async_trading_loop():
                                             
                                         bot_global_state["logs"].append(msg)
                                         logger.info(msg)
-                                        send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, action))
+                                        send_telegram_sync(_tg_exit(symbol, position_side, avg_fill_price, total_gross_pnl, total_fee, pnl_amount, pnl_percent, action, is_test=_is_paper))
 
                                         # 4. 프론트엔드 포지션 초기화
                                         bot_global_state["symbols"][symbol]["position"] = "NONE"
@@ -1135,7 +1136,7 @@ async def async_trading_loop():
                                         error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
                                         bot_global_state["logs"].append(error_msg)
                                         logger.error(error_msg)
-                                        send_telegram_sync(_tg_exit(symbol, position_side, current_price, 0.0, 0.0, 0.0, 0.0, action))
+                                        send_telegram_sync(_tg_exit(symbol, position_side, current_price, 0.0, 0.0, 0.0, 0.0, action, is_test=bot_global_state["symbols"][symbol].get("is_paper", False)))
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
