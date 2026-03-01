@@ -1228,6 +1228,7 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            _signal_start_time = _time.time()  # [Phase 21.1] A.D.S 레이턴시 측정 시작점
                             # [Phase 18.1] 방향 모드 필터 (LONG/SHORT/AUTO) — 코인별 독립 설정
                             _direction_mode = str(get_config('direction_mode', symbol) or 'AUTO').upper()
                             if _direction_mode == 'LONG' and signal != 'LONG':
@@ -1308,6 +1309,17 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["contracts"] = trade_amount
                                         bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
                                         bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
+
+                                    # [Phase 21.1] A.D.S 자가 진단: 레이턴시 & 슬리피지 측정
+                                    _latency_ms = (_time.time() - _signal_start_time) * 1000
+                                    _ref_price = payload.get('close', executed_price) if payload else executed_price
+                                    _slippage_pct = abs(executed_price - _ref_price) / _ref_price * 100 if _ref_price else 0.0
+                                    _diag_msg = (f"🩻 [A.D.S DIAG] [{symbol}] {signal} 진입 진단 | "
+                                                 f"레이턴시: {_latency_ms:.0f}ms | "
+                                                 f"슬리피지: {_slippage_pct:.4f}% | "
+                                                 f"기준가: ${_ref_price:.4f} → 체결가: ${executed_price:.4f}")
+                                    bot_global_state["logs"].append(_diag_msg)
+                                    logger.info(_diag_msg)
 
                                     entry_emoji = "📈" if signal == "LONG" else "📉"
                                     entry_msg = f"{_paper_tag}{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"

@@ -1370,8 +1370,12 @@ async function updateLogs() {
                 || msg.includes('📈') || msg.includes('📉'))
                 && !msg.includes('타점 탐색 중'); // 반복성 탐색 로그는 SYSTEM 분류
 
+            const isDiagKeyword = msg.includes('🩻');
+
             let category = 'SYSTEM';
-            if (isAlertLevel) {
+            if (isDiagKeyword) {
+                category = 'DIAG';
+            } else if (isAlertLevel) {
                 category = 'ALERT';
             } else if (isTradeKeyword) {
                 category = 'TRADE';
