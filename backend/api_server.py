@@ -2799,6 +2799,385 @@ async def fetch_system_health():
         "strategy_engine_running": strategy_running
     }
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [Phase 27] 전체 서브시스템 자가 진단 (Full Diagnostic)
+# ─────────────────────────────────────────────────────────────────────────────
+@app_server.get("/api/v1/diagnostic")
+async def run_full_diagnostic():
+    """전체 서브시스템 자가 진단 — 10개 항목 자동 점검 (읽기 전용, 상태 변경 없음)"""
+    from datetime import datetime
+    results = []
+
+    # ── 1. OKX API 연결 ──
+    try:
+        if _engine and _engine.exchange:
+            bal_data = await asyncio.to_thread(_engine.exchange.fetch_balance)
+            usdt_total = float(bal_data.get('total', {}).get('USDT', 0))
+            results.append({
+                "id": "okx_connection", "name": "OKX API 연결",
+                "status": "PASS", "message": f"잔고 조회 성공: ${usdt_total:.2f}",
+                "details": {"usdt_total": usdt_total}
+            })
+        else:
+            results.append({
+                "id": "okx_connection", "name": "OKX API 연결",
+                "status": "FAIL", "message": "OKXEngine 미초기화",
+                "details": {}
+            })
+            usdt_total = 0
+    except Exception as e:
+        results.append({
+            "id": "okx_connection", "name": "OKX API 연결",
+            "status": "FAIL", "message": f"연결 실패: {str(e)[:80]}",
+            "details": {}
+        })
+        usdt_total = 0
+
+    # ── 2. 잔고 & 레버리지 → 매매 가능성 (심볼별) ──
+    try:
+        symbols_cfg = get_config('symbols') or ['BTC/USDT:USDT']
+        leverage_cfg = max(1, int(get_config('leverage') or 1))
+        trade_feasibility = []
+        all_feasible = True
+        for sym in symbols_cfg:
+            try:
+                mkt = _engine.exchange.market(sym) if _engine and _engine.exchange else {}
+                cs = float(mkt.get('contractSize', 0.01))
+                px = float(bot_global_state["symbols"].get(sym, {}).get("current_price", 0))
+                if px <= 0:
+                    px = await asyncio.to_thread(_engine.get_current_price, sym) if _engine else 0
+                margin_per = (cs * px) / leverage_cfg if leverage_cfg > 0 else float('inf')
+                ok = usdt_total > margin_per and margin_per > 0
+                if not ok:
+                    all_feasible = False
+                trade_feasibility.append({
+                    "symbol": sym, "contractSize": cs, "price": round(px, 2),
+                    "margin_per_contract": round(margin_per, 4), "feasible": ok
+                })
+            except Exception:
+                all_feasible = False
+                trade_feasibility.append({"symbol": sym, "feasible": False, "error": "시장 데이터 조회 실패"})
+        results.append({
+            "id": "trade_feasibility", "name": "매매 가능성 (잔고×레버리지)",
+            "status": "PASS" if all_feasible else "FAIL",
+            "message": f"전체 {len(symbols_cfg)}개 심볼 {'매매 가능' if all_feasible else '일부 증거금 부족'} (레버리지 {leverage_cfg}x)",
+            "details": {"leverage": leverage_cfg, "balance": round(usdt_total, 2), "symbols": trade_feasibility}
+        })
+    except Exception as e:
+        results.append({
+            "id": "trade_feasibility", "name": "매매 가능성 (잔고×레버리지)",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 3. Adaptive Shield 정합성 ──
+    try:
+        auto_preset_on = str(get_config('auto_preset_enabled') or 'false').lower() == 'true'
+        db_tier = str(get_config('_current_adaptive_tier') or '')
+        mem_tier = bot_global_state.get("adaptive_tier", "")
+        # 예상 티어 계산
+        expected_tier = ""
+        if auto_preset_on and usdt_total > 0:
+            for tn in ['CRITICAL', 'MICRO', 'STANDARD', 'GROWTH']:
+                if usdt_total <= BALANCE_TIERS[tn]['max_balance']:
+                    expected_tier = tn
+                    break
+        shield_ok = True
+        shield_msg = ""
+        if not auto_preset_on:
+            shield_msg = "Adaptive Shield OFF — 수동 모드"
+        elif expected_tier == db_tier == mem_tier:
+            shield_msg = f"정합 OK: {expected_tier} (잔고 ${usdt_total:.2f})"
+        else:
+            shield_ok = False
+            shield_msg = f"불일치 — 예상: {expected_tier}, DB: {db_tier}, 메모리: {mem_tier}"
+        results.append({
+            "id": "adaptive_shield", "name": "Adaptive Shield 정합성",
+            "status": "PASS" if shield_ok or not auto_preset_on else "WARN",
+            "message": shield_msg,
+            "details": {"enabled": auto_preset_on, "expected": expected_tier, "db_tier": db_tier, "mem_tier": mem_tier}
+        })
+    except Exception as e:
+        results.append({
+            "id": "adaptive_shield", "name": "Adaptive Shield 정합성",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 4. TP/SL 공식 검증 ──
+    try:
+        test_sym = symbols_cfg[0] if symbols_cfg else 'BTC/USDT:USDT'
+        test_price = float(bot_global_state["symbols"].get(test_sym, {}).get("current_price", 0))
+        if test_price <= 0 and _engine:
+            test_price = await asyncio.to_thread(_engine.get_current_price, test_sym) or 0
+        sl_rate = float(get_config('hard_stop_loss_rate') or 0.005)
+        fee_margin = float(get_config('fee_margin') or 0.0015)
+        # ATR 조회 시도
+        test_atr = test_price * 0.01  # 기본 fallback
+        try:
+            tf = str(get_config('timeframe') or '15m')
+            ohlcv = await asyncio.to_thread(_engine.exchange.fetch_ohlcv, test_sym, tf, None, 50)
+            if ohlcv and len(ohlcv) >= 14:
+                _df_diag = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                _tr = pd.concat([
+                    _df_diag['high'] - _df_diag['low'],
+                    (_df_diag['high'] - _df_diag['close'].shift()).abs(),
+                    (_df_diag['low'] - _df_diag['close'].shift()).abs()
+                ], axis=1).max(axis=1)
+                test_atr = float(_tr.rolling(14).mean().iloc[-1])
+                if pd.isna(test_atr):
+                    test_atr = test_price * 0.01
+        except Exception:
+            pass
+        # TP/SL 계산 (LONG 기준)
+        tp_offset = (test_price * fee_margin) + (test_atr * 0.5)
+        tp_long = round(test_price + tp_offset, 4)
+        sl_long = round(test_price * (1 - sl_rate), 4)
+        # 유효성 검증
+        import math
+        tp_valid = not math.isnan(tp_long) and not math.isinf(tp_long) and tp_long > test_price
+        sl_valid = not math.isnan(sl_long) and not math.isinf(sl_long) and sl_long < test_price
+        both_ok = tp_valid and sl_valid and test_price > 0
+        results.append({
+            "id": "tp_sl_formula", "name": "TP/SL 공식 검증",
+            "status": "PASS" if both_ok else "FAIL",
+            "message": f"LONG 기준 TP: ${tp_long:,.2f} / SL: ${sl_long:,.2f} (진입가 ${test_price:,.2f})" if test_price > 0 else "현재가 조회 불가",
+            "details": {"symbol": test_sym, "entry": test_price, "atr": round(test_atr, 4),
+                        "tp_long": tp_long, "sl_long": sl_long, "tp_valid": tp_valid, "sl_valid": sl_valid}
+        })
+    except Exception as e:
+        results.append({
+            "id": "tp_sl_formula", "name": "TP/SL 공식 검증",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 5. 포지션 사이징 시뮬레이션 ──
+    try:
+        risk_cfg = float(get_config('risk_per_trade') or 0.01)
+        sizing_results = []
+        all_sizing_ok = True
+        for sym in symbols_cfg:
+            try:
+                mkt = _engine.exchange.market(sym) if _engine and _engine.exchange else {}
+                cs = float(mkt.get('contractSize', 0.01))
+                px = float(bot_global_state["symbols"].get(sym, {}).get("current_price", 0))
+                if px <= 0 and _engine:
+                    px = await asyncio.to_thread(_engine.get_current_price, sym) or 0
+                sim_strat = TradingStrategy(initial_seed=usdt_total)
+                contracts = sim_strat.calculate_position_size_dynamic(usdt_total, px, leverage_cfg, cs, risk_cfg)
+                margin_needed = (cs * px * contracts) / leverage_cfg
+                ok = contracts >= 1 and margin_needed <= usdt_total * 0.95
+                if not ok:
+                    all_sizing_ok = False
+                sizing_results.append({
+                    "symbol": sym, "contracts": contracts, "contractSize": cs,
+                    "margin_needed": round(margin_needed, 4), "feasible": ok
+                })
+            except Exception:
+                all_sizing_ok = False
+                sizing_results.append({"symbol": sym, "contracts": 0, "feasible": False})
+        results.append({
+            "id": "position_sizing", "name": "포지션 사이징 시뮬레이션",
+            "status": "PASS" if all_sizing_ok else "FAIL",
+            "message": f"risk={risk_cfg}, leverage={leverage_cfg}x — {'전체 심볼 1계약 이상' if all_sizing_ok else '일부 0계약'}",
+            "details": {"risk_per_trade": risk_cfg, "symbols": sizing_results}
+        })
+    except Exception as e:
+        results.append({
+            "id": "position_sizing", "name": "포지션 사이징 시뮬레이션",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 6. 관문 필터 현재 상태 ──
+    try:
+        gate_sym = symbols_cfg[0] if symbols_cfg else 'BTC/USDT:USDT'
+        tf = str(get_config('timeframe') or '15m')
+        ohlcv_gate = await asyncio.to_thread(_engine.exchange.fetch_ohlcv, gate_sym, tf, None, 50) if _engine and _engine.exchange else []
+        if ohlcv_gate and len(ohlcv_gate) >= 20:
+            _df_gate = pd.DataFrame(ohlcv_gate, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            _diag_strat = TradingStrategy()
+            _df_gate = _diag_strat.calculate_indicators(_df_gate)
+            _latest = _df_gate.iloc[-1]
+            adx_val = float(_latest['adx']) if not pd.isna(_latest['adx']) else 0.0
+            chop_val = float(_latest['chop']) if not pd.isna(_latest['chop']) else 50.0
+            vol_val = float(_latest['volume'])
+            vol_sma = float(_latest['vol_sma_20']) if not pd.isna(_latest['vol_sma_20']) else 0
+            atr_val = float(_latest['atr']) if not pd.isna(_latest['atr']) else 0.0
+            # 현재 설정값 기준 통과 여부 판정
+            adx_th = float(get_config('adx_threshold') or 25.0)
+            adx_mx = float(get_config('adx_max') or 40.0)
+            chop_th = float(get_config('chop_threshold') or 61.8)
+            vol_mult = float(get_config('volume_surge_multiplier') or 1.5)
+            adx_pass = adx_th <= adx_val <= adx_mx
+            chop_pass = chop_val < chop_th
+            vol_pass = vol_val > (vol_sma * vol_mult) if vol_sma > 0 else True
+            gate_count = sum([adx_pass, chop_pass, vol_pass])
+            results.append({
+                "id": "gate_filters", "name": "관문 필터 현재 상태",
+                "status": "INFO",
+                "message": f"{gate_sym} ({tf}) — 통과 {gate_count}/3 관문",
+                "details": {
+                    "symbol": gate_sym, "timeframe": tf,
+                    "adx": {"value": round(adx_val, 1), "range": f"{adx_th}~{adx_mx}", "pass": adx_pass},
+                    "chop": {"value": round(chop_val, 1), "threshold": chop_th, "pass": chop_pass},
+                    "volume": {"current": round(vol_val, 1), "sma20": round(vol_sma, 1), "multiplier": vol_mult, "pass": vol_pass},
+                    "atr": round(atr_val, 4)
+                }
+            })
+        else:
+            results.append({
+                "id": "gate_filters", "name": "관문 필터 현재 상태",
+                "status": "WARN", "message": "OHLCV 데이터 부족 (최소 20봉 필요)",
+                "details": {}
+            })
+    except Exception as e:
+        results.append({
+            "id": "gate_filters", "name": "관문 필터 현재 상태",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 7. 쿨다운 & 킬스위치 상태 ──
+    try:
+        import time as _t
+        now_ts = _t.time()
+        cooldown_active = False
+        cooldown_msg = ""
+        kill_msg = ""
+        if _active_strategy:
+            cd_until = getattr(_active_strategy, 'loss_cooldown_until', 0)
+            if cd_until > now_ts:
+                cooldown_active = True
+                cooldown_msg = f"연패 쿨다운 활성 — {int(cd_until - now_ts)}초 남음 ({_active_strategy.consecutive_loss_count}연패)"
+            ks_active = getattr(_active_strategy, 'kill_switch_active', False)
+            ks_until = getattr(_active_strategy, 'kill_switch_until', 0)
+            if ks_active and ks_until > now_ts:
+                cooldown_active = True
+                kill_msg = f"킬스위치 발동 — {(ks_until - now_ts) / 3600:.1f}시간 남음"
+        status_cd = "WARN" if cooldown_active else "PASS"
+        msg_cd = " | ".join(filter(None, [cooldown_msg, kill_msg])) or "비활성 (정상)"
+        results.append({
+            "id": "cooldown_killswitch", "name": "쿨다운 & 킬스위치",
+            "status": status_cd, "message": msg_cd,
+            "details": {
+                "cooldown_active": bool(cooldown_msg),
+                "kill_switch_active": bool(kill_msg),
+                "consecutive_losses": getattr(_active_strategy, 'consecutive_loss_count', 0) if _active_strategy else 0
+            }
+        })
+    except Exception as e:
+        results.append({
+            "id": "cooldown_killswitch", "name": "쿨다운 & 킬스위치",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 8. 텔레그램 연결 ──
+    try:
+        from notifier import _telegram_app, TELEGRAM_BOT_TOKEN
+        tg_ok = False
+        tg_name = ""
+        if _telegram_app and _telegram_app.bot:
+            me = await _telegram_app.bot.get_me()
+            tg_ok = True
+            tg_name = f"@{me.username}" if me else ""
+        elif TELEGRAM_BOT_TOKEN:
+            import httpx
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(url)
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    tg_ok = True
+                    tg_name = "@" + resp.json()["result"].get("username", "")
+        results.append({
+            "id": "telegram", "name": "텔레그램 연결",
+            "status": "PASS" if tg_ok else "FAIL",
+            "message": f"봇 연결 성공: {tg_name}" if tg_ok else "텔레그램 미연결",
+            "details": {"bot_name": tg_name}
+        })
+    except Exception as e:
+        results.append({
+            "id": "telegram", "name": "텔레그램 연결",
+            "status": "FAIL", "message": f"연결 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 9. 설정 유효성 검사 ──
+    try:
+        validations = []
+        cfg_checks = [
+            ('risk_per_trade', 0.001, 0.1, "리스크 비율"),
+            ('leverage', 1, 100, "레버리지"),
+            ('hard_stop_loss_rate', 0.001, 0.1, "하드 손절율"),
+            ('trailing_stop_activation', 0.001, 0.1, "트레일링 활성화"),
+            ('trailing_stop_rate', 0.0005, 0.05, "트레일링 비율"),
+            ('min_take_profit_rate', 0.001, 0.1, "최소 익절율"),
+            ('daily_max_loss_rate', 0.01, 0.5, "일일 최대 손실율"),
+            ('fee_margin', 0.0001, 0.01, "수수료 마진"),
+        ]
+        all_cfg_ok = True
+        for key, lo, hi, label in cfg_checks:
+            val = get_config(key)
+            try:
+                fval = float(val)
+                ok = lo <= fval <= hi
+            except (TypeError, ValueError):
+                fval = None
+                ok = False
+            if not ok:
+                all_cfg_ok = False
+            validations.append({"key": key, "label": label, "value": fval, "range": f"{lo}~{hi}", "valid": ok})
+        results.append({
+            "id": "config_validation", "name": "설정 유효성 검사",
+            "status": "PASS" if all_cfg_ok else "FAIL",
+            "message": f"전체 {len(cfg_checks)}개 항목 {'정상' if all_cfg_ok else '일부 범위 이탈'}",
+            "details": {"checks": validations}
+        })
+    except Exception as e:
+        results.append({
+            "id": "config_validation", "name": "설정 유효성 검사",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 10. 고아 주문 감지 ──
+    try:
+        orphans = []
+        for sym, sym_st in bot_global_state.get("symbols", {}).items():
+            pos = sym_st.get("position", "NONE")
+            tp_id = sym_st.get("active_tp_order_id")
+            sl_id = sym_st.get("active_sl_order_id")
+            if pos == "NONE" and (tp_id or sl_id):
+                orphans.append({"symbol": sym, "tp_order_id": tp_id, "sl_order_id": sl_id})
+        results.append({
+            "id": "orphan_orders", "name": "고아 주문 감지",
+            "status": "PASS" if not orphans else "WARN",
+            "message": f"고아 주문 없음" if not orphans else f"고아 주문 {len(orphans)}건 감지",
+            "details": {"orphans": orphans}
+        })
+    except Exception as e:
+        results.append({
+            "id": "orphan_orders", "name": "고아 주문 감지",
+            "status": "FAIL", "message": f"점검 실패: {str(e)[:80]}",
+            "details": {}
+        })
+
+    # ── 요약 ──
+    pass_count = sum(1 for r in results if r["status"] == "PASS")
+    fail_count = sum(1 for r in results if r["status"] == "FAIL")
+    warn_count = sum(1 for r in results if r["status"] == "WARN")
+    info_count = sum(1 for r in results if r["status"] == "INFO")
+
+    return {
+        "diagnostic": results,
+        "summary": {"pass": pass_count, "fail": fail_count, "warn": warn_count, "info": info_count, "total": len(results)},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 프론트엔드 호스팅 (백엔드 IP로 직접 접속 가능하게 설정)
 # 모든 API 경로 정의 이후에 위치해야 API 요청을 가로채지 않음

@@ -981,6 +981,94 @@ async function toggleAutoPreset(enabled) {
     }
 }
 
+// [Phase 27] 전체 서브시스템 자가 진단 (Full Diagnostic)
+async function runDiagnostic() {
+    const btn = document.getElementById('diagnostic-btn');
+    const modal = document.getElementById('diagnostic-modal');
+    const container = document.getElementById('diag-results-container');
+    const summary = document.getElementById('diag-summary');
+    const tsEl = document.getElementById('diag-timestamp');
+
+    // 버튼 로딩 상태
+    if (btn) { btn.textContent = '⏳ 진단 중...'; btn.disabled = true; }
+
+    // 모달 열기
+    if (modal) modal.classList.remove('hidden');
+    if (container) container.innerHTML = '<div class="text-center text-gray-500 font-mono text-xs py-8 animate-pulse">🔍 10개 서브시스템 점검 중...</div>';
+
+    try {
+        const resp = await fetch(`${API_URL}/diagnostic`);
+        const data = await resp.json();
+        const items = data.diagnostic || [];
+
+        // 아이콘 매핑
+        const iconMap = { PASS: '🟢', FAIL: '🔴', WARN: '🟡', INFO: '🔵' };
+        const bgMap = {
+            PASS: 'border-emerald-500/30 bg-emerald-500/5',
+            FAIL: 'border-red-500/30 bg-red-500/5',
+            WARN: 'border-yellow-500/30 bg-yellow-500/5',
+            INFO: 'border-blue-500/30 bg-blue-500/5'
+        };
+
+        // 결과 렌더링
+        let html = '';
+        items.forEach((item, idx) => {
+            const icon = iconMap[item.status] || '⚪';
+            const bg = bgMap[item.status] || 'border-gray-600/30 bg-gray-800/30';
+            const hasDetails = item.details && Object.keys(item.details).length > 0;
+            html += `<div class="border ${bg} rounded-lg p-3 transition-all">`;
+            html += `<div class="flex items-start gap-2 ${hasDetails ? 'cursor-pointer' : ''}" ${hasDetails ? `onclick="toggleDiagDetail(${idx})"` : ''}>`;
+            html += `<span class="text-sm flex-shrink-0 mt-0.5">${icon}</span>`;
+            html += `<div class="flex-1 min-w-0">`;
+            html += `<div class="flex items-center gap-2">`;
+            html += `<span class="text-[11px] font-mono font-bold text-text-main">${item.name}</span>`;
+            html += `<span class="text-[9px] font-mono px-1.5 py-0.5 rounded ${item.status === 'PASS' ? 'bg-emerald-500/20 text-emerald-400' : item.status === 'FAIL' ? 'bg-red-500/20 text-red-400' : item.status === 'WARN' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'}">${item.status}</span>`;
+            if (hasDetails) html += `<span class="text-[9px] text-gray-600 font-mono" id="diag-arrow-${idx}">▸ 상세</span>`;
+            html += `</div>`;
+            html += `<p class="text-[10px] font-mono text-gray-400 mt-1 break-all">${item.message}</p>`;
+            html += `</div></div>`;
+            // 접히는 상세 영역
+            if (hasDetails) {
+                html += `<div id="diag-detail-${idx}" class="hidden mt-2 ml-6 p-2 rounded bg-black/30 border border-gray-700/40">`;
+                html += `<pre class="text-[9px] font-mono text-gray-500 whitespace-pre-wrap break-all">${JSON.stringify(item.details, null, 2)}</pre>`;
+                html += `</div>`;
+            }
+            html += `</div>`;
+        });
+        if (container) container.innerHTML = html;
+
+        // 요약 표시
+        const s = data.summary || {};
+        if (summary) summary.innerHTML = `<span class="text-emerald-400">${s.pass || 0} PASS</span> · <span class="text-red-400">${s.fail || 0} FAIL</span> · <span class="text-yellow-400">${s.warn || 0} WARN</span> · <span class="text-blue-400">${s.info || 0} INFO</span>`;
+        if (tsEl) tsEl.textContent = data.timestamp ? `진단 시각: ${new Date(data.timestamp).toLocaleString('ko-KR')}` : '';
+
+        // 토스트
+        const totalFail = s.fail || 0;
+        if (totalFail === 0) {
+            showToast('시스템 진단', `전체 ${s.total || items.length}개 항목 점검 완료 — 이상 없음`, 'SUCCESS');
+        } else {
+            showToast('시스템 진단', `${totalFail}개 항목에서 문제 발견`, 'ERROR');
+        }
+    } catch (e) {
+        console.error('[ANTIGRAVITY] diagnostic 실패:', e);
+        if (container) container.innerHTML = `<div class="text-center text-red-400 font-mono text-xs py-8">진단 실패: ${e.message}</div>`;
+        showToast('시스템 진단', '진단 요청 실패', 'ERROR');
+    } finally {
+        if (btn) { btn.textContent = '🔍 시스템 진단'; btn.disabled = false; }
+    }
+}
+
+// [Phase 27] 진단 상세 접기/펼치기
+function toggleDiagDetail(idx) {
+    const el = document.getElementById(`diag-detail-${idx}`);
+    const arrow = document.getElementById(`diag-arrow-${idx}`);
+    if (el) {
+        const isHidden = el.classList.contains('hidden');
+        el.classList.toggle('hidden');
+        if (arrow) arrow.textContent = isHidden ? '▾ 접기' : '▸ 상세';
+    }
+}
+
 // [Phase 24] 매복 주문 수동 철수 — 사령관 즉시 개입
 async function abortPendingOrder() {
     if (!confirm("대기 중인 매복 주문을 즉시 취소하시겠습니까?")) return;
