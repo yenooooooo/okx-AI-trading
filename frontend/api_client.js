@@ -1031,23 +1031,7 @@ function flashBtn(btn, success) {
     }, 2000);
 }
 
-async function updateConfigValue(key) {
-    const btn = document.querySelector(`[onclick="updateConfigValue('${key}')"]`);
-    try {
-        let value;
-        if (key === 'risk_per_trade') {
-            value = parseFloat(document.getElementById('config-risk-rate').value) / 100;
-        } else if (key === 'leverage') {
-            value = parseInt(document.getElementById('config-leverage').value);
-        }
-        const response = await fetch(`${API_URL}/config?key=${encodeURIComponent(key)}&value=${encodeURIComponent(value)}`, { method: 'POST' });
-        await response.json();
-        flashBtn(btn, true);
-    } catch (error) {
-        console.error(`[ANTIGRAVITY 디버그] updateConfigValue('${key}') 실패 (엔드포인트: /api/v1/config POST):`, error);
-        flashBtn(btn, false);
-    }
-}
+
 
 async function setTargetSymbol(newSymbol) {
     // 사전 차단: 포지션 보유 중 타겟 변경 강력 차단
