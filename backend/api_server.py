@@ -708,6 +708,11 @@ async def async_trading_loop():
                             "entry_timestamp": 0.0,  # [Race Condition Fix] 진입 시각 기록 — Grace Period 계산용
                             "last_price_update_time": _time.time(),  # [Phase 20.2] 데이터 신선도 추적용 타임스탬프
                             "last_exit_time": 0,
+                            # [Phase 21.4] A.D.S 전략 영양실조 감시용 상태
+                            "starvation_start_time": _time.time(),
+                            "starvation_reasons": {},
+                            "last_starvation_report": _time.time(),
+                            "last_analyzed_candle_ts": 0,
                         }
 
                     # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
@@ -878,6 +883,60 @@ async def async_trading_loop():
                     if len(_ml) > 30:
                         _ml = _ml[-30:]
                     ai_brain_state["symbols"][symbol]["monologue"] = _ml
+
+                    # [Phase 21.4] A.D.S 자가 면역 체계: 전략 영양실조(Starvation) 감시
+                    if bot_global_state["symbols"][symbol]["position"] == "NONE":
+                        _sym_st = bot_global_state["symbols"][symbol]
+                        _cur_ts = int(df['timestamp'].iloc[-1])
+
+                        # 1. 캔들(5분)당 1회만 거절 사유 수집 (동일 캔들 중복 카운트 방지)
+                        if _sym_st.get("last_analyzed_candle_ts") != _cur_ts:
+                            _sym_st["last_analyzed_candle_ts"] = _cur_ts
+                            if signal == "HOLD" and "차단" in analysis_msg:
+                                # "이격도 초과 차단 — EMA20..." -> "이격도 초과 차단" 추출
+                                _reason_key = analysis_msg.split("차단")[0].strip() + " 차단"
+                                _sym_st["starvation_reasons"] = _sym_st.get("starvation_reasons", {})
+                                _sym_st["starvation_reasons"][_reason_key] = _sym_st["starvation_reasons"].get(_reason_key, 0) + 1
+
+                        # 2. 12시간 주기 진단 리포트 발송
+                        _now_s = _time.time()
+                        if _now_s - _sym_st.get("last_starvation_report", _now_s) >= 43200:  # 12시간 = 43200초
+                            _sym_st["last_starvation_report"] = _now_s
+
+                            # 마지막 청산(또는 봇 시작)으로부터 경과된 시간 계산
+                            _base_time = _sym_st["last_exit_time"] if _sym_st.get("last_exit_time", 0) > 0 else _sym_st.get("starvation_start_time", _now_s)
+                            _hours_starved = (_now_s - _base_time) / 3600
+
+                            if _hours_starved >= 11.5:  # 포지션 없이 대략 12시간 경과 시
+                                _reasons_dict = _sym_st.get("starvation_reasons", {})
+                                if _reasons_dict:
+                                    _top_reason = max(_reasons_dict, key=_reasons_dict.get)
+                                    _total_blocks = sum(_reasons_dict.values())
+                                    _starv_msg = (
+                                        f"🩻 [A.D.S 진단] [{symbol}] ⚠️ 전략 영양실조 상태 감지 | "
+                                        f"최근 {_hours_starved:.1f}시간 동안 진입 0건 | "
+                                        f"총 {_total_blocks}번의 유효 신호가 방어막에 막힘 (주요 원인: '{_top_reason}') | "
+                                        f"💡 [AI 권장]: 튜닝 패널에서 '{_top_reason}' 관련 임계값을 완화해 보세요."
+                                    )
+                                    bot_global_state["logs"].append(_starv_msg)
+                                    logger.warning(_starv_msg)
+
+                                    _tg_starv = (
+                                        f"🩻 <b>A.D.S 진단 보고서</b>\n"
+                                        f"{_TG_LINE}\n"
+                                        f"⚠️ <b>전략 영양실조 감지</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+                                        f"{_TG_LINE}\n"
+                                        f"경과 시간 │  <code>{_hours_starved:.1f} 시간째 관망 중</code>\n"
+                                        f"놓친 타점 │  <code>{_total_blocks} 회</code>\n"
+                                        f"주요 원인 │  <b>{_top_reason}</b>\n"
+                                        f"{_TG_LINE}\n"
+                                        f"💡 <b>AI 권장 조치</b>\n"
+                                        f"대시보드 튜닝 패널에서 해당 조건의 임계값을 약간 완화하여 진입 확률을 높이십시오."
+                                    )
+                                    send_telegram_sync(_tg_starv)
+
+                                # 리포트 발송 후 통계 리셋 (다음 12시간을 위해)
+                                _sym_st["starvation_reasons"] = {}
 
                     # 포지션 상태 체크 및 리스크 관리
                     if bot_global_state["symbols"][symbol]["position"] != "NONE":
@@ -1211,6 +1270,43 @@ async def async_trading_loop():
                                         if _is_bypass_active('stress_bypass_cooldown_loss'):
                                             strategy_instance.loss_cooldown_until = 0
                                             strategy_instance.consecutive_loss_count = 0
+
+                                        # [Phase 21.3] A.D.S 자가 면역 체계: 손절 자동 부검 리포트 (Post-Mortem)
+                                        if is_loss:
+                                            _reasons = []
+                                            _row_pm = df.iloc[-1]
+                                            _cur_macd = float(_row_pm['macd']) if not pd.isna(_row_pm['macd']) else 0.0
+                                            _cur_sig = float(_row_pm['macd_signal']) if 'macd_signal' in _row_pm and not pd.isna(_row_pm['macd_signal']) else 0.0
+                                            _cur_chop = float(_row_pm['chop']) if 'chop' in _row_pm and not pd.isna(_row_pm['chop']) else 50.0
+                                            _cur_vol = float(_row_pm['volume']) if not pd.isna(_row_pm['volume']) else 0.0
+                                            _cur_vsma = float(_row_pm['vol_sma_20']) if 'vol_sma_20' in _row_pm and not pd.isna(_row_pm['vol_sma_20']) else 1.0
+
+                                            # 1. 횡보장 판단
+                                            if _cur_chop > 60:
+                                                _reasons.append(f"톱니바퀴 장세 돌입(CHOP {_cur_chop:.1f})")
+                                            # 2. 세력 이탈 판단
+                                            if _cur_vol < _cur_vsma:
+                                                _reasons.append("매수/매도세 실종(거래량 급감)")
+                                            # 3. 방향성 역전 및 거시 추세 이탈 판단
+                                            if position_side == "LONG":
+                                                if _cur_macd < _cur_sig:
+                                                    _reasons.append("MACD 데드크로스(모멘텀 역전)")
+                                                if macro_ema_200 is not None and current_price < macro_ema_200:
+                                                    _reasons.append("1h EMA200 하방 돌파 당함")
+                                            else:
+                                                if _cur_macd > _cur_sig:
+                                                    _reasons.append("MACD 골든크로스(모멘텀 역전)")
+                                                if macro_ema_200 is not None and current_price > macro_ema_200:
+                                                    _reasons.append("1h EMA200 상방 돌파 당함")
+
+                                            _reason_txt = " · ".join(_reasons) if _reasons else "복합적 시장 변동성(스파이크/휩쏘)"
+                                            _pm_msg = (
+                                                f"🩻 [A.D.S 부검] [{symbol}] {position_side} 손절 원인 분석 완료 | "
+                                                f"사망 원인: {_reason_txt} | "
+                                                f"💡 [AI 권장]: 튜닝 패널에서 보수적 프리셋(스나이퍼/아이언돔) 전환 검토"
+                                            )
+                                            bot_global_state["logs"].append(_pm_msg)
+                                            logger.info(_pm_msg)
 
                                         # [v2.2] 일일 누적 PnL 반영 + 킬스위치 체크 (Paper는 제외)
                                         if not _is_paper:
