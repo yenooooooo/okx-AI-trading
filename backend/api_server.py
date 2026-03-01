@@ -3048,28 +3048,35 @@ async def run_full_diagnostic():
         symbols_cfg = get_config('symbols') or ['BTC/USDT:USDT']
         # 매매 루프와 동일한 레버리지 결정 로직 (manual_override → manual_leverage, 아닐 시 leverage)
         _diag_manual = str(get_config('manual_override_enabled')).lower() == 'true'
-        leverage_cfg = max(1, int(get_config('manual_leverage' if _diag_manual else 'leverage') or 1))
+        _leverage_key = 'manual_leverage' if _diag_manual else 'leverage'
+        # GLOBAL 기본값 (심볼별 override가 없을 때 fallback)
+        leverage_cfg_global = max(1, int(get_config(_leverage_key) or 1))
         _diag_shadow = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
         trade_feasibility = []
         all_feasible = True
         for sym in symbols_cfg:
             try:
+                # [수정] 매매 루프와 동일하게 심볼별 leverage 우선, 없으면 GLOBAL fallback
+                sym_leverage = max(1, int(get_config(_leverage_key, sym) or leverage_cfg_global))
                 mkt = _engine.exchange.market(sym) if _engine and _engine.exchange else {}
                 cs = float(mkt.get('contractSize', 0.01))
                 px = float(bot_global_state["symbols"].get(sym, {}).get("current_price", 0))
                 if px <= 0:
                     px = await asyncio.to_thread(_engine.get_current_price, sym) if _engine else 0
-                margin_per = (cs * px) / leverage_cfg if leverage_cfg > 0 else float('inf')
+                margin_per = (cs * px) / sym_leverage if sym_leverage > 0 else float('inf')
                 ok = usdt_total > margin_per and margin_per > 0
                 if not ok:
                     all_feasible = False
                 trade_feasibility.append({
                     "symbol": sym, "contractSize": cs, "price": round(px, 2),
-                    "margin_per_contract": round(margin_per, 4), "feasible": ok
+                    "margin_per_contract": round(margin_per, 4), "feasible": ok,
+                    "leverage": sym_leverage
                 })
             except Exception:
                 all_feasible = False
                 trade_feasibility.append({"symbol": sym, "feasible": False, "error": "시장 데이터 조회 실패"})
+        # 대표 레버리지 (메시지용): 첫 심볼 기준 또는 GLOBAL
+        leverage_cfg = trade_feasibility[0].get('leverage', leverage_cfg_global) if trade_feasibility else leverage_cfg_global
         # 섀도우 모드일 때: 실제 증거금 불필요(Paper) → WARN으로 완화
         if all_feasible:
             _feas_status = "PASS"
@@ -3181,6 +3188,8 @@ async def run_full_diagnostic():
         _sizing_mode = "수동 USDT" if _diag_manual else "정률법"
         for sym in symbols_cfg:
             try:
+                # [수정] 매매 루프와 동일하게 심볼별 leverage 우선, 없으면 GLOBAL fallback
+                sym_leverage = max(1, int(get_config(_leverage_key, sym) or leverage_cfg_global))
                 mkt = _engine.exchange.market(sym) if _engine and _engine.exchange else {}
                 cs = float(mkt.get('contractSize', 0.01))
                 px = float(bot_global_state["symbols"].get(sym, {}).get("current_price", 0))
@@ -3189,18 +3198,19 @@ async def run_full_diagnostic():
                 # 매매 루프와 동일한 사이징 로직 분기
                 if _diag_manual:
                     seed_usdt = max(1.0, float(get_config('manual_amount') or 10))
-                    notional = seed_usdt * leverage_cfg
+                    notional = seed_usdt * sym_leverage
                     contracts = max(1, round(notional / (px * cs))) if px > 0 else 0
                 else:
                     sim_strat = TradingStrategy(initial_seed=usdt_total)
-                    contracts = sim_strat.calculate_position_size_dynamic(usdt_total, px, leverage_cfg, cs, risk_cfg)
-                margin_needed = (cs * px * contracts) / leverage_cfg if leverage_cfg > 0 else float('inf')
+                    contracts = sim_strat.calculate_position_size_dynamic(usdt_total, px, sym_leverage, cs, risk_cfg)
+                margin_needed = (cs * px * contracts) / sym_leverage if sym_leverage > 0 else float('inf')
                 ok = contracts >= 1 and margin_needed <= usdt_total * 0.95
                 if not ok:
                     all_sizing_ok = False
                 sizing_results.append({
                     "symbol": sym, "contracts": contracts, "contractSize": cs,
-                    "margin_needed": round(margin_needed, 4), "feasible": ok
+                    "margin_needed": round(margin_needed, 4), "feasible": ok,
+                    "leverage": sym_leverage
                 })
             except Exception:
                 all_sizing_ok = False
