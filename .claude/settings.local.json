@@ -9,7 +9,13 @@
       "Bash(grep:*)",
       "Bash(python:*)",
       "Bash(ls:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(pm2 logs:*)",
+      "Bash(where pm2:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(curl:*)",
+      "Bash(tasklist:*)"
     ]
   }
 }
