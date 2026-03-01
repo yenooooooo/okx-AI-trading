@@ -1240,7 +1240,7 @@ async def async_trading_loop():
                                     entry_msg = f"{_paper_tag}{entry_emoji} [{symbol}] {signal} 시장가 진입 성공! | 가격: ${executed_price:.2f} | {trade_amount}계약 | 레버리지 {trade_leverage}x"
                                     bot_global_state["logs"].append(entry_msg)
                                     logger.info(entry_msg)
-                                    send_telegram_sync(_tg_entry(symbol, signal, executed_price, trade_amount, trade_leverage, payload=payload))
+                                    send_telegram_sync(_tg_entry(symbol, signal, executed_price, trade_amount, trade_leverage, payload=payload, is_test=_is_shadow_entry))
 
                             except Exception as e:
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
