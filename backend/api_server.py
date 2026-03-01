@@ -310,6 +310,7 @@ ai_brain_state = {
 trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
 _broadcast_task = None  # /ws/dashboard 브로드캐스트 태스크 (클라이언트 연결 시 on-demand 시작)
+_private_ws_task = None  # [Phase 33] Private WS 루프 태스크 추적 (헬스체크용)
 _engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
 _active_strategy: TradingStrategy = None  # 활성 전략 인스턴스 레퍼런스 (wipe_db 인메모리 리셋용)
 
@@ -406,7 +407,7 @@ async def private_ws_loop():
 @app_server.on_event("startup")
 async def startup_event():
     """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
-    global _engine
+    global _engine, _private_ws_task
     init_db()
     bot_global_state["logs"].append("[봇] 🔴 실전망(LIVE) 서버 시스템 가동 시작 - 실전 API 연동 완료")
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
@@ -426,7 +427,7 @@ async def startup_event():
                 send_telegram_sync(_restart_warn)
         except Exception as _pos_err:
             logger.warning(f"[Phase 32] 시작 시 포지션 감지 실패: {_pos_err}")
-        asyncio.create_task(private_ws_loop())  # OKX 프라이빗 WS 시작
+        _private_ws_task = asyncio.create_task(private_ws_loop())  # OKX 프라이빗 WS 시작
         logger.info("Private WebSocket 태스크 시작")
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
@@ -3408,6 +3409,222 @@ async def run_full_diagnostic():
     return {
         "diagnostic": results,
         "summary": {"pass": pass_count, "fail": fail_count, "warn": warn_count, "info": info_count, "total": len(results)},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [Phase 33] 연결 상태 종합 점검 (Health Check Dashboard)
+# ─────────────────────────────────────────────────────────────────────────────
+@app_server.get("/api/v1/health_check")
+async def run_health_check():
+    """[Phase 33] 프론트-백엔드-거래소 연결 상태 종합 점검 (읽기 전용, 사이드이펙트 없음)"""
+    checks = []
+
+    # ── Check 1: OKX REST API ──
+    _t0 = _time.time()
+    try:
+        if _engine and _engine.exchange:
+            await asyncio.to_thread(_engine.exchange.fetch_balance)
+            _lat = round((_time.time() - _t0) * 1000, 1)
+            checks.append({
+                "id": "okx_rest", "name": "OKX REST API",
+                "status": "OK", "latency_ms": _lat,
+                "details": f"fetch_balance 성공 ({_lat}ms)"
+            })
+        else:
+            checks.append({
+                "id": "okx_rest", "name": "OKX REST API",
+                "status": "FAIL", "latency_ms": 0,
+                "details": "OKXEngine 미초기화"
+            })
+    except Exception as _e:
+        _lat = round((_time.time() - _t0) * 1000, 1)
+        checks.append({
+            "id": "okx_rest", "name": "OKX REST API",
+            "status": "FAIL", "latency_ms": _lat,
+            "details": f"연결 실패: {str(_e)[:100]}"
+        })
+
+    # ── Check 2: OKX Private WebSocket ──
+    _ws_alive = bool(_private_ws_task and not _private_ws_task.done())
+    checks.append({
+        "id": "okx_private_ws", "name": "OKX Private WebSocket",
+        "status": "OK" if _ws_alive else "WARN",
+        "latency_ms": 0,
+        "details": "positions 채널 수신 중" if _ws_alive else "Private WS 비활성 또는 재연결 대기"
+    })
+
+    # ── Check 3: Telegram Bot ──
+    from notifier import _telegram_app, TELEGRAM_BOT_TOKEN
+    _t0 = _time.time()
+    try:
+        _tg_ok = False
+        _tg_name = ""
+        if _telegram_app and _telegram_app.bot:
+            _me = await _telegram_app.bot.get_me()
+            _tg_ok = True
+            _tg_name = f"@{_me.username}" if _me else ""
+        elif TELEGRAM_BOT_TOKEN:
+            import httpx
+            _url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe"
+            async with httpx.AsyncClient(timeout=5.0) as _client:
+                _resp = await _client.get(_url)
+                if _resp.status_code == 200 and _resp.json().get("ok"):
+                    _tg_ok = True
+                    _tg_name = "@" + _resp.json()["result"].get("username", "")
+        _lat = round((_time.time() - _t0) * 1000, 1)
+        checks.append({
+            "id": "telegram", "name": "Telegram Bot",
+            "status": "OK" if _tg_ok else "FAIL",
+            "latency_ms": _lat,
+            "details": f"{_tg_name} 응답 ({_lat}ms)" if _tg_ok else "텔레그램 미연결"
+        })
+    except Exception as _e:
+        _lat = round((_time.time() - _t0) * 1000, 1)
+        checks.append({
+            "id": "telegram", "name": "Telegram Bot",
+            "status": "FAIL", "latency_ms": _lat,
+            "details": f"연결 실패: {str(_e)[:100]}"
+        })
+
+    # ── Check 4: SQLite Database ──
+    _t0 = _time.time()
+    try:
+        from database import get_connection
+        _conn = get_connection()
+        _cur = _conn.cursor()
+        _cur.execute("SELECT COUNT(*) FROM bot_config")
+        _count = _cur.fetchone()[0]
+        _conn.close()
+        _lat = round((_time.time() - _t0) * 1000, 1)
+        checks.append({
+            "id": "database", "name": "SQLite Database",
+            "status": "OK", "latency_ms": _lat,
+            "details": f"bot_config {_count}개 키 ({_lat}ms)"
+        })
+    except Exception as _e:
+        _lat = round((_time.time() - _t0) * 1000, 1)
+        checks.append({
+            "id": "database", "name": "SQLite Database",
+            "status": "FAIL", "latency_ms": _lat,
+            "details": f"DB 접근 실패: {str(_e)[:100]}"
+        })
+
+    # ── Check 5: Config Integrity ──
+    try:
+        _all_config = get_config()
+        _expected_keys = {
+            'symbols', 'risk_per_trade', 'hard_stop_loss_rate',
+            'trailing_stop_activation', 'trailing_stop_rate', 'daily_max_loss_rate',
+            'timeframe', 'leverage', 'telegram_enabled',
+            'manual_override_enabled', 'manual_amount', 'manual_leverage',
+            'ENTRY_ORDER_TYPE', 'adx_threshold', 'adx_max', 'chop_threshold',
+            'volume_surge_multiplier', 'fee_margin',
+            'cooldown_losses_trigger', 'cooldown_duration_sec',
+            'auto_scan_enabled', 'direction_mode', 'exit_only_mode',
+            'shadow_hunting_enabled', 'SHADOW_MODE_ENABLED',
+            'min_take_profit_rate', 'auto_preset_enabled',
+            '_current_adaptive_tier',
+            'stress_bypass_kill_switch', 'stress_bypass_cooldown_loss',
+            'stress_bypass_daily_loss', 'stress_bypass_reentry_cd',
+            'stress_bypass_stale_price',
+        }
+        _actual_keys = set(_all_config.keys())
+        _missing = _expected_keys - _actual_keys
+        _extra = _actual_keys - _expected_keys
+        if not _missing and not _extra:
+            _cfg_status = "OK"
+            _cfg_detail = f"전체 {len(_expected_keys)}개 키 정합"
+        elif _missing:
+            _cfg_status = "WARN"
+            _cfg_detail = f"누락 키 {len(_missing)}개: {', '.join(sorted(_missing)[:5])}"
+        else:
+            _cfg_status = "OK"
+            _cfg_detail = f"정합 OK (추가 키 {len(_extra)}개 존재)"
+        checks.append({
+            "id": "config_integrity", "name": "설정 키 정합성",
+            "status": _cfg_status, "latency_ms": 0,
+            "details": _cfg_detail
+        })
+    except Exception as _e:
+        checks.append({
+            "id": "config_integrity", "name": "설정 키 정합성",
+            "status": "FAIL", "latency_ms": 0,
+            "details": f"점검 실패: {str(_e)[:100]}"
+        })
+
+    # ── Check 6: Memory State ──
+    try:
+        _symbols_state = bot_global_state.get("symbols", {})
+        _sym_count = len(_symbols_state)
+        _zombies = []
+        for _sym, _st in _symbols_state.items():
+            _pos = _st.get("position", "NONE")
+            _ep = _st.get("entry_price", 0)
+            if _pos not in ("NONE",) and _ep == 0:
+                _zombies.append(_sym)
+        if _sym_count == 0:
+            _mem_status = "WARN"
+            _mem_detail = "심볼 미초기화 (엔진 미가동 상태)"
+        elif _zombies:
+            _mem_status = "WARN"
+            _mem_detail = f"좀비 포지션 {len(_zombies)}건: {', '.join(_zombies)}"
+        else:
+            _active_count = sum(1 for _s in _symbols_state.values() if _s.get('position', 'NONE') != 'NONE')
+            _mem_status = "OK"
+            _mem_detail = f"{_sym_count}개 심볼 정상 (활성 포지션: {_active_count}개)"
+        checks.append({
+            "id": "memory_state", "name": "메모리 상태 (Global State)",
+            "status": _mem_status, "latency_ms": 0,
+            "details": _mem_detail
+        })
+    except Exception as _e:
+        checks.append({
+            "id": "memory_state", "name": "메모리 상태 (Global State)",
+            "status": "FAIL", "latency_ms": 0,
+            "details": f"점검 실패: {str(_e)[:100]}"
+        })
+
+    # ── Endpoint Registry (프론트엔드 POST 검증용) ──
+    _endpoints = [
+        {"method": "GET", "path": "/api/v1/status", "name": "봇 상태 조회"},
+        {"method": "GET", "path": "/api/v1/brain", "name": "AI 뇌 상태"},
+        {"method": "GET", "path": "/api/v1/config", "name": "설정 조회"},
+        {"method": "GET", "path": "/api/v1/trades", "name": "거래 내역"},
+        {"method": "GET", "path": "/api/v1/stats", "name": "성과 통계"},
+        {"method": "GET", "path": "/api/v1/logs", "name": "시스템 로그"},
+        {"method": "GET", "path": "/api/v1/symbols", "name": "심볼 목록"},
+        {"method": "GET", "path": "/api/v1/system_health", "name": "시스템 헬스"},
+        {"method": "GET", "path": "/api/v1/diagnostic", "name": "전체 진단"},
+        {"method": "GET", "path": "/api/v1/ohlcv", "name": "차트 데이터"},
+        {"method": "GET", "path": "/api/v1/stress_bypass", "name": "바이패스 현황"},
+        {"method": "GET", "path": "/api/v1/history_stats", "name": "기간별 통계"},
+        {"method": "GET", "path": "/api/v1/export_csv", "name": "CSV 내보내기"},
+        {"method": "GET", "path": "/api/v1/health_check", "name": "연결 점검"},
+        {"method": "POST", "path": "/api/v1/toggle", "name": "봇 시작/중지"},
+        {"method": "POST", "path": "/api/v1/config", "name": "설정 변경"},
+        {"method": "POST", "path": "/api/v1/test_order", "name": "테스트 주문"},
+        {"method": "POST", "path": "/api/v1/close_paper", "name": "Paper 청산"},
+        {"method": "POST", "path": "/api/v1/cancel_pending", "name": "매복 취소"},
+        {"method": "POST", "path": "/api/v1/inject_stress", "name": "스트레스 주입"},
+        {"method": "POST", "path": "/api/v1/reset_stress", "name": "스트레스 해제"},
+        {"method": "POST", "path": "/api/v1/stress_bypass", "name": "바이패스 토글"},
+        {"method": "POST", "path": "/api/v1/wipe_db", "name": "DB 초기화"},
+        {"method": "POST", "path": "/api/v1/tuning/reset", "name": "튜닝 리셋"},
+        {"method": "POST", "path": "/api/v1/backtest", "name": "백테스트"},
+        {"method": "WEBSOCKET", "path": "/ws/dashboard", "name": "대시보드 WS"},
+    ]
+
+    # ── Summary ──
+    _ok_cnt = sum(1 for _c in checks if _c["status"] == "OK")
+    _fail_cnt = sum(1 for _c in checks if _c["status"] == "FAIL")
+    _warn_cnt = sum(1 for _c in checks if _c["status"] == "WARN")
+
+    return {
+        "checks": checks,
+        "endpoints": _endpoints,
+        "summary": {"ok": _ok_cnt, "fail": _fail_cnt, "warn": _warn_cnt, "total": len(checks)},
         "timestamp": datetime.now().isoformat()
     }
 
