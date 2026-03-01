@@ -683,6 +683,8 @@ async def async_trading_loop():
                         if _b_disp is not None: strategy_instance.bypass_disparity = (str(_b_disp).lower() == 'true')
                         _b_ind = get_config('bypass_indicator', symbol)
                         if _b_ind is not None: strategy_instance.bypass_indicator = (str(_b_ind).lower() == 'true')
+                        # [Phase 19] 퇴근 모드 로드
+                        _exit_only = str(get_config('exit_only_mode', symbol)).lower() == 'true'
                     except Exception as _sym_sync_err:
                         logger.error(f"[{symbol}] 코인별 설정 동기화 오류: {_sym_sync_err}")
 
@@ -786,7 +788,10 @@ async def async_trading_loop():
                     # 봇 혼잣말 — 지금 무엇을 기다리는지 한 줄 생성
                     _KST = _dt.timezone(_dt.timedelta(hours=9))
                     _ts = _dt.datetime.now(_KST).strftime("%H:%M:%S")
-                    if signal == "LONG":
+                    
+                    if _exit_only and bot_global_state["symbols"][symbol]["position"] == "NONE":
+                        _mono = f"[{_ts}] 🛏️ 퇴근 모드(Exit-Only) 가동 중 — 기존 포지션 관리만 수행하며 신규 진입을 차단합니다."
+                    elif signal == "LONG":
                         _mono = f"[{_ts}] 🟢 LONG 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
                     elif signal == "SHORT":
                         _mono = f"[{_ts}] 🔴 SHORT 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
@@ -1134,6 +1139,10 @@ async def async_trading_loop():
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
+                        # [Phase 19] 퇴근 모드 작동 시 신규 진입 강제 차단
+                        if _exit_only:
+                            continue
+
                         # 현재 사이클 최신 상태 기준 — 다른 심볼에 포지션이 있으면 진입 차단
                         any_other_position_open = any(
                             s.get("position", "NONE") != "NONE"

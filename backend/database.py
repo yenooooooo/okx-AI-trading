@@ -94,6 +94,7 @@ def init_db():
         'cooldown_duration_sec': '900',
         'auto_scan_enabled': 'false',
         'direction_mode': 'AUTO',  # [Phase 18.1] 방향 모드 (AUTO/LONG/SHORT)
+        'exit_only_mode': 'false', # [Phase 19] 퇴근 모드 (Exit-Only)
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))

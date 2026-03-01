@@ -838,6 +838,9 @@ async function syncConfig(symbol = null) {
                 // [Phase 14.1] Gate Bypass 체크박스 동기화
                 const el = document.getElementById(`config-${key}`);
                 if (el) el.checked = (val === true || val === 'true');
+            } else if (key === 'exit_only_mode') {
+                const el = document.getElementById('config-exit_only_mode');
+                if (el) el.checked = (val === true || val === 'true');
             }
         }
         updateActiveTuningBadge();
@@ -949,7 +952,7 @@ async function saveTuningConfig() {
             payloads.push({ key, value: String(value) });
         }
         // [Phase 14.1] Gate Bypass 체크박스 3종 추가 저장
-        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator']) {
+        for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode']) {
             const el = document.getElementById(`config-${bkey}`);
             if (!el) continue;
             payloads.push({ key: bkey, value: el.checked.toString() });
