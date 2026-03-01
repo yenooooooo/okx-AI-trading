@@ -663,6 +663,8 @@ async def async_trading_loop():
                             "trailing_active": False,
                             "trailing_target": 0.0,
                             "entry_timestamp": 0.0,  # [Race Condition Fix] 진입 시각 기록 — Grace Period 계산용
+                            "last_price_update_time": _time.time(),  # [Phase 20.2] 데이터 신선도 추적용 타임스탬프
+                            "last_exit_time": 0,
                         }
 
                     # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
@@ -938,6 +940,24 @@ async def async_trading_loop():
                                 current_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns else float(entry * 0.01)
                                 if pd.isna(current_atr) or current_atr <= 0:
                                     current_atr = float(entry * 0.01)
+
+                                # [Phase 20.2] Stale Price Watchdog (웹소켓 뇌사 방어막)
+                                _now = _time.time()
+                                _last_update = bot_global_state["symbols"][symbol].get("last_price_update_time", _now)
+
+                                # 마지막 가격 갱신이 3초 이상 지연되었다면 웹소켓 이상으로 간주하고 REST API 강제 호출
+                                if _now - _last_update > 3.0:
+                                    try:
+                                        logger.warning(f"[{symbol}] ⚠️ 실시간 데이터 수신 지연 감지 (>3초). REST API 비상 우회 폴링 실행!")
+                                        _emergency_ticker = await asyncio.to_thread(engine_api.exchange.fetch_ticker, symbol)
+                                        current_price = float(_emergency_ticker['last'])
+                                        # 비상 갱신 후 타임스탬프 리셋
+                                        bot_global_state["symbols"][symbol]["last_price_update_time"] = _now
+                                    except Exception as fallback_err:
+                                        logger.error(f"[{symbol}] 🚨 비상 REST API 폴링마저 실패: {fallback_err}")
+                                else:
+                                    # 정상 갱신 경로: 타임스탬프 업데이트
+                                    bot_global_state["symbols"][symbol]["last_price_update_time"] = _now
 
                                 # [v2.2 DRY] evaluate_risk_management Tuple 언패킹 — 이중 계산 완전 제거
                                 # (action, real_sl, trailing_active, trailing_target)를 단일 소스(strategy.py)에서만 계산
