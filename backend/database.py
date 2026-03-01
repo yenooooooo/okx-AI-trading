@@ -95,6 +95,12 @@ def init_db():
         'auto_scan_enabled': 'false',
         'direction_mode': 'AUTO',  # [Phase 18.1] 방향 모드 (AUTO/LONG/SHORT)
         'exit_only_mode': 'false', # [Phase 19] 퇴근 모드 (Exit-Only)
+        # [Phase 21.2] 스트레스 테스트 바이패스 (값 = 활성화 타임스탬프, "0" = 비활성)
+        'stress_bypass_kill_switch': '0',
+        'stress_bypass_cooldown_loss': '0',
+        'stress_bypass_daily_loss': '0',
+        'stress_bypass_reentry_cd': '0',
+        'stress_bypass_stale_price': '0',
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))

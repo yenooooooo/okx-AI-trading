@@ -1976,6 +1976,9 @@ async function initializeApp() {
     setInterval(syncSystemHealth, 5000);
     setInterval(fetchAndRenderHeatmap, 60000);
     setInterval(fetchLiveTickers, 5000);
+    // [Phase 21.2] 스트레스 바이패스 상태 주기적 갱신 (10초마다 카운트다운 동기화)
+    setInterval(refreshStressBypassUI, 10000);
+    refreshStressBypassUI();
 }
 
 // Start
@@ -2235,6 +2238,48 @@ function downloadCSV() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+}
+
+// ════════════ [Phase 21.2] 스트레스 테스트 바이패스 ════════════
+
+async function fetchStressBypass() {
+    try {
+        const res = await fetch(`${API_URL}/stress_bypass`);
+        return await res.json();
+    } catch { return null; }
+}
+
+async function toggleStressBypass(feature, enabled) {
+    try {
+        await fetch(`${API_URL}/stress_bypass?feature=${feature}&enabled=${enabled}`, { method: 'POST' });
+    } catch (e) {
+        console.error('[StressBypass] 토글 실패:', e);
+    }
+    await refreshStressBypassUI();
+}
+
+async function refreshStressBypassUI() {
+    const data = await fetchStressBypass();
+    if (!data) return;
+    const features = ['kill_switch', 'cooldown_loss', 'daily_loss', 'reentry_cd', 'stale_price'];
+    features.forEach(f => {
+        const btn = document.getElementById(`bypass-btn-${f}`);
+        const timer = document.getElementById(`bypass-timer-${f}`);
+        if (!btn || !timer) return;
+        const info = data[f];
+        if (info && info.active) {
+            btn.classList.add('bypass-active');
+            btn.textContent = '✅ 해제 중';
+            const h = Math.floor(info.remaining_sec / 3600);
+            const m = Math.floor((info.remaining_sec % 3600) / 60);
+            const s = Math.floor(info.remaining_sec % 60);
+            timer.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')} 남음`;
+        } else {
+            btn.classList.remove('bypass-active');
+            btn.textContent = '🔒 원래 동작';
+            timer.textContent = '';
+        }
+    });
 }
 
 // ══════════════════════════════════════

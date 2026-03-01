@@ -500,6 +500,82 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- ⚡ [Phase 21.2] 극한 스트레스 테스트 바이패스 패널 -->
+                <div class="border border-yellow-500/30 rounded p-3 mt-2 bg-yellow-500/5">
+                    <div class="text-yellow-400 text-[11px] font-mono mb-1 font-bold tracking-widest">⚡ 극한 스트레스 테스트 — 자동 잠금 24h 해제</div>
+                    <div class="text-gray-500 text-[9px] font-mono mb-3 leading-relaxed">※ 활성화 후 24시간이 지나면 자동으로 원래 기능으로 복구됩니다.</div>
+                    <style>
+                        .bypass-active { background-color: rgba(234,179,8,0.2) !important; border-color: rgba(234,179,8,0.6) !important; color: #facc15 !important; }
+                    </style>
+                    <div class="flex flex-col gap-2">
+                        <!-- [1] 연속 에러 킬 스위치 -->
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-[10px] font-mono text-gray-300">연속 에러 킬 스위치</div>
+                                <div class="text-[8px] font-mono text-gray-500">3회 연속 에러 시 봇 강제 종료 차단</div>
+                            </div>
+                            <button id="bypass-btn-kill_switch"
+                                onclick="toggleStressBypass('kill_switch', document.getElementById('bypass-btn-kill_switch').classList.contains('bypass-active') ? false : true)"
+                                class="text-[9px] font-mono px-2 py-1 rounded border border-gray-600/40 bg-gray-800/40 text-gray-400 whitespace-nowrap transition">
+                                🔒 원래 동작
+                            </button>
+                            <span id="bypass-timer-kill_switch" class="text-[8px] font-mono text-yellow-400 w-20 text-right"></span>
+                        </div>
+                        <!-- [2] 연패 쿨다운 -->
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-[10px] font-mono text-gray-300">연패 쿨다운</div>
+                                <div class="text-[8px] font-mono text-gray-500">연속 손실 후 진입 금지 타이머 해제</div>
+                            </div>
+                            <button id="bypass-btn-cooldown_loss"
+                                onclick="toggleStressBypass('cooldown_loss', document.getElementById('bypass-btn-cooldown_loss').classList.contains('bypass-active') ? false : true)"
+                                class="text-[9px] font-mono px-2 py-1 rounded border border-gray-600/40 bg-gray-800/40 text-gray-400 whitespace-nowrap transition">
+                                🔒 원래 동작
+                            </button>
+                            <span id="bypass-timer-cooldown_loss" class="text-[8px] font-mono text-yellow-400 w-20 text-right"></span>
+                        </div>
+                        <!-- [3] 일일 최대 손실 차단 -->
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-[10px] font-mono text-gray-300">일일 최대 손실 차단</div>
+                                <div class="text-[8px] font-mono text-gray-500">일일 손실 한도 도달 시 24h 매매 중단 해제</div>
+                            </div>
+                            <button id="bypass-btn-daily_loss"
+                                onclick="toggleStressBypass('daily_loss', document.getElementById('bypass-btn-daily_loss').classList.contains('bypass-active') ? false : true)"
+                                class="text-[9px] font-mono px-2 py-1 rounded border border-gray-600/40 bg-gray-800/40 text-gray-400 whitespace-nowrap transition">
+                                🔒 원래 동작
+                            </button>
+                            <span id="bypass-timer-daily_loss" class="text-[8px] font-mono text-yellow-400 w-20 text-right"></span>
+                        </div>
+                        <!-- [4] 60초 재진입 쿨다운 -->
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-[10px] font-mono text-gray-300">60초 재진입 쿨다운</div>
+                                <div class="text-[8px] font-mono text-gray-500">청산 직후 60초 재진입 금지 해제</div>
+                            </div>
+                            <button id="bypass-btn-reentry_cd"
+                                onclick="toggleStressBypass('reentry_cd', document.getElementById('bypass-btn-reentry_cd').classList.contains('bypass-active') ? false : true)"
+                                class="text-[9px] font-mono px-2 py-1 rounded border border-gray-600/40 bg-gray-800/40 text-gray-400 whitespace-nowrap transition">
+                                🔒 원래 동작
+                            </button>
+                            <span id="bypass-timer-reentry_cd" class="text-[8px] font-mono text-yellow-400 w-20 text-right"></span>
+                        </div>
+                        <!-- [5] Stale Price Watchdog -->
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-[10px] font-mono text-gray-300">Stale Price Watchdog</div>
+                                <div class="text-[8px] font-mono text-gray-500">웹소켓 지연 시 REST 비상 폴링 해제</div>
+                            </div>
+                            <button id="bypass-btn-stale_price"
+                                onclick="toggleStressBypass('stale_price', document.getElementById('bypass-btn-stale_price').classList.contains('bypass-active') ? false : true)"
+                                class="text-[9px] font-mono px-2 py-1 rounded border border-gray-600/40 bg-gray-800/40 text-gray-400 whitespace-nowrap transition">
+                                🔒 원래 동작
+                            </button>
+                            <span id="bypass-timer-stale_price" class="text-[8px] font-mono text-yellow-400 w-20 text-right"></span>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
