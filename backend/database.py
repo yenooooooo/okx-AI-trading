@@ -96,6 +96,7 @@ def init_db():
         'direction_mode': 'AUTO',  # [Phase 18.1] 방향 모드 (AUTO/LONG/SHORT)
         'exit_only_mode': 'false', # [Phase 19] 퇴근 모드 (Exit-Only)
         'shadow_hunting_enabled': 'false',  # [Phase 23] 그림자 사냥(Shadow Hunting) 모드
+        'SHADOW_MODE_ENABLED': 'false',      # [Phase 30] 섀도우(Paper) 모드 기본값
         'min_take_profit_rate': '0.01',   # [Phase 24] 최소 익절 목표율 1.0% (R:R 1:2 강제)
         'auto_preset_enabled': 'true',    # [Phase 25] Adaptive Shield 기본 활성화
         '_current_adaptive_tier': '',     # [Phase 25] 현재 적용 중인 방어 티어
@@ -251,6 +252,19 @@ def delete_configs(keys: List[str]):
     cursor.execute(f'DELETE FROM bot_config WHERE key IN ({placeholders})', keys)
     conn.commit()
     conn.close()
+
+def delete_symbol_configs(symbol: str) -> int:
+    """[Phase 30] 특정 심볼의 전용 설정 전체 삭제 (SYMBOL::* 패턴 고아 키 청소)"""
+    if not symbol:
+        return 0
+    conn = get_connection()
+    cursor = conn.cursor()
+    prefix = f"{symbol}::"
+    cursor.execute('DELETE FROM bot_config WHERE key LIKE ?', (prefix + '%',))
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted
 
 # 데이터베이스 초기화 (모듈 로드 시 자동 실행)
 init_db()

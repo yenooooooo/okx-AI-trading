@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
-from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs
+from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs, delete_symbol_configs
 from backtester import Backtester
 from notifier import send_telegram_sync
 from logger import get_logger
@@ -274,6 +274,35 @@ bot_global_state = {
 # [Phase 20.1] 동시성 충돌 방어용 절대 자물쇠 (Mutex Lock)
 state_lock = asyncio.Lock()
 
+def _reset_position_state(sym_state: dict):
+    """[Phase 32] 포지션 상태 통합 초기화 — 모든 청산/취소 경로에서 일관적으로 사용
+    비즈니스 로직(DB 저장, 킬스위치, 알림 등)은 각 호출부에서 별도 처리.
+    이 함수는 순수 상태 필드 초기화만 담당."""
+    sym_state["position"] = "NONE"
+    sym_state["entry_price"] = 0.0
+    sym_state["last_exit_time"] = _time.time()
+    sym_state["take_profit_price"] = "대기중"
+    sym_state["stop_loss_price"] = 0.0
+    sym_state["real_sl"] = 0.0
+    sym_state["trailing_active"] = False
+    sym_state["trailing_target"] = 0.0
+    sym_state["partial_tp_executed"] = False
+    sym_state["is_paper"] = False
+    sym_state["entry_timestamp"] = 0.0
+    sym_state["active_tp_order_id"] = None
+    sym_state["active_sl_order_id"] = None
+    sym_state["last_placed_tp_price"] = 0.0
+    sym_state["last_placed_sl_price"] = 0.0
+    sym_state["highest_price"] = 0.0
+    sym_state["lowest_price"] = 0.0
+    sym_state["unrealized_pnl_percent"] = 0.0
+    sym_state["is_shadow_hunting"] = False
+    sym_state["contracts"] = 0
+    sym_state["leverage"] = 1
+    # PENDING 관련 동적 필드 제거
+    for _pk in ["pending_order_id", "pending_order_time", "pending_amount", "pending_price"]:
+        sym_state.pop(_pk, None)
+
 ai_brain_state = {
     "symbols": {}  # symbol별 뇌 상태
 }
@@ -385,6 +414,18 @@ async def startup_event():
     _engine = await loop.run_in_executor(None, OKXEngine)
     if _engine and _engine.exchange:
         logger.info("OKXEngine 싱글톤 초기화 완료")
+        # [Phase 32] 서버 재시작 시 거래소 잔류 포지션 감지 경고
+        try:
+            _positions = await asyncio.to_thread(_engine.exchange.fetch_positions)
+            _open_pos = [p for p in _positions if float(p.get('contracts', 0)) > 0]
+            if _open_pos:
+                _pos_symbols = [p['symbol'] for p in _open_pos]
+                _restart_warn = f"⚠️ [서버 재시작 감지] 거래소에 열린 포지션 {len(_open_pos)}건 발견: {_pos_symbols}. 봇 인메모리 상태와 동기화되지 않았습니다. 수동 확인 필요."
+                bot_global_state["logs"].append(_restart_warn)
+                logger.warning(_restart_warn)
+                send_telegram_sync(_restart_warn)
+        except Exception as _pos_err:
+            logger.warning(f"[Phase 32] 시작 시 포지션 감지 실패: {_pos_err}")
         asyncio.create_task(private_ws_loop())  # OKX 프라이빗 WS 시작
         logger.info("Private WebSocket 태스크 시작")
     else:
@@ -446,19 +487,8 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
                     logger.warning(f"[{symbol}] 잔여 거미줄 취소 실패(이미 소멸됨): {clear_err}")
 
     # ── 즉시 상태 초기화 (같은 사이클 중복 감지 방지) ──────────────────────
-    sym_state["position"]              = "NONE"
-    sym_state["entry_price"]           = 0.0
-    sym_state["last_exit_time"]        = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
-    # [Phase 22.4] 뇌 구조(기억 장치) 거미줄 데이터 완전 삭제
-    sym_state["active_tp_order_id"]    = None
-    sym_state["active_sl_order_id"]    = None
-    sym_state["last_placed_tp_price"]  = 0.0
-    sym_state["last_placed_sl_price"]  = 0.0
-    sym_state["unrealized_pnl_percent"] = 0.0
-    sym_state["unrealized_pnl"]        = 0.0
-    sym_state["take_profit_price"]     = "대기중"  # [Phase 16] 문자열 통일
-    sym_state["stop_loss_price"]       = 0.0
-    sym_state["entry_timestamp"]       = 0.0  # [Race Condition Fix] Grace Period 리셋
+    # [Phase 32] 통합 상태 초기화 헬퍼 사용
+    _reset_position_state(sym_state)
 
     pnl_amount     = 0.0
     total_gross    = 0.0
@@ -752,6 +782,14 @@ async def async_trading_loop():
                             await asyncio.sleep(0.5)  # [Phase 4] API Rate Limit 보호용 미세 비동기 지연
                             top_symbols = await engine_api.scan_top_volume_coins(limit=3)
                             if top_symbols:
+                                # [Phase 30] 스캐너 심볼 로테이션 시 고아 설정 청소
+                                _old_syms_scan = get_config('symbols') or []
+                                if isinstance(_old_syms_scan, list):
+                                    _removed_scan = set(_old_syms_scan) - set(top_symbols)
+                                    for _rs_scan in _removed_scan:
+                                        _del_scan = delete_symbol_configs(_rs_scan)
+                                        if _del_scan > 0:
+                                            logger.info(f"[Phase 30] 스캐너 로테이션: {_rs_scan} 고아 설정 {_del_scan}건 청소")
                                 # 설정에 바로 업데이트하여 영속화 및 프론트 반영
                                 set_config('symbols', top_symbols)
                                 scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 자동 갱신 완료: {top_symbols}"
@@ -834,7 +872,13 @@ async def async_trading_loop():
                 # 멀티 타겟팅 API Rate Limit 우회를 위한 물리적 딜레이 추가
                 if i > 0:
                     await asyncio.sleep(1)
-                
+                    # [Phase 31] 멀티심볼: 두 번째 심볼부터 잔고 재갱신 (stale balance 방지)
+                    try:
+                        curr_bal = await asyncio.to_thread(engine_api.get_usdt_balance)
+                        bot_global_state["balance"] = round(curr_bal, 2)
+                    except Exception:
+                        pass  # 갱신 실패 시 이전 값 유지
+
                 try:
                     # 심볼 상태 초기화
                     if symbol not in bot_global_state["symbols"]:
@@ -866,6 +910,13 @@ async def async_trading_loop():
                             "last_placed_sl_price": 0.0,
                             # [Phase 23] 그림자 사냥 포지션 여부 추적
                             "is_shadow_hunting": False,
+                            # [Phase 29] Shadow/Live 모드 플래그 초기값 명시
+                            "is_paper": False,
+                            # [Phase 32] 동적 생성 필드 초기값 명시 (상태 드리프트 방지)
+                            "contracts": 0,
+                            "leverage": 1,
+                            "unrealized_pnl_percent": 0.0,
+                            "partial_tp_executed": False,
                         }
 
                     # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
@@ -1185,7 +1236,45 @@ async def async_trading_loop():
                                             strategy_instance.trailing_stop_activation = abs(_sh_new_act - executed_price) / executed_price
                                             bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False  # 재계산 완료, 플래그 리셋
                                             logger.info(f"[{symbol}] 🐸 Shadow Hunting 체결! 리스크 재계산 완료 | 신규 SL: {_sh_new_sl:.4f} | 트레일링 발동선: {_sh_new_act:.4f}")
-                                        
+
+                                        # [Phase 28] Smart Limit 체결 직후 거래소 초기 TP/SL 배치
+                                        # Market 진입(Line 1820-1860)과 100% 동일한 방어막 로직
+                                        if not _is_paper_pending:
+                                            try:
+                                                _entry_p_sl = float(executed_price)
+                                                _amt_sl = float(trade_amount)
+                                                _close_side_sl = "sell" if real_side == "LONG" else "buy"
+
+                                                # TP: 수수료 0.15% + ATR * 50%
+                                                _sl_atr = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not pd.isna(df['atr'].iloc[-1]) else float(_entry_p_sl * 0.01)
+                                                _sl_offset = (_entry_p_sl * 0.0015) + (_sl_atr * 0.5)
+                                                _sl_init_tp = round(_entry_p_sl + _sl_offset, 4) if real_side == "LONG" else round(_entry_p_sl - _sl_offset, 4)
+
+                                                # SL: hard_stop_loss_rate 직결
+                                                _sl_rate_init = strategy_instance.hard_stop_loss_rate
+                                                _sl_init_sl = round(_entry_p_sl * (1 - _sl_rate_init), 4) if real_side == "LONG" else round(_entry_p_sl * (1 + _sl_rate_init), 4)
+
+                                                _params_tp_sl = {"reduceOnly": True}
+                                                _params_sl_sl = {"reduceOnly": True, "stopLossPrice": _sl_init_sl}
+
+                                                tp_order_sl = await asyncio.to_thread(
+                                                    engine_api.exchange.create_order,
+                                                    symbol, 'limit', _close_side_sl, _amt_sl, _sl_init_tp, _params_tp_sl
+                                                )
+                                                sl_order_sl = await asyncio.to_thread(
+                                                    engine_api.exchange.create_order,
+                                                    symbol, 'market', _close_side_sl, _amt_sl, None, _params_sl_sl
+                                                )
+
+                                                bot_global_state["symbols"][symbol]["active_tp_order_id"] = tp_order_sl['id']
+                                                bot_global_state["symbols"][symbol]["active_sl_order_id"] = sl_order_sl['id']
+                                                bot_global_state["symbols"][symbol]["last_placed_tp_price"] = _sl_init_tp
+                                                bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _sl_init_sl
+
+                                                logger.info(f"[{symbol}] 🕸️ [Smart Limit 체결] 거래소 초기 방어막 전송 완료 | TP: {_sl_init_tp:.4f} / SL: {_sl_init_sl:.4f}")
+                                            except Exception as sl_init_err:
+                                                logger.error(f"[{symbol}] 🚨 [Smart Limit 체결] 초기 방어막 전송 실패. 자가 치유가 다음 사이클에서 복구 시도: {sl_init_err}")
+
                                     elif status in ['canceled', 'rejected'] or (time.time() - pending_time > 300):
                                         # 취소되었거나 5분 초과 시 -> 주문 취소 및 PENDING 해제 (고스트 오더 방지)
                                         if status not in ['canceled', 'rejected']:
@@ -1195,15 +1284,17 @@ async def async_trading_loop():
                                                 except Exception as cancel_err:
                                                     logger.warning(f"[{symbol}] 미체결 주문 취소 실패 (이미 취소되었을 수 있음): {cancel_err}")
                                                 
-                                        bot_global_state["symbols"][symbol]["position"] = "NONE"
-                                        
+                                        # [Phase 23.5] Shadow Hunting 철수 전용 알림 (상태 초기화 전에 체크)
+                                        _was_shadow_hunting = bot_global_state["symbols"][symbol].get("is_shadow_hunting", False)
+
+                                        # [Phase 32] 통합 상태 초기화 헬퍼 사용
+                                        _reset_position_state(bot_global_state["symbols"][symbol])
+
                                         _paper_tag = "[👻 PAPER] " if _is_paper_pending else ""
                                         cancel_msg = f"{_paper_tag}⏱️ [{symbol}] 지정가 5분 미체결 취소 완료 → 봇이 새로운 최적의 타점을 즉시 재탐색합니다."
                                         bot_global_state["logs"].append(cancel_msg)
                                         logger.info(cancel_msg)
-                                        # [Phase 23.5] Shadow Hunting 철수 전용 알림
-                                        if bot_global_state["symbols"][symbol].get("is_shadow_hunting", False):
-                                            bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False
+                                        if _was_shadow_hunting:
                                             _sh_fail_msg = f"🐸 [{symbol}] 그림자 사냥 실패 — 꼬리가 잡히지 않아 작전 철수합니다."
                                             bot_global_state["logs"].append(_sh_fail_msg)
                                             save_log("WARNING", _sh_fail_msg)
@@ -1381,6 +1472,32 @@ async def async_trading_loop():
                                             logger.error(f"[{symbol}] 1차 타겟 도달 처리 실패: {partial_err}")
                                 # --- End of Partial TP 조건 체크 ---
 
+                                # [Phase 28] TP/SL 자가 치유 안전망 (Self-Healing Safety Net)
+                                # 실전 포지션인데 거래소 SL이 없는 경우 → 즉시 생성 (크래시 복구, 예외 복구 등)
+                                if not bot_global_state["symbols"][symbol].get("is_paper", False):
+                                    _heal_sl_id = bot_global_state["symbols"][symbol].get("active_sl_order_id")
+                                    _heal_real_sl = float(bot_global_state["symbols"][symbol].get("real_sl", 0.0))
+                                    if not _heal_sl_id and entry > 0:
+                                        try:
+                                            _heal_close_side = "sell" if position_side == "LONG" else "buy"
+                                            _heal_amt = float(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                            # SL 가격: real_sl이 있으면 사용, 없으면 hard_stop_loss_rate 기반 계산
+                                            if _heal_real_sl > 0:
+                                                _heal_sl_price = _heal_real_sl
+                                            else:
+                                                _heal_sl_rate = strategy_instance.hard_stop_loss_rate
+                                                _heal_sl_price = round(entry * (1 - _heal_sl_rate), 4) if position_side == "LONG" else round(entry * (1 + _heal_sl_rate), 4)
+                                            _heal_params = {"reduceOnly": True, "stopLossPrice": _heal_sl_price}
+                                            _heal_order = await asyncio.to_thread(
+                                                engine_api.exchange.create_order,
+                                                symbol, 'market', _heal_close_side, _heal_amt, None, _heal_params
+                                            )
+                                            bot_global_state["symbols"][symbol]["active_sl_order_id"] = _heal_order['id']
+                                            bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _heal_sl_price
+                                            logger.warning(f"[{symbol}] 🩹 [Self-Healing] 거래소 SL 누락 감지 → 자동 복구 완료 | SL: {_heal_sl_price:.4f}")
+                                        except Exception as heal_err:
+                                            logger.error(f"[{symbol}] 🚨 [Self-Healing] SL 자동 복구 실패: {heal_err}")
+
                                 # [Phase 22.3] 0.05% 스마트 갱신 (Smart Amend) 엔진
                                 # 실시간으로 변동된 본전 방어선 및 트레일링 스탑(real_sl)을 추적하여 거래소 거미줄 위치를 수정함
                                 if not bot_global_state["symbols"][symbol].get("is_paper", False):
@@ -1541,24 +1658,9 @@ async def async_trading_loop():
                                                         pass  # 에러 무시 (안전 종료)
 
                                         # 4. 프론트엔드 포지션 초기화
-                                        # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+                                        # [Phase 32] 통합 상태 초기화 헬퍼 사용
                                         async with state_lock:
-                                            bot_global_state["symbols"][symbol]["position"] = "NONE"
-                                            bot_global_state["symbols"][symbol]["entry_price"] = 0.0
-                                            bot_global_state["symbols"][symbol]["last_exit_time"] = time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
-                                            bot_global_state["symbols"][symbol]["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
-                                            bot_global_state["symbols"][symbol]["stop_loss_price"] = 0.0
-                                            bot_global_state["symbols"][symbol]["real_sl"] = 0.0
-                                            bot_global_state["symbols"][symbol]["trailing_active"] = False
-                                            bot_global_state["symbols"][symbol]["trailing_target"] = 0.0
-                                            bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
-                                            bot_global_state["symbols"][symbol]["is_paper"] = False  # 플래그 리셋
-                                            bot_global_state["symbols"][symbol]["entry_timestamp"] = 0.0  # [Race Condition Fix]
-                                            # [Phase 22.4] 거미줄 기억 장치 리셋
-                                            bot_global_state["symbols"][symbol]["active_tp_order_id"] = None
-                                            bot_global_state["symbols"][symbol]["active_sl_order_id"] = None
-                                            bot_global_state["symbols"][symbol]["last_placed_tp_price"] = 0.0
-                                            bot_global_state["symbols"][symbol]["last_placed_sl_price"] = 0.0
+                                            _reset_position_state(bot_global_state["symbols"][symbol])
 
                                         # [v2.1] 연패 쿨다운 카운터 업데이트 (Paper도 카운트하여 전략 검증)
                                         is_loss = (pnl_amount < 0)
@@ -1683,7 +1785,9 @@ async def async_trading_loop():
                                     # [Phase 9.1] USDT → 계약수 환산
                                     # 공식: 계약수 = floor(입력USDT * 레버리지 / (현재가 * 계약당기초자산))
                                     seed_usdt = max(1.0, float(get_config('manual_amount') or 10))
-                                    notional = seed_usdt * trade_leverage
+                                    # [Phase 31] 수수료 여유분 확보 (dynamic 모드와 동일한 95% 안전 버퍼)
+                                    safe_seed = seed_usdt * 0.95
+                                    notional = safe_seed * trade_leverage
                                     trade_amount = max(1, round(notional / (current_price * contract_size)))
                                 else:
                                     # [v2.3] 정률법 기반 동적 사이징 적용 (UI 연동 · 증거금 부족 패치)
@@ -1692,6 +1796,13 @@ async def async_trading_loop():
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
                                         curr_bal, current_price, trade_leverage, contract_size, _risk_rate
                                     )
+                                # [Phase 31] 증거금 사전 검증 — 거래소 거부(51008) 선제 차단
+                                _margin_needed = (contract_size * current_price * trade_amount) / trade_leverage
+                                if curr_bal * 0.90 < _margin_needed:
+                                    _margin_msg = f"[{symbol}] 증거금 사전 검증 실패: 필요 ${_margin_needed:.2f} vs 가용 ${curr_bal * 0.90:.2f} (90% 기준)"
+                                    bot_global_state["logs"].append(_margin_msg)
+                                    logger.warning(_margin_msg)
+                                    continue  # 이 심볼 진입 건너뛰기
                                 # 레버리지 거래소 적용
                                 try:
                                     await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
@@ -1778,6 +1889,8 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_pending
                                         # [Phase 23] 그림자 사냥 포지션 여부 각인
                                         bot_global_state["symbols"][symbol]["is_shadow_hunting"] = _is_shadow_hunt_order
+                                        # [Phase 28] 레버리지 저장 (체결 후 텔레그램 알림에서 참조)
+                                        bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
 
                                     entry_emoji = "⏳"
                                     entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
@@ -2167,19 +2280,9 @@ async def close_paper_position():
         logger.info(msg)
         send_telegram_sync(f"[👻 PAPER] {emoji} 수동 청산\n코인: {symbol} {position_side}\n체결가: ${current_price:.2f}\n순수익: {pnl_amount:+.4f} USDT ({pnl_percent:+.2f}%)")
 
-        # [Phase 20.1] 상태 변경 시 자물쇠 잠금
+        # [Phase 32] 통합 상태 초기화 헬퍼 사용
         async with state_lock:
-            # 상태 초기화
-            sym_state["position"] = "NONE"
-            sym_state["entry_price"] = 0.0
-            sym_state["last_exit_time"] = _time.time()  # [Phase 19.3] 60초 호흡 고르기 기준점
-            sym_state["take_profit_price"] = "대기중"  # [Phase 16] 문자열 통일
-            sym_state["stop_loss_price"] = 0.0
-            sym_state["real_sl"] = 0.0
-            sym_state["trailing_active"] = False
-            sym_state["trailing_target"] = 0.0
-            sym_state["partial_tp_executed"] = False
-            sym_state["is_paper"] = False
+            _reset_position_state(sym_state)
 
             # [Phase 19] 강제 청산 시 봇 재진입 방지를 위해 자동매매 엔진 자체를 STOP 상태로 전환
             bot_global_state["is_running"] = False
@@ -2218,11 +2321,9 @@ async def manual_cancel_pending():
             except Exception as cancel_err:
                 logger.warning(f"[{symbol}] 수동 취소 요청 실패 (이미 취소되었을 수 있음): {cancel_err}")
 
-        # 2. 상태 초기화
+        # 2. [Phase 32] 통합 상태 초기화 헬퍼 사용
         async with state_lock:
-            bot_global_state["symbols"][symbol]["position"] = "NONE"
-            bot_global_state["symbols"][symbol]["pending_order_id"] = None
-            bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False
+            _reset_position_state(bot_global_state["symbols"][symbol])
 
         # 3. 가시성 보고
         _abort_msg = f"🟡 [{symbol}] 수동 철수: 사령관 명령으로 대기 주문({pending_id})을 즉시 철거했습니다."
@@ -2619,12 +2720,108 @@ async def fetch_config(symbol: Optional[str] = None):
 async def update_config(key: str, value: str, symbol: str = "GLOBAL"):
     """봇 설정 변경 (실시간 적용). symbol 지정 시 해당 심볼 전용으로 저장, 미지정 시 GLOBAL"""
     try:
+        # ── [Phase 29] Shadow↔Live 전환 가드 (Transition Guard) ──
+        _transition_warnings = []
+        if key == "SHADOW_MODE_ENABLED":
+            _old_shadow = str(get_config('SHADOW_MODE_ENABLED') or 'false').lower() == 'true'
+            _new_shadow = str(value).lower() == 'true'
+
+            if _old_shadow and not _new_shadow:
+                # ── Shadow → Live 전환: Paper 포지션 자동 강제 청산 ──
+                _closed_papers = []
+                for _sym, _sym_st in bot_global_state["symbols"].items():
+                    _pos = _sym_st.get("position", "NONE")
+                    _is_p = _sym_st.get("is_paper", False)
+                    if _pos != "NONE" and _is_p:
+                        # Paper 포지션 발견 → 자동 청산
+                        _cp = _sym_st.get("current_price", 0)
+                        _ep = _sym_st.get("entry_price", 0)
+                        _amt = int(_sym_st.get("contracts", 1))
+                        _lev = int(_sym_st.get("leverage", 1))
+                        # PnL 시뮬레이션
+                        try:
+                            _cs = float(_engine.exchange.market(_sym).get('contractSize', 0.01)) if _engine else 0.01
+                        except Exception:
+                            _cs = 0.01
+                        _pv = _ep * _amt * _cs
+                        if _pos in ("LONG", "PENDING_LONG"):
+                            _gross = (_cp - _ep) * _amt * _cs
+                        else:
+                            _gross = (_ep - _cp) * _amt * _cs
+                        _fee = -(_pv * 0.0005 * 2)
+                        _pnl = _gross + _fee
+                        _pnl_pct = (_pnl / (_pv / _lev) * 100) if _pv > 0 else 0.0
+                        # 상태 초기화
+                        async with state_lock:
+                            _sym_st["position"] = "NONE"
+                            _sym_st["entry_price"] = 0.0
+                            _sym_st["last_exit_time"] = _time.time()
+                            _sym_st["take_profit_price"] = "대기중"
+                            _sym_st["stop_loss_price"] = 0.0
+                            _sym_st["real_sl"] = 0.0
+                            _sym_st["trailing_active"] = False
+                            _sym_st["trailing_target"] = 0.0
+                            _sym_st["partial_tp_executed"] = False
+                            _sym_st["is_paper"] = False
+                            _sym_st["entry_timestamp"] = 0.0
+                            _sym_st["active_tp_order_id"] = None
+                            _sym_st["active_sl_order_id"] = None
+                            _sym_st["last_placed_tp_price"] = 0.0
+                            _sym_st["last_placed_sl_price"] = 0.0
+                            # PENDING 관련 필드 제거
+                            for _pk in ["pending_order_id", "pending_order_time", "pending_amount", "pending_price"]:
+                                _sym_st.pop(_pk, None)
+                        _emoji = "+" if _pnl >= 0 else ""
+                        _closed_papers.append(f"{_sym} {_pos} (PnL: {_emoji}{_pnl:.4f} USDT)")
+                if _closed_papers:
+                    _guard_msg = f"[전환 가드] Shadow→Live 전환: Paper 포지션 {len(_closed_papers)}건 자동 청산 | {', '.join(_closed_papers)}"
+                    bot_global_state["logs"].append(_guard_msg)
+                    logger.info(_guard_msg)
+                    send_telegram_sync(f"[전환 가드] Shadow→Live 전환\nPaper 포지션 {len(_closed_papers)}건 자동 청산\n{chr(10).join(_closed_papers)}")
+                    _transition_warnings.append(_guard_msg)
+
+            elif not _old_shadow and _new_shadow:
+                # ── Live → Shadow 전환: 실전 포지션 존재 시 경고 ──
+                _live_positions = []
+                for _sym, _sym_st in bot_global_state["symbols"].items():
+                    _pos = _sym_st.get("position", "NONE")
+                    _is_p = _sym_st.get("is_paper", False)
+                    if _pos != "NONE" and not _is_p:
+                        _live_positions.append(f"{_sym} {_pos}")
+                if _live_positions:
+                    _warn_msg = f"[전환 가드] Live→Shadow 전환 경고: 실전 포지션 {len(_live_positions)}건 유지됨 ({', '.join(_live_positions)}). 기존 실전 포지션은 그대로 동작하며, 새 진입만 Paper로 전환됩니다."
+                    bot_global_state["logs"].append(_warn_msg)
+                    logger.warning(_warn_msg)
+                    _transition_warnings.append(_warn_msg)
+
+        # ── [Phase 30] 심볼 변경 시 고아 설정 자동 청소 (Config Pollution Guard) ──
+        if key == "symbols":
+            try:
+                _old_syms = get_config('symbols') or []
+                _new_syms = json.loads(value) if isinstance(value, str) else value
+                if isinstance(_old_syms, list) and isinstance(_new_syms, list):
+                    _removed_syms = set(_old_syms) - set(_new_syms)
+                    _total_cleaned = 0
+                    for _rs in _removed_syms:
+                        _del_cnt = delete_symbol_configs(_rs)
+                        _total_cleaned += _del_cnt
+                    if _total_cleaned > 0:
+                        _clean_msg = f"[Phase 30] 심볼 변경 감지: 제거된 심볼 {len(_removed_syms)}개의 고아 설정 {_total_cleaned}건 청소 완료"
+                        bot_global_state["logs"].append(_clean_msg)
+                        logger.info(_clean_msg)
+                        _transition_warnings.append(_clean_msg)
+            except (json.JSONDecodeError, TypeError):
+                pass  # 파싱 실패 시 청소 건너뜀 (설정 저장은 계속 진행)
+
         set_config(key, value, symbol)
         sym_tag = f"[{symbol}] " if symbol != "GLOBAL" else ""
         log_msg = f"[UI 연동 성공 \U0001f7e2] {sym_tag}'{key}' 설정이 '{value}'(으)로 뇌 구조에 완벽히 적용되었습니다."
         bot_global_state["logs"].append(log_msg)
         logger.info(log_msg)
-        return {"success": True, "message": f"{key} 업데이트 완료"}
+        result = {"success": True, "message": f"{key} 업데이트 완료"}
+        if _transition_warnings:
+            result["warnings"] = _transition_warnings
+        return result
     except Exception as e:
         log_msg = f"[UI 연동 실패 \U0001f534] '{key}' 설정 적용 중 코드 연결 오류가 발생했습니다."
         bot_global_state["logs"].append(log_msg)
@@ -2643,10 +2840,21 @@ async def reset_tuning_to_auto():
         "disparity_threshold",  # [Phase 14.2] 이격도 동적 한계치
         "bypass_macro", "bypass_disparity", "bypass_indicator",  # [Phase 14.1] Gate Bypass 플래그
         "min_take_profit_rate",  # [Phase 24] 최소 익절 목표율
+        # [Phase 30] 누락된 키 추가
+        "direction_mode",
+        "exit_only_mode",
+        "shadow_hunting_enabled",
     ]
     delete_configs(keys)
+    # [Phase 30] 활성 심볼의 심볼별 설정도 함께 삭제 (완전한 순정 복귀)
+    _active_syms = get_config('symbols') or []
+    _sym_cleaned = 0
+    if isinstance(_active_syms, list):
+        for _sym in _active_syms:
+            _sym_cleaned += delete_symbol_configs(_sym)
     _active_strategy = TradingStrategy()
-    msg = "[시스템] 사령관 명령 수신: 튜닝 데이터 삭제 및 AI 순정 모드(Tier 1) 딥 리셋 완료."
+    _reset_detail = f" (심볼별 설정 {_sym_cleaned}건 추가 청소)" if _sym_cleaned > 0 else ""
+    msg = f"[시스템] 사령관 명령 수신: 튜닝 데이터 삭제 및 AI 순정 모드(Tier 1) 딥 리셋 완료.{_reset_detail}"
     bot_global_state["logs"].append(msg)
     logger.info(msg)
     return {"success": True, "message": msg}
