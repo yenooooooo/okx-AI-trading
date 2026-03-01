@@ -636,6 +636,10 @@ async def _auto_tune_by_balance(curr_bal):
     """잔고 규모에 따라 전략 파라미터를 자동 전환하여 자본 보호 극대화"""
     # 1. 기능 활성화 여부 체크
     if str(get_config('auto_preset_enabled') or 'false').lower() != 'true':
+        # OFF 전환 시 티어 상태 클리어 (배지 잔류 방지)
+        if bot_global_state.get("adaptive_tier", ""):
+            bot_global_state["adaptive_tier"] = ""
+            set_config('_current_adaptive_tier', '')
         return
 
     # 2. 현재 티어 판정 (잔고 구간별)

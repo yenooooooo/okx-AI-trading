@@ -394,8 +394,8 @@ async function syncBotStatus() {
                 tierBadge.textContent = `${t.emoji} ${t.label}`;
                 tierBadge.className = `inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border ${t.cls}`;
             } else {
-                tierBadge.textContent = '— 티어 감지 중';
-                tierBadge.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border border-gray-600/50 bg-gray-800/50 text-gray-400';
+                tierBadge.textContent = '🛡️ OFF — 수동 모드';
+                tierBadge.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border border-gray-600/50 bg-gray-800/50 text-gray-500';
             }
         }
 
