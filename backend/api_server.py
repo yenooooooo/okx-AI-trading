@@ -1107,11 +1107,21 @@ async def async_trading_loop():
 
                     # 지표 계산
                     df = strategy_instance.calculate_indicators(df)
-                    latest_rsi = df['rsi'].iloc[-1]
-                    latest_macd = df['macd'].iloc[-1]
-                    latest_upper = df['upper_band'].iloc[-1]
-                    latest_lower = df['lower_band'].iloc[-1]
-                    latest_adx = df['adx'].iloc[-1] if 'adx' in df.columns else float('nan')
+
+                    # ── [확정봉 기반 평가] 미완성 봉(마지막 행) 제외 → 봇 판단 = 화면 100% 일치 ──
+                    df_confirmed = df.iloc[:-1]
+                    if len(df_confirmed) < 50:
+                        continue  # 지표 계산 최소치 미달
+                    _confirmed_row = df_confirmed.iloc[-1]
+                    _confirmed_ts = int(_confirmed_row['timestamp'])
+                    candle_close = float(_confirmed_row['close'])
+
+                    # 확정봉 기준 지표 읽기
+                    latest_rsi = df_confirmed['rsi'].iloc[-1]
+                    latest_macd = df_confirmed['macd'].iloc[-1]
+                    latest_upper = df_confirmed['upper_band'].iloc[-1]
+                    latest_lower = df_confirmed['lower_band'].iloc[-1]
+                    latest_adx = df_confirmed['adx'].iloc[-1] if 'adx' in df_confirmed.columns else float('nan')
 
                     # ── [Phase 1] 거시적 추세(1h EMA200) 데이터 수집 (비동기, 캐시 적용) ──
                     macro_ema_200 = await strategy_instance.get_macro_ema_200(engine_api, symbol)
@@ -1124,8 +1134,23 @@ async def async_trading_loop():
                         strategy_instance.kill_switch_active = False
                         strategy_instance.kill_switch_until = 0
 
-                    # 매매 시그널 및 AI 판단 상태 평가 (거시적 필터 적용)
-                    signal, analysis_msg, payload = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
+                    # ── 캔들 변화 감지: 새 봉 완성 시만 시그널 재평가 (봉 간 캐시 재사용) ──
+                    _prev_confirmed = bot_global_state["symbols"][symbol].get("_last_confirmed_candle_ts", 0)
+                    _new_candle = (_confirmed_ts != _prev_confirmed)
+
+                    if _new_candle:
+                        bot_global_state["symbols"][symbol]["_last_confirmed_candle_ts"] = _confirmed_ts
+                        # 확정봉 기준 매매 시그널 평가 (candle_close = 확정봉 종가)
+                        signal, analysis_msg, payload = strategy_instance.check_entry_signal(df_confirmed, candle_close, macro_ema_200)
+                        # 캐시 저장 (봉 간 재사용)
+                        bot_global_state["symbols"][symbol]["_cached_signal"] = signal
+                        bot_global_state["symbols"][symbol]["_cached_analysis"] = analysis_msg
+                        bot_global_state["symbols"][symbol]["_cached_payload"] = payload
+                    else:
+                        # 동일 봉: 캐시된 시그널 사용 (게이트 결과 불변)
+                        signal = bot_global_state["symbols"][symbol].get("_cached_signal", "HOLD")
+                        analysis_msg = bot_global_state["symbols"][symbol].get("_cached_analysis", "")
+                        payload = bot_global_state["symbols"][symbol].get("_cached_payload", {})
 
                     # 뇌 상태 업데이트
                     if symbol not in ai_brain_state["symbols"]:
@@ -1133,127 +1158,132 @@ async def async_trading_loop():
 
                     ai_brain_state["symbols"][symbol].update({
                         "price": current_price,
+                        "candle_close": candle_close,
+                        "confirmed_candle_ts": _confirmed_ts,
+                        "timeframe": _tf,
                         "rsi": round(latest_rsi, 2) if not pd.isna(latest_rsi) else 50.0,
                         "macd": round(latest_macd, 2) if not pd.isna(latest_macd) else 0.0,
                         "bb_upper": round(latest_upper, 2) if not pd.isna(latest_upper) else 0.0,
                         "bb_lower": round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0,
                         "adx": round(latest_adx, 2) if not pd.isna(latest_adx) else 0.0,
-                        "chop": round(float(df['chop'].iloc[-1]), 1) if 'chop' in df.columns and not pd.isna(df['chop'].iloc[-1]) else 0.0,
+                        "chop": round(float(_confirmed_row['chop']), 1) if 'chop' in _confirmed_row.index and not pd.isna(_confirmed_row['chop']) else 0.0,
                         "decision": analysis_msg,
                         "macro_ema_200": float(macro_ema_200) if macro_ema_200 is not None else None,
                     })
 
-                    # ── [UI A+B] 실시간 진입 관문 체크리스트 + 봇 혼잣말 생성 ──
-                    import datetime as _dt
-                    _row       = df.iloc[-1]
-                    _rsi_v     = float(latest_rsi)  if not pd.isna(latest_rsi)  else 50.0
-                    _adx_v     = float(latest_adx)  if not pd.isna(latest_adx)  else 0.0
-                    _macd_v    = float(latest_macd) if not pd.isna(latest_macd) else 0.0
-                    _msig_v    = float(_row['macd_signal']) if 'macd_signal' in _row.index and not pd.isna(_row['macd_signal']) else 0.0
-                    _chop_v    = float(_row['chop'])     if 'chop'     in _row.index and not pd.isna(_row['chop'])     else 50.0
-                    _vol_v     = float(_row['volume'])   if not pd.isna(_row['volume'])   else 0.0
-                    _vsma_v    = float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0
-                    _ema20_v   = float(_row['ema_20'])   if 'ema_20'   in _row.index and not pd.isna(_row['ema_20'])   else (current_price or 1)
+                    # ── [확정봉 기반] 진입 관문 체크리스트 + 봇 혼잣말 (새 봉 완성 시만 갱신) ──
+                    if _new_candle:
+                        import datetime as _dt
+                        _row       = _confirmed_row
+                        _rsi_v     = float(latest_rsi)  if not pd.isna(latest_rsi)  else 50.0
+                        _adx_v     = float(latest_adx)  if not pd.isna(latest_adx)  else 0.0
+                        _macd_v    = float(latest_macd) if not pd.isna(latest_macd) else 0.0
+                        _msig_v    = float(_row['macd_signal']) if 'macd_signal' in _row.index and not pd.isna(_row['macd_signal']) else 0.0
+                        _chop_v    = float(_row['chop'])     if 'chop'     in _row.index and not pd.isna(_row['chop'])     else 50.0
+                        _vol_v     = float(_row['volume'])   if not pd.isna(_row['volume'])   else 0.0
+                        _vsma_v    = float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0
+                        _ema20_v   = float(_row['ema_20'])   if 'ema_20'   in _row.index and not pd.isna(_row['ema_20'])   else (candle_close or 1)
 
-                    _vol_ratio  = float(_vol_v / _vsma_v) if _vsma_v > 0 else 0.0
-                    _disparity  = float(abs((current_price - _ema20_v) / _ema20_v) * 100) if current_price and _ema20_v else 0.0
-                    _long_macd  = bool(_macd_v > _msig_v)
-                    _short_macd = bool(_macd_v < _msig_v)
-                    _long_rsi   = bool(30 <= _rsi_v <= 55)
-                    _short_rsi  = bool(45 <= _rsi_v <= 70)
-                    _mr_ok      = bool((_long_macd and _long_rsi) or (_short_macd and _short_rsi))
-                    _macro_ok   = True
-                    _macro_lbl  = "N/A"
-                    if macro_ema_200 is not None and current_price is not None:
-                        _macro_ok  = bool(current_price > float(macro_ema_200))
-                        _macro_lbl = "상승추세 ↑" if _macro_ok else "하락추세 ↓"
+                        _vol_ratio  = float(_vol_v / _vsma_v) if _vsma_v > 0 else 0.0
+                        _disparity  = float(abs((candle_close - _ema20_v) / _ema20_v) * 100) if candle_close and _ema20_v else 0.0
+                        _long_macd  = bool(_macd_v > _msig_v)
+                        _short_macd = bool(_macd_v < _msig_v)
+                        _long_rsi   = bool(30 <= _rsi_v <= 55)
+                        _short_rsi  = bool(45 <= _rsi_v <= 70)
+                        _mr_ok      = bool((_long_macd and _long_rsi) or (_short_macd and _short_rsi))
+                        _macro_ok   = True
+                        _macro_lbl  = "N/A"
+                        if macro_ema_200 is not None and candle_close is not None:
+                            _macro_ok  = bool(candle_close > float(macro_ema_200))
+                            _macro_lbl = "상승추세 ↑" if _macro_ok else "하락추세 ↓"
 
-                    # 동적 임계값 — strategy_instance 에서 직접 바인딩 (하드코딩 제거)
-                    _adx_min  = strategy_instance.adx_threshold
-                    _adx_max  = strategy_instance.adx_max
-                    _chop_max = strategy_instance.chop_threshold
-                    _vol_mul  = strategy_instance.volume_surge_multiplier
+                        # 동적 임계값 — strategy_instance 에서 직접 바인딩 (하드코딩 제거)
+                        _adx_min  = strategy_instance.adx_threshold
+                        _adx_max  = strategy_instance.adx_max
+                        _chop_max = strategy_instance.chop_threshold
+                        _vol_mul  = strategy_instance.volume_surge_multiplier
 
-                    _bypass_disp = bool(strategy_instance.bypass_disparity)
-                    _bypass_ind  = bool(strategy_instance.bypass_indicator)
-                    _bypass_mac  = bool(strategy_instance.bypass_macro)
-                    _gates = {
-                        "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max),     "value": f"{_adx_v:.1f}",                                                   "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
-                        "chop":      {"pass": bool(_chop_v < _chop_max),                "value": f"{_chop_v:.1f}",                                                  "target": f"< {_chop_max:.1f}"},
-                        "volume":    {"pass": bool(_vol_ratio >= _vol_mul),             "value": f"{_vol_ratio:.2f}x",                                              "target": f"≥ {_vol_mul:.1f}x"},
-                        "disparity": {"pass": bool(_bypass_disp or _disparity < 0.8),  "value": f"{_disparity:.2f}%" + (" [우회]" if _bypass_disp else ""),        "target": "< 0.8%"},
-                        "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),            "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "크로스+구간"},
-                        "macro":     {"pass": bool(_bypass_mac  or _macro_ok),         "value": _macro_lbl             + (" [우회]" if _bypass_mac  else ""),       "target": "EMA200"},
-                    }
-                    _passed = int(sum(1 for g in _gates.values() if g["pass"]))
-                    ai_brain_state["symbols"][symbol]["gates"]        = _gates
-                    ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
+                        _bypass_disp = bool(strategy_instance.bypass_disparity)
+                        _bypass_ind  = bool(strategy_instance.bypass_indicator)
+                        _bypass_mac  = bool(strategy_instance.bypass_macro)
+                        _gates = {
+                            "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max),     "value": f"{_adx_v:.1f}",                                                   "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
+                            "chop":      {"pass": bool(_chop_v < _chop_max),                "value": f"{_chop_v:.1f}",                                                  "target": f"< {_chop_max:.1f}"},
+                            "volume":    {"pass": bool(_vol_ratio >= _vol_mul),             "value": f"{_vol_ratio:.2f}x",                                              "target": f"≥ {_vol_mul:.1f}x"},
+                            "disparity": {"pass": bool(_bypass_disp or _disparity < 0.8),  "value": f"{_disparity:.2f}%" + (" [우회]" if _bypass_disp else ""),        "target": "< 0.8%"},
+                            "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),            "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "크로스+구간"},
+                            "macro":     {"pass": bool(_bypass_mac  or _macro_ok),         "value": _macro_lbl             + (" [우회]" if _bypass_mac  else ""),       "target": "EMA200"},
+                        }
+                        _passed = int(sum(1 for g in _gates.values() if g["pass"]))
+                        ai_brain_state["symbols"][symbol]["gates"]        = _gates
+                        ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
 
-                    # ── [Scalp Fitness] 스캘핑 적합도 점수 ──
-                    _sf_score = 0
-                    if _adx_v >= 30: _sf_score += 2
-                    if _chop_v < 50: _sf_score += 2
-                    if _vol_ratio >= 2.0: _sf_score += 2
-                    if _macro_ok: _sf_score += 1
-                    if 30 <= _rsi_v <= 70: _sf_score += 1
-                    ai_brain_state["symbols"][symbol]["scalp_fitness"] = _sf_score
-                    ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _sf_score >= 6 else "대기"
+                        # ── [Scalp Fitness] 스캘핑 적합도 점수 ──
+                        _sf_score = 0
+                        if _adx_v >= 30: _sf_score += 2
+                        if _chop_v < 50: _sf_score += 2
+                        if _vol_ratio >= 2.0: _sf_score += 2
+                        if _macro_ok: _sf_score += 1
+                        if 30 <= _rsi_v <= 70: _sf_score += 1
+                        ai_brain_state["symbols"][symbol]["scalp_fitness"] = _sf_score
+                        ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _sf_score >= 6 else "대기"
 
-                    # TG 알림 (6+ 시, 5분 쿨다운, was_fit 플래그)
-                    _sf_now = _time.time()
-                    if symbol not in _scalp_fitness_alert_state:
-                        _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "was_fit": False}
-                    _sf_st = _scalp_fitness_alert_state[symbol]
-                    _sf_is_fit = (_sf_score >= 6)
-                    if _sf_is_fit and ((not _sf_st["was_fit"]) or (_sf_now - _sf_st["last_alert_time"] >= 300)):
-                        send_telegram_sync(
-                            f"⚡ <b>스캘핑 적합 구간 감지!</b>\n{_TG_LINE}\n"
-                            f"코인 │ <code>{_sym_short(symbol)}</code>\n"
-                            f"점수 │ <b>{_sf_score}/8</b>\n{_TG_LINE}\n"
-                            f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
-                            f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}"
-                        )
-                        _sf_st["last_alert_time"] = _sf_now
-                    _sf_st["was_fit"] = _sf_is_fit
+                        # TG 알림 (6+ 시, 5분 쿨다운, was_fit 플래그)
+                        _sf_now = _time.time()
+                        if symbol not in _scalp_fitness_alert_state:
+                            _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "was_fit": False}
+                        _sf_st = _scalp_fitness_alert_state[symbol]
+                        _sf_is_fit = (_sf_score >= 6)
+                        if _sf_is_fit and ((not _sf_st["was_fit"]) or (_sf_now - _sf_st["last_alert_time"] >= 300)):
+                            send_telegram_sync(
+                                f"⚡ <b>스캘핑 적합 구간 감지!</b>\n{_TG_LINE}\n"
+                                f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                                f"점수 │ <b>{_sf_score}/8</b>\n{_TG_LINE}\n"
+                                f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
+                                f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}"
+                            )
+                            _sf_st["last_alert_time"] = _sf_now
+                        _sf_st["was_fit"] = _sf_is_fit
 
-                    # 봇 혼잣말 — 지금 무엇을 기다리는지 한 줄 생성
-                    _KST = _dt.timezone(_dt.timedelta(hours=9))
-                    _ts = _dt.datetime.now(_KST).strftime("%H:%M:%S")
-                    
-                    if _exit_only and bot_global_state["symbols"][symbol]["position"] == "NONE":
-                        _mono = f"[{_ts}] 🛏️ 퇴근 모드(Exit-Only) 가동 중 — 기존 포지션 관리만 수행하며 신규 진입을 차단합니다."
-                    elif signal == "LONG":
-                        _mono = f"[{_ts}] 🟢 LONG 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
-                    elif signal == "SHORT":
-                        _mono = f"[{_ts}] 🔴 SHORT 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
-                    elif not (_adx_min <= _adx_v <= _adx_max):
-                        if _adx_v < _adx_min:
-                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 방향성 없는 시장이야. {_adx_min:.0f} 이상으로 올라올 때까지 기다리는 중... ({_passed}/6)"
+                        # 봇 혼잣말 — 확정봉 시각 기준 1회 생성
+                        _KST = _dt.timezone(_dt.timedelta(hours=9))
+                        _candle_dt = _dt.datetime.fromtimestamp(_confirmed_ts / 1000, tz=_KST)
+                        _ts = _candle_dt.strftime("%H:%M") + "봉"
+
+                        if _exit_only and bot_global_state["symbols"][symbol]["position"] == "NONE":
+                            _mono = f"[{_ts}] 🛏️ 퇴근 모드(Exit-Only) 가동 중 — 기존 포지션 관리만 수행하며 신규 진입을 차단합니다."
+                        elif signal == "LONG":
+                            _mono = f"[{_ts}] 🟢 LONG 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
+                        elif signal == "SHORT":
+                            _mono = f"[{_ts}] 🔴 SHORT 진입 신호 포착! 6/6 관문 통과 — 주문 실행!"
+                        elif not (_adx_min <= _adx_v <= _adx_max):
+                            if _adx_v < _adx_min:
+                                _mono = f"[{_ts}] ADX {_adx_v:.1f} — 방향성 없는 시장이야. {_adx_min:.0f} 이상으로 올라올 때까지 기다리는 중... ({_passed}/6)"
+                            else:
+                                _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. {_adx_max:.0f} 아래로 식을 때까지 관망 중... ({_passed}/6)"
+                        elif _chop_v >= _chop_max:
+                            _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. {_chop_max:.1f} 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
+                        elif (not _bypass_disp) and _disparity >= 0.8:
+                            _mono = f"[{_ts}] 이격도 {_disparity:.2f}% — 이미 너무 달렸어. EMA20에 붙을 때까지 기다리는 중... ({_passed}/6)"
+                        elif _vol_ratio < _vol_mul:
+                            _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. {_vol_mul:.1f}x 이상 폭발 대기 중... ({_passed}/6)"
+                        elif (not _bypass_mac) and not _macro_ok:
+                            _mono = f"[{_ts}] EMA200 역방향({_macro_lbl}) — 큰 흐름 거슬러 들어가면 안 돼. 추세 전환 대기 중... ({_passed}/6)"
+                        elif (not _bypass_ind) and not _mr_ok:
+                            if _long_macd and not _long_rsi:
+                                _mono = f"[{_ts}] MACD 상향 ✓, RSI {_rsi_v:.1f} — LONG 진입 구간(30~55)으로 내려올 때까지 대기... ({_passed}/6)"
+                            elif _short_macd and not _short_rsi:
+                                _mono = f"[{_ts}] MACD 하향 ✓, RSI {_rsi_v:.1f} — SHORT 진입 구간(45~70)으로 올라올 때까지 대기... ({_passed}/6)"
+                            else:
+                                _mono = f"[{_ts}] RSI {_rsi_v:.1f}, MACD {_macd_v:.4f} vs Signal {_msig_v:.4f} — 크로스 신호 계산 중... ({_passed}/6)"
                         else:
-                            _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. {_adx_max:.0f} 아래로 식을 때까지 관망 중... ({_passed}/6)"
-                    elif _chop_v >= _chop_max:
-                        _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. {_chop_max:.1f} 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
-                    elif (not _bypass_disp) and _disparity >= 0.8:
-                        _mono = f"[{_ts}] 이격도 {_disparity:.2f}% — 이미 너무 달렸어. EMA20에 붙을 때까지 기다리는 중... ({_passed}/6)"
-                    elif _vol_ratio < _vol_mul:
-                        _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. {_vol_mul:.1f}x 이상 폭발 대기 중... ({_passed}/6)"
-                    elif (not _bypass_mac) and not _macro_ok:
-                        _mono = f"[{_ts}] EMA200 역방향({_macro_lbl}) — 큰 흐름 거슬러 들어가면 안 돼. 추세 전환 대기 중... ({_passed}/6)"
-                    elif (not _bypass_ind) and not _mr_ok:
-                        if _long_macd and not _long_rsi:
-                            _mono = f"[{_ts}] MACD 상향 ✓, RSI {_rsi_v:.1f} — LONG 진입 구간(30~55)으로 내려올 때까지 대기... ({_passed}/6)"
-                        elif _short_macd and not _short_rsi:
-                            _mono = f"[{_ts}] MACD 하향 ✓, RSI {_rsi_v:.1f} — SHORT 진입 구간(45~70)으로 올라올 때까지 대기... ({_passed}/6)"
-                        else:
-                            _mono = f"[{_ts}] RSI {_rsi_v:.1f}, MACD {_macd_v:.4f} vs Signal {_msig_v:.4f} — 크로스 신호 계산 중... ({_passed}/6)"
-                    else:
-                        _mono = f"[{_ts}] {_passed}/6 조건 충족 — RSI {_rsi_v:.1f} / MACD {_macd_v:.4f} 타점 탐색 중..."
+                            _mono = f"[{_ts}] {_passed}/6 조건 충족 — RSI {_rsi_v:.1f} / MACD {_macd_v:.4f} 타점 탐색 중..."
 
-                    _ml = ai_brain_state["symbols"][symbol].get("monologue", [])
-                    _ml.append(_mono)
-                    if len(_ml) > 30:
-                        _ml = _ml[-30:]
-                    ai_brain_state["symbols"][symbol]["monologue"] = _ml
+                        _ml = ai_brain_state["symbols"][symbol].get("monologue", [])
+                        _ml.append(_mono)
+                        if len(_ml) > 30:
+                            _ml = _ml[-30:]
+                        ai_brain_state["symbols"][symbol]["monologue"] = _ml
 
                     # [Phase 21.4] A.D.S 자가 면역 체계: 전략 영양실조(Starvation) 감시
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
