@@ -34,6 +34,32 @@ function parseTimeframeMs(tf) {
     return 900000; // fallback 15m
 }
 
+// --- OKX 수동 매매 싱크 ---
+/** OKX 수동 매매 기록을 대시보드로 동기화 */
+async function syncOkxTrades() {
+    const btn = document.getElementById('okx-sync-btn');
+    const origText = btn ? btn.textContent : '';
+    if (btn) btn.textContent = '\u23F3';  // ⏳
+    try {
+        const res = await fetch(`${API_URL}/sync_trades`, { method: 'POST' });
+        const data = await res.json();
+        if (btn) {
+            btn.textContent = data.synced > 0 ? ('\u2705' + data.synced) : '\u2705';
+            setTimeout(() => { btn.textContent = origText || '\uD83D\uDD04'; }, 3000);
+        }
+        // 싱크 건수 있으면 즉시 stats/heatmap 갱신
+        if (data.synced > 0) {
+            syncStats();
+            if (typeof fetchAndRenderHeatmap === 'function') fetchAndRenderHeatmap();
+        }
+    } catch(e) {
+        if (btn) {
+            btn.textContent = '\u274C';
+            setTimeout(() => { btn.textContent = origText || '\uD83D\uDD04'; }, 3000);
+        }
+    }
+}
+
 // --- Gate 수동 새로고침 ---
 /** Entry Readiness 패널 즉시 새로고침 (방식 A: syncBrain 즉시 1회 호출 + 시각 피드백) */
 async function forceRefreshGates() {

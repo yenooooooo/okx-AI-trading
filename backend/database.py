@@ -49,6 +49,17 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # OKX 싱크 전용 컬럼 마이그레이션
+    try:
+        cursor.execute('ALTER TABLE trades ADD COLUMN okx_order_id TEXT')
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute('ALTER TABLE trades ADD COLUMN source TEXT DEFAULT "BOT"')
+    except sqlite3.OperationalError:
+        pass
+
     # bot_config 테이블
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bot_config (
@@ -116,21 +127,27 @@ def init_db():
 def save_trade(symbol: str, position_type: str, entry_price: float, amount: float,
                exit_price: float = None, pnl: float = None, pnl_percent: float = None,
                fee: float = 0.0, gross_pnl: float = 0.0,
-               exit_reason: str = None, leverage: int = 1):
-    """거래 기록 저장"""
+               exit_reason: str = None, leverage: int = 1,
+               entry_time=None, exit_time=None,
+               okx_order_id: str = None, source: str = 'BOT'):
+    """거래 기록 저장 (OKX 싱크 시 entry_time/exit_time/okx_order_id/source 직접 지정 가능)"""
     conn = get_connection()
     cursor = conn.cursor()
 
-    entry_time = datetime.now()
-    exit_time = datetime.now() if exit_price else None
+    entry_time = entry_time or datetime.now()
+    exit_time = exit_time or (datetime.now() if exit_price else None)
+    # created_at: 싱크 시 실제 거래 날짜로 일별 통계 정확 집계
+    created_at = exit_time or entry_time
 
     cursor.execute('''
         INSERT INTO trades
         (symbol, position_type, entry_price, exit_price, entry_time, exit_time,
-         pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage,
+         okx_order_id, source, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (symbol, position_type, entry_price, exit_price, entry_time, exit_time,
-          pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage))
+          pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage,
+          okx_order_id, source, created_at))
 
     conn.commit()
     trade_id = cursor.lastrowid
@@ -265,6 +282,17 @@ def delete_symbol_configs(symbol: str) -> int:
     conn.commit()
     conn.close()
     return deleted
+
+def trade_exists_by_okx_id(okx_order_id: str) -> bool:
+    """OKX posId 기준 중복 거래 존재 여부 확인 (싱크 중복 방지)"""
+    if not okx_order_id:
+        return False
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM trades WHERE okx_order_id = ? LIMIT 1', (okx_order_id,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
 
 # 데이터베이스 초기화 (모듈 로드 시 자동 실행)
 init_db()

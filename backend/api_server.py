@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
-from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs, delete_symbol_configs
+from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs, delete_symbol_configs, trade_exists_by_okx_id
 from backtester import Backtester
 from notifier import send_telegram_sync
 from logger import get_logger
@@ -365,6 +365,7 @@ _trading_task = None  # 중복 루프 방지용 태스크 추적
 _broadcast_task = None  # /ws/dashboard 브로드캐스트 태스크 (클라이언트 연결 시 on-demand 시작)
 _private_ws_task = None  # [Phase 33] Private WS 루프 태스크 추적 (헬스체크용)
 _margin_guard_bg_task = None  # Margin Guard 백그라운드 모니터링 태스크
+_trade_sync_task = None  # OKX 수동 매매 싱크 백그라운드 태스크
 _engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
 _active_strategy: TradingStrategy = None  # 활성 전략 인스턴스 레퍼런스 (wipe_db 인메모리 리셋용)
 
@@ -530,10 +531,88 @@ async def _margin_guard_bg_loop():
             pass
         await asyncio.sleep(60)
 
+# ════════════ [OKX Trade Sync] 수동 매매 기록 자동 싱크 ════════════
+
+async def _fetch_okx_positions_history(engine, limit=100):
+    """OKX 청산 포지션 히스토리 조회 — /api/v5/account/positions-history"""
+    result = await asyncio.to_thread(
+        engine.exchange.private_get_account_positions_history,
+        {'instType': 'SWAP', 'limit': str(limit)}
+    )
+    return result.get('data', [])
+
+async def _sync_okx_trades(engine):
+    """OKX 수동 매매 기록 싱크 — posId 기준 중복 방지 후 DB 저장"""
+    from datetime import datetime as _sync_dt
+    positions = await _fetch_okx_positions_history(engine)
+    synced = 0
+    for pos in positions:
+        pos_id = pos.get('posId', '')
+        if not pos_id or trade_exists_by_okx_id(pos_id):
+            continue  # 이미 싱크됨 또는 posId 없음
+
+        # instId → CCXT 심볼 변환 (e.g., "BTC-USDT-SWAP" → "BTC/USDT:USDT")
+        inst_id = pos.get('instId', '')
+        try:
+            symbol = engine.exchange.safe_symbol(inst_id)
+        except Exception:
+            symbol = inst_id  # 변환 실패 시 원본 사용
+
+        direction = (pos.get('direction') or 'long').upper()
+        entry_price = float(pos.get('openAvgPx') or 0)
+        exit_price = float(pos.get('closeAvgPx') or 0)
+        gross_pnl = float(pos.get('pnl') or 0)
+        fee = float(pos.get('fee') or 0)
+        net_pnl = gross_pnl + fee  # fee는 음수
+        leverage = int(pos.get('lever') or 1)
+        amount = float(pos.get('closeTotalPos') or 0)
+
+        # pnl_percent 계산
+        pnl_percent = 0.0
+        if entry_price > 0:
+            if direction == 'LONG':
+                pnl_percent = (exit_price - entry_price) / entry_price * 100
+            else:
+                pnl_percent = (entry_price - exit_price) / entry_price * 100
+
+        # 타임스탬프 변환 (ms → datetime)
+        entry_time = _sync_dt.fromtimestamp(int(pos.get('cTime', 0)) / 1000) if pos.get('cTime') else None
+        exit_time = _sync_dt.fromtimestamp(int(pos.get('uTime', 0)) / 1000) if pos.get('uTime') else None
+
+        save_trade(
+            symbol=symbol, position_type=direction,
+            entry_price=entry_price, amount=amount,
+            exit_price=exit_price, pnl=round(net_pnl, 6),
+            pnl_percent=round(pnl_percent, 4), fee=round(fee, 6),
+            gross_pnl=round(gross_pnl, 6), exit_reason='OKX_MANUAL',
+            leverage=leverage, entry_time=entry_time,
+            exit_time=exit_time, okx_order_id=pos_id,
+            source='OKX_SYNC'
+        )
+        synced += 1
+        logger.info(f"[OKX Sync] 싱크: {symbol} {direction} PnL={net_pnl:.4f} (posId={pos_id})")
+
+    return synced
+
+async def _okx_trade_sync_loop():
+    """5분마다 OKX 수동 매매 기록 자동 싱크"""
+    await asyncio.sleep(30)  # 서버 시작 후 30초 대기 (엔진 안정화)
+    while True:
+        try:
+            if _engine and _engine.exchange:
+                count = await _sync_okx_trades(_engine)
+                if count > 0:
+                    logger.info(f"[OKX Sync] {count}건 수동 매매 기록 싱크 완료")
+        except Exception as e:
+            logger.warning(f"[OKX Sync] 싱크 실패: {e}")
+        await asyncio.sleep(300)  # 5분
+
+# ════════════════════════════════════════════════════════════════════
+
 @app_server.on_event("startup")
 async def startup_event():
     """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
-    global _engine, _private_ws_task, _margin_guard_bg_task
+    global _engine, _private_ws_task, _margin_guard_bg_task, _trade_sync_task
     init_db()
     bot_global_state["logs"].append("[봇] 🔴 실전망(LIVE) 서버 시스템 가동 시작 - 실전 API 연동 완료")
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
@@ -557,6 +636,8 @@ async def startup_event():
         logger.info("Private WebSocket 태스크 시작")
         _margin_guard_bg_task = asyncio.create_task(_margin_guard_bg_loop())  # Margin Guard 백그라운드 시작
         logger.info("Margin Guard 백그라운드 모니터링 태스크 시작")
+        _trade_sync_task = asyncio.create_task(_okx_trade_sync_loop())  # OKX 수동 매매 싱크 시작
+        logger.info("OKX Trade Sync 백그라운드 태스크 시작")
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
@@ -2918,6 +2999,18 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 # ===== 신규 엔드포인트 =====
+
+@app_server.post("/api/v1/sync_trades")
+async def trigger_trade_sync():
+    """OKX 매매 기록 수동 싱크 트리거 — 대시보드 🔄 버튼용"""
+    if not _engine or not _engine.exchange:
+        return {"success": False, "error": "OKX 연결 안됨", "synced": 0}
+    try:
+        count = await _sync_okx_trades(_engine)
+        return {"success": True, "synced": count, "message": f"{count}건 싱크 완료"}
+    except Exception as e:
+        logger.warning(f"[OKX Sync] 수동 트리거 실패: {e}")
+        return {"success": False, "error": str(e), "synced": 0}
 
 @app_server.get("/api/v1/stats")
 async def fetch_statistics():

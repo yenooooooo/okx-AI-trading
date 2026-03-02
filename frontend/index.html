@@ -957,7 +957,12 @@
                 <div class="glass-panel p-5 flex flex-col gap-3.5 text-xs">
                     <!-- 헤더 + OKX 실전 배지 -->
                     <div class="flex items-center justify-between border-b border-navy-border pb-2">
-                        <h3 class="text-gray-400 uppercase tracking-widest text-[10px]">누적 성과 지표</h3>
+                        <div class="flex items-center gap-1.5">
+                            <h3 class="text-gray-400 uppercase tracking-widest text-[10px]">누적 성과 지표</h3>
+                            <button onclick="syncOkxTrades()" id="okx-sync-btn" title="OKX 수동 매매 기록 동기화"
+                                class="text-gray-500 hover:text-cyan-400 transition-colors duration-150 leading-none select-none"
+                                style="font-size:12px; line-height:1; cursor:pointer; background:none; border:none; padding:0;">&#x1f504;</button>
+                        </div>
                         <span class="text-[8px] font-mono bg-neon-green/10 border border-neon-green/30 text-neon-green px-2 py-0.5 rounded-full tracking-wide">OKX 실전</span>
                     </div>
                     <!-- Hero: Total PnL + Daily PnL -->
