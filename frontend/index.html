@@ -224,6 +224,21 @@
         .preset-flash {
             animation: preset-input-flash 0.7s ease-out forwards;
         }
+        /* ════════════ [X-Ray] 매매 진단 모달 탭 스타일 ════════════ */
+        .xray-tab {
+            padding: 6px 12px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            color: #8b949e;
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: none;
+            border-top: none; border-left: none; border-right: none;
+        }
+        .xray-tab:hover { color: #c9d1d9; }
+        .xray-tab.active { color: #a78bfa; border-bottom-color: #a78bfa; }
     </style>
 </head>
 
@@ -290,6 +305,11 @@
                     <button onclick="runHealthCheck()" id="health-check-btn"
                         class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/25 hover:border-emerald-400 transition-all cursor-pointer">
                         🔗 연결 점검
+                    </button>
+                    <!-- [X-Ray] 매매 진단 버튼 -->
+                    <button onclick="openXrayModal()" id="xray-btn"
+                        class="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border border-purple-500/40 bg-purple-500/10 text-purple-400 hover:bg-purple-500/25 hover:border-purple-400 transition-all cursor-pointer">
+                        🩻 매매 X-Ray
                     </button>
                 </div>
             </div>
@@ -1245,6 +1265,45 @@
                         🔄 재점검
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ════════════ [X-Ray] 매매 진단 Modal ════════════ -->
+    <div id="xray-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4"
+        style="background: rgba(13,17,23,0.85); backdrop-filter: blur(6px);">
+        <div class="glass-panel w-full max-w-4xl flex flex-col max-h-[90vh]">
+            <!-- Modal Header -->
+            <div class="flex items-center justify-between px-5 py-4 border-b border-navy-border flex-shrink-0">
+                <div class="flex items-center gap-3">
+                    <span class="text-lg">🩻</span>
+                    <div>
+                        <h2 class="text-sm font-mono font-bold text-text-main tracking-widest">매매 X-Ray</h2>
+                        <p class="text-[9px] font-mono text-gray-500 mt-0.5">Trading Loop Deep Diagnostic</p>
+                    </div>
+                </div>
+                <button onclick="closeXrayModal()"
+                    class="text-gray-500 hover:text-white text-xl font-mono transition">✕</button>
+            </div>
+            <!-- Tab Bar -->
+            <div class="flex border-b border-navy-border px-5 gap-1 flex-shrink-0" id="xray-tabs">
+                <button class="xray-tab active" data-tab="loop" onclick="switchXrayTab('loop')">루프 상태</button>
+                <button class="xray-tab" data-tab="blocker" onclick="switchXrayTab('blocker')">차단 마법사</button>
+                <button class="xray-tab" data-tab="attempts" onclick="switchXrayTab('attempts')">시도 이력</button>
+                <button class="xray-tab" data-tab="gates" onclick="switchXrayTab('gates')">7게이트</button>
+                <button class="xray-tab" data-tab="okx" onclick="switchXrayTab('okx')">OKX 딥검증</button>
+            </div>
+            <!-- Tab Content -->
+            <div class="overflow-y-auto flex-grow px-5 py-4" id="xray-content">
+                <div class="text-center text-gray-500 font-mono text-xs py-8">탭을 선택하세요</div>
+            </div>
+            <!-- Footer -->
+            <div class="px-5 py-3 border-t border-navy-border flex-shrink-0 flex justify-between items-center">
+                <span id="xray-timestamp" class="text-[9px] font-mono text-gray-600"></span>
+                <button onclick="refreshCurrentXrayTab()"
+                    class="px-4 py-1.5 text-[10px] font-mono font-bold bg-purple-500/15 border border-purple-500/40 text-purple-400 hover:bg-purple-500/25 rounded transition">
+                    🔄 새로고침
+                </button>
             </div>
         </div>
     </div>
