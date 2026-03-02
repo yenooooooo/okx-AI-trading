@@ -462,40 +462,45 @@ async function syncBotStatus() {
 
         // 7. [Margin Guard] 증거금 사전 경고 렌더링
         if (data.margin_guard) {
-            const mgBadge = document.getElementById('margin-guard-badge');
-            const cmdMgWarn = document.getElementById('cmd-margin-warn');
-            let _mgHasWarn = false;
-            let _mgSym = '', _mgCurLev = 0, _mgRecLev = 0;
-
-            for (const [sym, mg] of Object.entries(data.margin_guard)) {
-                if (mg.needs_change) {
-                    _mgHasWarn = true;
-                    _mgSym = sym.split(':')[0];
-                    _mgCurLev = mg.current_leverage;
-                    _mgRecLev = mg.recommended_leverage;
-                    break;
-                }
-            }
-
-            if (_mgHasWarn && mgBadge) {
-                mgBadge.classList.remove('hidden');
-                const mgSymEl = document.getElementById('mg-symbol');
-                const mgCurEl = document.getElementById('mg-current-lev');
-                const mgRecEl = document.getElementById('mg-rec-lev');
-                if (mgSymEl) mgSymEl.textContent = _mgSym;
-                if (mgCurEl) mgCurEl.textContent = _mgCurLev + 'x';
-                if (mgRecEl) mgRecEl.textContent = _mgRecLev + 'x';
-                // 토스트: 5분 쿨다운
-                if (!window._mgLastToast || Date.now() - window._mgLastToast > 300000) {
-                    window._mgLastToast = Date.now();
-                    showToast('Margin Guard', `${_mgSym} 증거금 부족 — ${_mgRecLev}x 추천`, 'ERROR');
-                }
-            } else if (mgBadge) {
-                mgBadge.classList.add('hidden');
-            }
-
-            if (cmdMgWarn) cmdMgWarn.classList.toggle('hidden', !_mgHasWarn);
             window._marginGuardData = data.margin_guard;
+
+            // [Bug Fix] 적용 직후 grace period (5초) — 백엔드 갱신 전 배지 재표시 방지
+            const _mgInGrace = window._mgAppliedAt && (Date.now() - window._mgAppliedAt < 5000);
+            if (!_mgInGrace) {
+                const mgBadge = document.getElementById('margin-guard-badge');
+                const cmdMgWarn = document.getElementById('cmd-margin-warn');
+                let _mgHasWarn = false;
+                let _mgSym = '', _mgCurLev = 0, _mgRecLev = 0;
+
+                for (const [sym, mg] of Object.entries(data.margin_guard)) {
+                    if (mg.needs_change) {
+                        _mgHasWarn = true;
+                        _mgSym = sym.split(':')[0];
+                        _mgCurLev = mg.current_leverage;
+                        _mgRecLev = mg.recommended_leverage;
+                        break;
+                    }
+                }
+
+                if (_mgHasWarn && mgBadge) {
+                    mgBadge.classList.remove('hidden');
+                    const mgSymEl = document.getElementById('mg-symbol');
+                    const mgCurEl = document.getElementById('mg-current-lev');
+                    const mgRecEl = document.getElementById('mg-rec-lev');
+                    if (mgSymEl) mgSymEl.textContent = _mgSym;
+                    if (mgCurEl) mgCurEl.textContent = _mgCurLev + 'x';
+                    if (mgRecEl) mgRecEl.textContent = _mgRecLev + 'x';
+                    // 토스트: 5분 쿨다운
+                    if (!window._mgLastToast || Date.now() - window._mgLastToast > 300000) {
+                        window._mgLastToast = Date.now();
+                        showToast('Margin Guard', `${_mgSym} 증거금 부족 — ${_mgRecLev}x 추천`, 'ERROR');
+                    }
+                } else if (mgBadge) {
+                    mgBadge.classList.add('hidden');
+                }
+
+                if (cmdMgWarn) cmdMgWarn.classList.toggle('hidden', !_mgHasWarn);
+            }
         }
 
     } catch (error) {
@@ -3841,7 +3846,12 @@ async function applyRecommendedLeverage() {
     for (const [sym, d] of Object.entries(mg)) {
         if (d.needs_change && d.recommended_leverage) {
             try {
-                await fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}`, { method: 'POST' });
+                // [Bug Fix] 심볼 전용 + GLOBAL 동시 저장 (saveTuningConfig 패턴 동일)
+                // get_config('leverage', symbol)가 심볼 전용 키를 우선 조회하므로 반드시 심볼 전용도 저장
+                await Promise.all([
+                    fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}&symbol=${encodeURIComponent(sym)}`, { method: 'POST' }),
+                    fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}`, { method: 'POST' }),
+                ]);
                 showToast('Margin Guard', `레버리지 ${d.current_leverage}x → ${d.recommended_leverage}x 적용 완료`, 'SUCCESS');
 
                 // UI 즉시 갱신
@@ -3851,6 +3861,9 @@ async function applyRecommendedLeverage() {
                 if (leftLev) leftLev.textContent = d.recommended_leverage + 'x';
                 const cmdLev = document.getElementById('cmd-lev-badge');
                 if (cmdLev) cmdLev.textContent = d.recommended_leverage + 'x';
+
+                // [Bug Fix] grace period 설정 — syncBotStatus 재실행 시 배지 즉시 재표시 방지
+                window._mgAppliedAt = Date.now();
 
                 // 경고 배지 숨김
                 const badge = document.getElementById('margin-guard-badge');

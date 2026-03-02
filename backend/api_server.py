@@ -2690,6 +2690,21 @@ async def fetch_current_status():
             except Exception:
                 _margin_guard[_mg_sym] = {"feasible": True, "needs_change": False}
 
+    # ── Margin Guard 텔레그램 사전 경고 (봇 미실행 시에도 알림, 5분 쿨다운) ──
+    for _mg_sym_key, _mg_data in _margin_guard.items():
+        if _mg_data.get("needs_change"):
+            _mg_alert_key = f"_margin_guard_last_alert_{_mg_sym_key}"
+            _mg_last_ts = float(get_config(_mg_alert_key) or 0)
+            if _time.time() - _mg_last_ts > 300:  # 5분 쿨다운
+                set_config(_mg_alert_key, str(_time.time()))
+                try:
+                    send_telegram_sync(_tg_margin_guard(
+                        _mg_sym_key, _mg_data["current_leverage"], _mg_data["recommended_leverage"],
+                        _mg_bal, _mg_data["margin_per_contract"]
+                    ))
+                except Exception:
+                    pass  # 텔레그램 실패 시 status 응답 보호
+
     return {
         "is_running": bot_global_state["is_running"],
         "balance": bot_global_state["balance"],
