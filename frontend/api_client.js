@@ -2951,6 +2951,8 @@ async function toggleStressBypass(feature, enabled) {
 async function refreshStressBypassUI() {
     const data = await fetchStressBypass();
     if (!data) return;
+
+    // ── 바이패스 토글 버튼 갱신 ──
     const features = ['kill_switch', 'cooldown_loss', 'daily_loss', 'reentry_cd', 'stale_price'];
     features.forEach(f => {
         const btn = document.getElementById(`bypass-btn-${f}`);
@@ -2970,6 +2972,86 @@ async function refreshStressBypassUI() {
             timer.textContent = '';
         }
     });
+
+    // ── 방어 상태 모니터 렌더링 ──
+    const ds = data._defense_state;
+    if (!ds) return;
+
+    // Kill Switch 카드
+    const ksCard  = document.getElementById('def-ks-card');
+    const ksDot   = document.getElementById('def-ks-dot');
+    const ksLabel = document.getElementById('def-ks-label');
+    const ksTimer = document.getElementById('def-ks-timer');
+    if (ksCard && ksDot && ksLabel && ksTimer) {
+        if (ds.kill_switch_active) {
+            ksCard.className  = 'rounded-lg p-2.5 border border-red-500/50 bg-red-900/20 shadow-[0_0_10px_rgba(239,68,68,0.15)] transition-all duration-500';
+            ksDot.className   = 'w-2 h-2 rounded-full bg-red-500 animate-pulse transition-all duration-300';
+            ksLabel.className = 'text-[11px] font-mono font-bold text-red-400';
+            ksLabel.textContent = '🔴 ACTIVE';
+            const rem = ds.kill_switch_remaining_sec;
+            const kh = Math.floor(rem / 3600), km = Math.floor((rem % 3600) / 60);
+            ksTimer.textContent = `${kh}시간 ${km}분 남음`;
+        } else {
+            ksCard.className  = 'rounded-lg p-2.5 border border-gray-700/50 bg-gray-900/60 transition-all duration-500';
+            ksDot.className   = 'w-2 h-2 rounded-full bg-emerald-500 transition-all duration-300';
+            ksLabel.className = 'text-[11px] font-mono font-bold text-emerald-400';
+            ksLabel.textContent = '🟢 정상';
+            ksTimer.textContent = '';
+        }
+    }
+
+    // 연패 쿨다운 카드
+    const cdCard  = document.getElementById('def-cd-card');
+    const cdDot   = document.getElementById('def-cd-dot');
+    const cdLabel = document.getElementById('def-cd-label');
+    const cdCount = document.getElementById('def-cd-count');
+    const cdTimer = document.getElementById('def-cd-timer');
+    if (cdCard && cdDot && cdLabel && cdTimer) {
+        const losses  = ds.consecutive_losses || 0;
+        const trigger = ds.cd_trigger || 3;
+        const countTxt = `${losses}/${trigger}`;
+        if (cdCount) cdCount.textContent = countTxt;
+
+        if (ds.cooldown_active) {
+            cdCard.className  = 'rounded-lg p-2.5 border border-orange-500/50 bg-orange-900/20 shadow-[0_0_10px_rgba(249,115,22,0.15)] transition-all duration-500';
+            cdDot.className   = 'w-2 h-2 rounded-full bg-orange-400 animate-pulse transition-all duration-300';
+            cdLabel.className = 'text-[11px] font-mono font-bold text-orange-400';
+            cdLabel.innerHTML = `🟡 COOLING <span id="def-cd-count" class="text-[9px] font-normal">${countTxt}</span>`;
+            const rem = ds.cooldown_remaining_sec;
+            const cm = Math.floor(rem / 60), cs = Math.floor(rem % 60);
+            cdTimer.textContent = `${cm}분 ${cs}초 남음`;
+        } else if (losses > 0) {
+            cdCard.className  = 'rounded-lg p-2.5 border border-yellow-700/40 bg-yellow-900/10 transition-all duration-500';
+            cdDot.className   = 'w-2 h-2 rounded-full bg-yellow-500 transition-all duration-300';
+            cdLabel.className = 'text-[11px] font-mono font-bold text-yellow-500';
+            cdLabel.innerHTML = `⚠️ ${losses}연패 <span id="def-cd-count" class="text-[9px] font-normal">${countTxt}</span>`;
+            cdTimer.textContent = '';
+        } else {
+            cdCard.className  = 'rounded-lg p-2.5 border border-gray-700/50 bg-gray-900/60 transition-all duration-500';
+            cdDot.className   = 'w-2 h-2 rounded-full bg-emerald-500 transition-all duration-300';
+            cdLabel.className = 'text-[11px] font-mono font-bold text-emerald-400';
+            cdLabel.innerHTML = `🟢 정상 <span id="def-cd-count" class="text-[9px] text-gray-700 font-normal">${countTxt}</span>`;
+            cdTimer.textContent = '';
+        }
+    }
+
+    // 일일 누적 PnL 미니바
+    const pnlEl  = document.getElementById('def-daily-pnl');
+    const barEl  = document.getElementById('def-daily-bar');
+    if (pnlEl && barEl) {
+        const pct    = ds.daily_pnl_pct || 0;
+        const maxPct = ds.daily_max_pct || 7;
+        const sign   = pct >= 0 ? '+' : '';
+        pnlEl.textContent = `${sign}${pct.toFixed(2)}%`;
+        if (pct >= 0) {
+            pnlEl.className = 'text-[9px] font-mono font-bold text-neon-green';
+            barEl.className = 'h-full transition-all duration-700 rounded-full bg-neon-green';
+        } else {
+            pnlEl.className = 'text-[9px] font-mono font-bold text-red-400';
+            barEl.className = 'h-full transition-all duration-700 rounded-full bg-red-500';
+        }
+        barEl.style.width = `${Math.min(100, Math.abs(pct) / maxPct * 100).toFixed(1)}%`;
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

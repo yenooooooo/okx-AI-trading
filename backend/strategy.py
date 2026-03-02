@@ -432,3 +432,26 @@ class TradingStrategy:
                 return True  # 킬스위치 발동!
 
         return False
+
+    def save_state(self, set_config_fn):
+        """[방어 상태 영속화] 킬스위치·쿨다운 상태를 SQLite에 저장 — 서버 재시작 후 복원 가능"""
+        set_config_fn("strategy_ks_active", "1" if self.kill_switch_active else "0")
+        set_config_fn("strategy_ks_until", str(self.kill_switch_until))
+        set_config_fn("strategy_cd_until", str(self.loss_cooldown_until))
+        set_config_fn("strategy_cd_count", str(self.consecutive_loss_count))
+
+    def load_state(self, get_config_fn):
+        """[방어 상태 복원] 서버 시작 시 SQLite에서 방어 상태 복원 — 만료된 상태는 무시"""
+        try:
+            now = _time.time()
+            ks_until = float(get_config_fn("strategy_ks_until") or 0)
+            cd_until = float(get_config_fn("strategy_cd_until") or 0)
+            # 만료되지 않은 상태만 복원 (재시작 전 이미 해제된 잠금은 무시)
+            if ks_until > now:
+                self.kill_switch_active = (str(get_config_fn("strategy_ks_active")) == "1")
+                self.kill_switch_until = ks_until
+            if cd_until > now:
+                self.loss_cooldown_until = cd_until
+                self.consecutive_loss_count = int(get_config_fn("strategy_cd_count") or 0)
+        except (TypeError, ValueError):
+            pass  # DB 값 없거나 형식 오류 시 기본값 유지

@@ -363,6 +363,16 @@ def _is_bypass_active(feature_key: str) -> bool:
         return False
 
 
+def _save_strategy_state(s):
+    """[방어 상태 영속화] TradingStrategy 방어 상태(킬스위치+쿨다운)를 SQLite에 즉시 저장"""
+    if s is None:
+        return
+    set_config("strategy_ks_active", "1" if s.kill_switch_active else "0")
+    set_config("strategy_ks_until", str(s.kill_switch_until))
+    set_config("strategy_cd_until", str(s.loss_cooldown_until))
+    set_config("strategy_cd_count", str(s.consecutive_loss_count))
+
+
 def _generate_ws_sign(secret_key: str, timestamp: str) -> str:
     """OKX WebSocket 인증 서명 생성 (HMAC-SHA256 Base64)"""
     message = timestamp + "GET" + "/users/self/verify"
@@ -774,6 +784,9 @@ async def async_trading_loop():
     _active_strategy = strategy_instance  # wipe_db 엔드포인트가 인메모리 상태를 리셋할 수 있도록 등록
     # [v2.2] DB 설정에서 일일 최대 손실율 동기화 (UI에서 변경 가능)
     strategy_instance.daily_max_loss_pct = float(get_config('daily_max_loss_rate') or 0.07)
+    # [방어 상태 복원] 서버 재시작 후 킬스위치·쿨다운 상태 복원 (만료된 상태는 자동 무시)
+    strategy_instance.load_state(get_config)
+    logger.info(f"[방어 상태 복원] KS={strategy_instance.kill_switch_active} | CD_until={strategy_instance.loss_cooldown_until:.0f} | losses={strategy_instance.consecutive_loss_count}")
 
     if not engine_api or not engine_api.exchange:
         logger.error("OKXEngine 미초기화 상태 - 매매 루프 중단")
@@ -879,6 +892,7 @@ async def async_trading_loop():
                     fake_loss = -(curr_bal * 0.10)
                     strategy_instance.daily_pnl_accumulated = fake_loss
                     kill_triggered = strategy_instance.record_daily_pnl(0)
+                    _save_strategy_state(strategy_instance)
                     drill_msg = f"🚨 [소방훈련: 킬스위치 강제 주입 완료] 가상 일일 손실: {fake_loss:+.2f} USDT | 발동: {'YES' if kill_triggered else 'NO'}"
                     bot_global_state["logs"].append(drill_msg)
                     logger.warning(drill_msg)
@@ -887,6 +901,7 @@ async def async_trading_loop():
                 elif _stress_type == "LOSS_STREAK":
                     strategy_instance.consecutive_loss_count = strategy_instance.cooldown_losses_trigger - 1
                     strategy_instance.record_trade_result(True)
+                    _save_strategy_state(strategy_instance)
                     import datetime as _dt_s
                     _cd_end = _dt_s.datetime.fromtimestamp(
                         strategy_instance.loss_cooldown_until,
@@ -902,6 +917,7 @@ async def async_trading_loop():
                     strategy_instance.daily_pnl_accumulated = 0.0
                     strategy_instance.consecutive_loss_count = 0
                     strategy_instance.loss_cooldown_until = 0
+                    _save_strategy_state(strategy_instance)
                     reset_msg = "✅ [소방훈련 해제 완료] 킬스위치 OFF + 쿨다운 OFF + 일일 PnL 리셋"
                     bot_global_state["logs"].append(reset_msg)
                     logger.info(reset_msg)
@@ -1740,6 +1756,7 @@ async def async_trading_loop():
                                         if _is_bypass_active('stress_bypass_cooldown_loss'):
                                             strategy_instance.loss_cooldown_until = 0
                                             strategy_instance.consecutive_loss_count = 0
+                                        _save_strategy_state(strategy_instance)
 
                                         # [Phase 21.3] A.D.S 자가 면역 체계: 손절 자동 부검 리포트 (Post-Mortem)
                                         if is_loss:
@@ -1781,6 +1798,7 @@ async def async_trading_loop():
                                         # [v2.2] 일일 누적 PnL 반영 + 킬스위치 체크 (Paper는 제외)
                                         if not _is_paper:
                                             kill_triggered = strategy_instance.record_daily_pnl(pnl_amount)
+                                            _save_strategy_state(strategy_instance)
                                             if kill_triggered:
                                                 kill_msg = f"🚨 [킬스위치 발동] 일일 최대 손실({strategy_instance.daily_max_loss_pct*100:.0f}%) 도달. 24시간 동안 매매 엔진 셋다운."
                                                 bot_global_state["logs"].append(kill_msg)
@@ -2159,6 +2177,29 @@ async def get_stress_bypass():
             "active": active,
             "remaining_sec": max(0.0, 86400 - elapsed) if active else 0.0,
         }
+    # ── 방어 상태 모니터: UI 실시간 표시용 전략 방어 상태 포함 ──
+    _ds_now = _time.time()
+    _ds = {
+        "kill_switch_active": False, "kill_switch_remaining_sec": 0.0,
+        "cooldown_active": False, "cooldown_remaining_sec": 0.0,
+        "consecutive_losses": 0, "cd_trigger": 3,
+        "daily_pnl_pct": 0.0, "daily_max_pct": 7.0,
+    }
+    if _active_strategy:
+        _ks_until = _active_strategy.kill_switch_until
+        _ks_on = _active_strategy.kill_switch_active and _ks_until > _ds_now
+        _cd_until = _active_strategy.loss_cooldown_until
+        _cd_on = _cd_until > _ds_now
+        _ds["kill_switch_active"] = _ks_on
+        _ds["kill_switch_remaining_sec"] = round(max(0.0, _ks_until - _ds_now), 1) if _ks_on else 0.0
+        _ds["cooldown_active"] = _cd_on
+        _ds["cooldown_remaining_sec"] = round(max(0.0, _cd_until - _ds_now), 1) if _cd_on else 0.0
+        _ds["consecutive_losses"] = _active_strategy.consecutive_loss_count
+        _ds["cd_trigger"] = _active_strategy.cooldown_losses_trigger
+        if _active_strategy.daily_start_balance > 0:
+            _ds["daily_pnl_pct"] = round(_active_strategy.daily_pnl_accumulated / _active_strategy.daily_start_balance * 100, 2)
+        _ds["daily_max_pct"] = round(_active_strategy.daily_max_loss_pct * 100, 1)
+    result["_defense_state"] = _ds
     return result
 
 
@@ -2188,6 +2229,8 @@ async def set_stress_bypass(feature: str, enabled: bool):
             _active_strategy.consecutive_loss_count = 0
     else:
         set_config(db_key, "0")
+    # 바이패스로 인해 변경된 방어 상태를 즉시 DB에 반영
+    _save_strategy_state(_active_strategy)
     return {
         "feature": feature,
         "active": enabled,
@@ -3669,6 +3712,8 @@ async def run_health_check():
             'stress_bypass_kill_switch', 'stress_bypass_cooldown_loss',
             'stress_bypass_daily_loss', 'stress_bypass_reentry_cd',
             'stress_bypass_stale_price',
+            'strategy_ks_active', 'strategy_ks_until',
+            'strategy_cd_until', 'strategy_cd_count',
         }
         _actual_keys = set(_all_config.keys())
         _missing = _expected_keys - _actual_keys
