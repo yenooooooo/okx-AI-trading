@@ -335,6 +335,8 @@ def _reset_position_state(sym_state: dict):
     sym_state["is_shadow_hunting"] = False
     sym_state["contracts"] = 0
     sym_state["leverage"] = 1
+    sym_state["exchange_tp_filled"] = False
+    sym_state["tp_order_amount"] = 0
     # PENDING 관련 동적 필드 제거
     for _pk in ["pending_order_id", "pending_order_time", "pending_amount", "pending_price"]:
         sym_state.pop(_pk, None)
@@ -405,6 +407,13 @@ async def _apply_position_ws_update(pos: dict):
             bot_global_state["symbols"][symbol]["current_price"] = mark_px
         if avg_px > 0 and bot_global_state["symbols"][symbol].get("entry_price", 0) == 0:
             bot_global_state["symbols"][symbol]["entry_price"] = avg_px
+
+        # [TP Split] 거래소 TP 부분 체결 감지 — 포지션 수량 감소 시 플래그
+        stored_contracts = float(bot_global_state["symbols"][symbol].get("contracts", 0))
+        if stored_contracts > 0 and pos_qty < stored_contracts and not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
+            bot_global_state["symbols"][symbol]["contracts"] = int(pos_qty)
+            bot_global_state["symbols"][symbol]["exchange_tp_filled"] = True
+            logger.info(f"[{symbol}] 📋 거래소 TP 부분 체결 감지 | {int(stored_contracts)} → {int(pos_qty)}계약")
 
 async def private_ws_loop():
     """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
@@ -1341,12 +1350,19 @@ async def async_trading_loop():
                                                 _sl_rate_init = strategy_instance.hard_stop_loss_rate
                                                 _sl_init_sl = round(_entry_p_sl * (1 - _sl_rate_init), 4) if real_side == "LONG" else round(_entry_p_sl * (1 + _sl_rate_init), 4)
 
+                                                # [TP Split] 멀티계약: TP 50% / 1계약: TP 100%
+                                                _full_int_sl = int(_amt_sl)
+                                                if _full_int_sl > 1:
+                                                    _tp_amt_sl = max(1, _full_int_sl // 2)
+                                                else:
+                                                    _tp_amt_sl = _full_int_sl  # 1계약 전량
+
                                                 _params_tp_sl = {"reduceOnly": True}
                                                 _params_sl_sl = {"reduceOnly": True, "stopLossPrice": _sl_init_sl}
 
                                                 tp_order_sl = await asyncio.to_thread(
                                                     engine_api.exchange.create_order,
-                                                    symbol, 'limit', _close_side_sl, _amt_sl, _sl_init_tp, _params_tp_sl
+                                                    symbol, 'limit', _close_side_sl, _tp_amt_sl, _sl_init_tp, _params_tp_sl
                                                 )
                                                 sl_order_sl = await asyncio.to_thread(
                                                     engine_api.exchange.create_order,
@@ -1357,8 +1373,10 @@ async def async_trading_loop():
                                                 bot_global_state["symbols"][symbol]["active_sl_order_id"] = sl_order_sl['id']
                                                 bot_global_state["symbols"][symbol]["last_placed_tp_price"] = _sl_init_tp
                                                 bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _sl_init_sl
+                                                bot_global_state["symbols"][symbol]["tp_order_amount"] = _tp_amt_sl
 
-                                                logger.info(f"[{symbol}] 🕸️ [Smart Limit 체결] 거래소 초기 방어막 전송 완료 | TP: {_sl_init_tp:.4f} / SL: {_sl_init_sl:.4f}")
+                                                _tp_pct_sl = "50%" if _full_int_sl > 1 else "100%"
+                                                logger.info(f"[{symbol}] 🕸️ [Smart Limit 체결] 거래소 초기 방어막 전송 완료 | TP: {_sl_init_tp:.4f} ({_tp_pct_sl}, {_tp_amt_sl}계약) / SL: {_sl_init_sl:.4f}")
                                             except Exception as sl_init_err:
                                                 logger.error(f"[{symbol}] 🚨 [Smart Limit 체결] 초기 방어막 전송 실패. 자가 치유가 다음 사이클에서 복구 시도: {sl_init_err}")
 
@@ -1446,7 +1464,12 @@ async def async_trading_loop():
                                     # 1차 분할 익절 타겟 선제적 계산 (수수료 0.15% + ATR 50%)
                                     _target_offset = (entry * 0.0015) + (current_atr * 0.5)
                                     _first_target = (entry + _target_offset) if position_side == "LONG" else (entry - _target_offset)
-                                    bot_global_state["symbols"][symbol]["take_profit_price"] = f"🎯 1차 타겟: ${_first_target:,.2f} (50%)"
+                                    # [TP Split] 멀티계약 vs 1계약 구분 표시
+                                    _cur_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                    if _cur_contracts > 1:
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = f"🎯 1차 타겟: ${_first_target:,.2f} (50% 거래소 지정가)"
+                                    else:
+                                        bot_global_state["symbols"][symbol]["take_profit_price"] = f"🔹 1차 타겟: ${_first_target:,.2f} (1계약 전량 지정가)"
                                 else:
                                     # 1차 익절 완료 후 트레일링 스탑 상태
                                     _t_target = bot_global_state["symbols"][symbol].get("trailing_target", 0.0)
@@ -1457,6 +1480,9 @@ async def async_trading_loop():
 
                                 # --- [Step 2] 50% 분할 익절 (Partial TP) 조건 체크 ---
                                 if not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
+                                    # [TP Split] 거래소 TP 부분 체결 플래그 우선 확인
+                                    _exchange_tp_filled = bot_global_state["symbols"][symbol].get("exchange_tp_filled", False)
+
                                     # [v2.1] 발동 조건: 수수료 마진 0.15% + ATR*0.5 이상 수익 구간
                                     partial_tp_threshold = (entry * 0.0015) + (current_atr * 0.5)
                                     if position_side == "LONG":
@@ -1464,16 +1490,28 @@ async def async_trading_loop():
                                     else:
                                         partial_profit = entry - current_price
 
-                                    if partial_profit >= partial_tp_threshold:
+                                    if _exchange_tp_filled or partial_profit >= partial_tp_threshold:
                                         try:
                                             full_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                             _is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
                                             _paper_tag = "[👻 PAPER] " if _is_paper else ""
 
-                                            if full_contracts > 1:
+                                            if _exchange_tp_filled:
+                                                # ── [TP Split] 거래소 TP가 이미 체결됨 → 시장가 스킵, 상태관리만 ──
+                                                bot_global_state["symbols"][symbol]["exchange_tp_filled"] = False
+                                                qty_msg = f"📋 거래소 지정가 체결 완료 | 잔여: {full_contracts}계약"
+                                                _tp_fill_source = "exchange"
+                                            elif full_contracts > 1:
                                                 half_contracts = max(1, full_contracts // 2)
                                                 # 시장가 절반 청산 (Reduce-Only) — Paper면 바이패스
                                                 if not _is_paper:
+                                                    # [TP Split] 먼저 거래소 TP 주문 취소 시도 (아직 체결되지 않은 경우)
+                                                    _pending_tp_id = bot_global_state["symbols"][symbol].get("active_tp_order_id")
+                                                    if _pending_tp_id:
+                                                        try:
+                                                            await asyncio.to_thread(engine_api.exchange.cancel_order, _pending_tp_id, symbol)
+                                                        except Exception:
+                                                            pass  # 이미 체결/취소된 경우 무시
                                                     if position_side == "LONG":
                                                         partial_order = await asyncio.to_thread(
                                                             engine_api.exchange.create_market_sell_order,
@@ -1488,9 +1526,11 @@ async def async_trading_loop():
                                                         )
                                                 bot_global_state["symbols"][symbol]["contracts"] = full_contracts - half_contracts
                                                 qty_msg = f"물량 50% ({half_contracts}계약) 수익 실현 완료 | 잔여: {bot_global_state['symbols'][symbol]['contracts']}계약"
+                                                _tp_fill_source = "software"
                                             else:
                                                 # [Phase 19.4 교정] 1계약일 경우 매도는 스킵하되, 목표가에 도달했으므로 방어선과 트레일링은 정상 발동
                                                 qty_msg = "소액(1계약) 포지션으로 분할 매도 스킵, 수익 보존(본전 방어) 모드 직행"
+                                                _tp_fill_source = "software"
 
                                             # 상태 업데이트 (공통)
                                             bot_global_state["symbols"][symbol]["partial_tp_executed"] = True
@@ -1510,12 +1550,14 @@ async def async_trading_loop():
                                             bot_global_state["logs"].append(partial_msg)
                                             logger.info(partial_msg)
 
-                                            # 텔레그램 분리 알림
+                                            # 텔레그램 분리 알림 — [TP Split] 체결 소스 태그 추가
+                                            _fill_tag = "📋 거래소 지정가 체결" if _tp_fill_source == "exchange" else "⚡ 소프트웨어 감지"
                                             _header_pt = "👻 PAPER TRADING | 가상 1차 타겟 도달" if _is_paper else "⚡ ANTIGRAVITY (LIVE) | 실전 1차 타겟 도달"
                                             partial_tg_msg = (
                                                 f"{_header_pt}\n"
                                                 f"{_TG_LINE}\n"
                                                 f"🎯 <b>1차 타겟 도달 완료</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+                                                f"{_fill_tag}\n"
                                                 f"{_TG_LINE}\n"
                                                 f"{qty_msg}\n"
                                                 f"🛡️ 본전 방어선(Breakeven) 작동 시작\n"
@@ -1527,6 +1569,7 @@ async def async_trading_loop():
                                             # 기존 TP/SL은 원래 계약수로 걸려있으므로 취소 후 잔여 계약수로 재배치
                                             if not _is_paper:
                                                 try:
+                                                    # [TP Split] exchange_tp_filled 경로에서는 TP 이미 체결됨 → SL만 취소/재배치
                                                     _old_tp_id = bot_global_state["symbols"][symbol].get("active_tp_order_id")
                                                     _old_sl_id = bot_global_state["symbols"][symbol].get("active_sl_order_id")
                                                     for _oid in [_old_tp_id, _old_sl_id]:
@@ -1640,7 +1683,7 @@ async def async_trading_loop():
                                                 try:
                                                     await asyncio.to_thread(engine_api.exchange.cancel_order, _active_tp_id, symbol)
                                                     _close_side_tp = "sell" if position_side == "LONG" else "buy"
-                                                    _amt_tp = float(bot_global_state["symbols"][symbol]["contracts"])
+                                                    _amt_tp = float(bot_global_state["symbols"][symbol].get("tp_order_amount", bot_global_state["symbols"][symbol]["contracts"]))
                                                     _params_tp_amend = {"reduceOnly": True}
                                                     new_tp_order = await asyncio.to_thread(
                                                         engine_api.exchange.create_order,
@@ -2050,17 +2093,24 @@ async def async_trading_loop():
                                             _sl_rate = strategy_instance.hard_stop_loss_rate
                                             _init_sl = round(_entry_p * (1 - _sl_rate), 4) if signal == "LONG" else round(_entry_p * (1 + _sl_rate), 4)
 
+                                            # [TP Split] 멀티계약: TP 50% / 1계약: TP 100%
+                                            _full_int = int(_amt)
+                                            if _full_int > 1:
+                                                _tp_amt = max(1, _full_int // 2)
+                                            else:
+                                                _tp_amt = _full_int  # 1계약 전량
+
                                             # CCXT 규격에 맞춘 Reduce-Only 파라미터
                                             _params_tp = {"reduceOnly": True}
                                             _params_sl = {"reduceOnly": True, "stopLossPrice": _init_sl}
 
-                                            # Limit TP (지정가 익절) 전송
+                                            # Limit TP (지정가 익절) 전송 — [TP Split] _tp_amt 사용
                                             tp_order = await asyncio.to_thread(
                                                 engine_api.exchange.create_order,
-                                                symbol, 'limit', _close_side, _amt, _init_tp, _params_tp
+                                                symbol, 'limit', _close_side, _tp_amt, _init_tp, _params_tp
                                             )
 
-                                            # Stop-Market SL (조건부 시장가 손절) 전송
+                                            # Stop-Market SL (조건부 시장가 손절) 전송 — 전체 수량 유지
                                             sl_order = await asyncio.to_thread(
                                                 engine_api.exchange.create_order,
                                                 symbol, 'market', _close_side, _amt, None, _params_sl
@@ -2071,8 +2121,10 @@ async def async_trading_loop():
                                             bot_global_state["symbols"][symbol]["active_sl_order_id"] = sl_order['id']
                                             bot_global_state["symbols"][symbol]["last_placed_tp_price"] = _init_tp
                                             bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _init_sl
+                                            bot_global_state["symbols"][symbol]["tp_order_amount"] = _tp_amt
 
-                                            logger.info(f"[{symbol}] 🕸️ 거래소 초기 방어막 전송 완료 | TP: {_init_tp:.4f} / SL: {_init_sl:.4f}")
+                                            _tp_pct_label = "50%" if _full_int > 1 else "100%"
+                                            logger.info(f"[{symbol}] 🕸️ 거래소 초기 방어막 전송 완료 | TP: {_init_tp:.4f} ({_tp_pct_label}, {_tp_amt}계약) / SL: {_init_sl:.4f}")
                                         except Exception as limit_err:
                                             logger.error(f"[{symbol}] 🚨 초기 방어막(Limit/Stop) 전송 실패. 거래소 수동 확인 요망: {limit_err}")
 
