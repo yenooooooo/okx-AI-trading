@@ -239,7 +239,7 @@ BALANCE_TIERS = {
         'max_balance': 500,
         'config': {
             'exit_only_mode': 'false', 'risk_per_trade': '0.015',
-            'hard_stop_loss_rate': '0.008', 'trailing_stop_activation': '0.005',
+            'hard_stop_loss_rate': '0.006', 'trailing_stop_activation': '0.005',
             'trailing_stop_rate': '0.003', 'min_take_profit_rate': '0.008',
             'adx_threshold': '30.0', 'adx_max': '45.0', 'chop_threshold': '55.0',
             'volume_surge_multiplier': '2.0', 'fee_margin': '0.002',
@@ -252,7 +252,7 @@ BALANCE_TIERS = {
         'max_balance': float('inf'),
         'config': {
             'exit_only_mode': 'false', 'risk_per_trade': '0.02',
-            'hard_stop_loss_rate': '0.010', 'trailing_stop_activation': '0.005',
+            'hard_stop_loss_rate': '0.008', 'trailing_stop_activation': '0.005',
             'trailing_stop_rate': '0.004', 'min_take_profit_rate': '0.008',
             'adx_threshold': '25.0', 'adx_max': '60.0', 'chop_threshold': '58.0',
             'volume_surge_multiplier': '1.3', 'fee_margin': '0.001',

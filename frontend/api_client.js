@@ -701,32 +701,37 @@ const PRESET_CONFIGS = {
     sniper: {
         adx_threshold: 30.0, adx_max: 45.0, chop_threshold: 55.0,
         volume_surge_multiplier: 2.0, fee_margin: 0.002,
-        hard_stop_loss_rate: 0.008, trailing_stop_activation: 0.005,
-        trailing_stop_rate: 0.003, cooldown_losses_trigger: 2, cooldown_duration_sec: 1800,
+        hard_stop_loss_rate: 0.006, trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.003, min_take_profit_rate: 0.008,
+        cooldown_losses_trigger: 2, cooldown_duration_sec: 1800,
     },
     trend_rider: {
         adx_threshold: 25.0, adx_max: 60.0, chop_threshold: 58.0,
         volume_surge_multiplier: 1.3, fee_margin: 0.001,
-        hard_stop_loss_rate: 0.010, trailing_stop_activation: 0.005,
-        trailing_stop_rate: 0.004, cooldown_losses_trigger: 4, cooldown_duration_sec: 600,
+        hard_stop_loss_rate: 0.008, trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.004, min_take_profit_rate: 0.008,
+        cooldown_losses_trigger: 4, cooldown_duration_sec: 600,
     },
     scalper: {
         adx_threshold: 20.0, adx_max: 50.0, chop_threshold: 65.0,
         volume_surge_multiplier: 1.2, fee_margin: 0.002,
         hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.002,
-        trailing_stop_rate: 0.001, cooldown_losses_trigger: 5, cooldown_duration_sec: 300,
+        trailing_stop_rate: 0.002, min_take_profit_rate: 0.005,
+        cooldown_losses_trigger: 5, cooldown_duration_sec: 300,
     },
     iron_dome: {
         adx_threshold: 28.0, adx_max: 42.0, chop_threshold: 50.0,
         volume_surge_multiplier: 2.5, fee_margin: 0.002,
         hard_stop_loss_rate: 0.004, trailing_stop_activation: 0.004,
-        trailing_stop_rate: 0.002, cooldown_losses_trigger: 2, cooldown_duration_sec: 3600,
+        trailing_stop_rate: 0.002, min_take_profit_rate: 0.005,
+        cooldown_losses_trigger: 2, cooldown_duration_sec: 3600,
     },
     factory_reset: {
         adx_threshold: 25.0, adx_max: 40.0, chop_threshold: 61.8,
         volume_surge_multiplier: 1.5, fee_margin: 0.0015,
-        hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.003,
-        trailing_stop_rate: 0.002, cooldown_losses_trigger: 3, cooldown_duration_sec: 900,
+        hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.005,
+        trailing_stop_rate: 0.002, min_take_profit_rate: 0.008,
+        cooldown_losses_trigger: 3, cooldown_duration_sec: 900,
     },
     // [Phase 14.3] 초단타 광기 모드 — 모든 방어 관문 해제 + 틱 단위 익절
     // [Phase 18.1] risk_per_trade / leverage 는 시드 보호 설정으로 프리셋에서 완전 제거 (PROTECTED_KEYS)
@@ -737,7 +742,8 @@ const PRESET_CONFIGS = {
         disparity_threshold: 3.0,       // 이격도 한계치 3% (UI 슬라이더 % 단위)
         hard_stop_loss_rate: 0.005,     // 0.5% 칼손절 (비율: 0.005)
         trailing_stop_activation: 0.003, // 0.3% 수익 시 트레일링 즉시 ON (비율: 0.003)
-        trailing_stop_rate: 0.001,      // 고점 대비 0.1% 낙폭 시 틱 익절 (비율: 0.001)
+        trailing_stop_rate: 0.002,      // 고점 대비 0.2% 낙폭 시 익절 (0.1%→0.2%: 거래소 TP 체결 여유)
+        min_take_profit_rate: 0.004,    // 0.4% 최소 익절 가드 (광기 모드 빠른 EXIT)
         cooldown_losses_trigger: 3,     // 3연패 시 쿨다운
         cooldown_duration_sec: 300,     // 5분 휴식 (초단타 특성상 짧게)
         // ── Gate Bypass: 3개 방어 관문 전면 해제 ──
@@ -768,7 +774,8 @@ const PRESET_CONFIGS = {
         fee_margin: 0.0015,              // 수수료 마진 타이트
         hard_stop_loss_rate: 0.003,      // 0.3% SL (스캘핑 타이트)
         trailing_stop_activation: 0.002, // 0.2% 수익 후 트레일링
-        trailing_stop_rate: 0.0015,      // 0.15% 트레일링 거리
+        trailing_stop_rate: 0.002,       // 0.2% 트레일링 거리 (0.15%→0.2%: 거래소 TP 체결 여유)
+        min_take_profit_rate: 0.005,     // 0.5% 최소 익절 가드 (잔여 50% 보호)
         cooldown_losses_trigger: 3,      // 3연패 쿨다운
         cooldown_duration_sec: 900,      // 15분 쿨다운
         bypass_macro: 'false',           // 거시추세 필터 유지 (안전장치)
