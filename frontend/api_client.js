@@ -496,7 +496,8 @@ async function syncBotStatus() {
                 let _mgHasWarn = false;
                 let _mgSym = '', _mgCurLev = 0, _mgRecLev = 0;
 
-                // 현재 감시 타겟(active_target)을 우선 체크 → 타겟 전환 시 해당 코인 경고 즉시 반영
+                // 현재 감시 타겟(active_target)만 체크 — 타겟 전환 시 해당 코인 상태만 반영
+                // (다른 심볼에 문제가 있어도 현재 보고 있는 코인이 괜찮으면 배지 숨김)
                 const _mgActiveSym = data.active_target || currentSymbol;
                 const _mgActive = data.margin_guard[_mgActiveSym];
                 if (_mgActive && _mgActive.needs_change) {
@@ -504,18 +505,6 @@ async function syncBotStatus() {
                     _mgSym = _mgActiveSym.split(':')[0];
                     _mgCurLev = _mgActive.current_leverage;
                     _mgRecLev = _mgActive.recommended_leverage;
-                } else {
-                    // active target에 이상 없으면 나머지 심볼 순회
-                    for (const [sym, mg] of Object.entries(data.margin_guard)) {
-                        if (sym === _mgActiveSym) continue;
-                        if (mg.needs_change) {
-                            _mgHasWarn = true;
-                            _mgSym = sym.split(':')[0];
-                            _mgCurLev = mg.current_leverage;
-                            _mgRecLev = mg.recommended_leverage;
-                            break;
-                        }
-                    }
                 }
 
                 if (_mgHasWarn && mgBadge) {
