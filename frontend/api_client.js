@@ -496,17 +496,31 @@ async function syncBotStatus() {
                 let _mgHasWarn = false;
                 let _mgSym = '', _mgCurLev = 0, _mgRecLev = 0;
 
-                for (const [sym, mg] of Object.entries(data.margin_guard)) {
-                    if (mg.needs_change) {
-                        _mgHasWarn = true;
-                        _mgSym = sym.split(':')[0];
-                        _mgCurLev = mg.current_leverage;
-                        _mgRecLev = mg.recommended_leverage;
-                        break;
+                // 현재 감시 타겟(active_target)을 우선 체크 → 타겟 전환 시 해당 코인 경고 즉시 반영
+                const _mgActiveSym = data.active_target || currentSymbol;
+                const _mgActive = data.margin_guard[_mgActiveSym];
+                if (_mgActive && _mgActive.needs_change) {
+                    _mgHasWarn = true;
+                    _mgSym = _mgActiveSym.split(':')[0];
+                    _mgCurLev = _mgActive.current_leverage;
+                    _mgRecLev = _mgActive.recommended_leverage;
+                } else {
+                    // active target에 이상 없으면 나머지 심볼 순회
+                    for (const [sym, mg] of Object.entries(data.margin_guard)) {
+                        if (sym === _mgActiveSym) continue;
+                        if (mg.needs_change) {
+                            _mgHasWarn = true;
+                            _mgSym = sym.split(':')[0];
+                            _mgCurLev = mg.current_leverage;
+                            _mgRecLev = mg.recommended_leverage;
+                            break;
+                        }
                     }
                 }
 
                 if (_mgHasWarn && mgBadge) {
+                    // applyRecommendedLeverage()가 정확한 심볼을 알 수 있게 캐싱
+                    window._lastActiveMgSym = _mgActiveSym;
                     mgBadge.classList.remove('hidden');
                     const mgSymEl = document.getElementById('mg-symbol');
                     const mgCurEl = document.getElementById('mg-current-lev');
@@ -3917,39 +3931,38 @@ async function applyRecommendedLeverage() {
     const mg = window._marginGuardData;
     if (!mg) return;
 
-    for (const [sym, d] of Object.entries(mg)) {
-        if (d.needs_change && d.recommended_leverage) {
-            try {
-                // [Bug Fix] 심볼 전용 + GLOBAL 동시 저장 (saveTuningConfig 패턴 동일)
-                // get_config('leverage', symbol)가 심볼 전용 키를 우선 조회하므로 반드시 심볼 전용도 저장
-                await Promise.all([
-                    fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}&symbol=${encodeURIComponent(sym)}`, { method: 'POST' }),
-                    fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}`, { method: 'POST' }),
-                ]);
-                showToast('Margin Guard', `레버리지 ${d.current_leverage}x → ${d.recommended_leverage}x 적용 완료`, 'SUCCESS');
+    // 현재 감시 타겟 기준으로 적용 (타겟 전환 후 적용 시 해당 코인에만 반영)
+    const _applyActiveSym = window._lastActiveMgSym || currentSymbol;
+    const d = mg[_applyActiveSym];
+    if (!d || !d.needs_change || !d.recommended_leverage) return;
 
-                // UI 즉시 갱신
-                const levInput = document.getElementById('config-leverage');
-                if (levInput) { levInput.value = d.recommended_leverage; levInput.dispatchEvent(new Event('input')); }
-                const leftLev = document.getElementById('left-panel-lev-badge');
-                if (leftLev) leftLev.textContent = d.recommended_leverage + 'x';
-                const cmdLev = document.getElementById('cmd-lev-badge');
-                if (cmdLev) cmdLev.textContent = d.recommended_leverage + 'x';
+    try {
+        // 심볼 전용 + GLOBAL 동시 저장
+        await Promise.all([
+            fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}&symbol=${encodeURIComponent(_applyActiveSym)}`, { method: 'POST' }),
+            fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}`, { method: 'POST' }),
+        ]);
+        showToast('Margin Guard', `[${_applyActiveSym.split(':')[0]}] 레버리지 ${d.current_leverage}x → ${d.recommended_leverage}x 적용 완료`, 'SUCCESS');
 
-                // [Bug Fix] grace period 설정 — syncBotStatus 재실행 시 배지 즉시 재표시 방지
-                window._mgAppliedAt = Date.now();
+        // UI 즉시 갱신
+        const levInput = document.getElementById('config-leverage');
+        if (levInput) { levInput.value = d.recommended_leverage; levInput.dispatchEvent(new Event('input')); }
+        const leftLev = document.getElementById('left-panel-lev-badge');
+        if (leftLev) leftLev.textContent = d.recommended_leverage + 'x';
+        const cmdLev = document.getElementById('cmd-lev-badge');
+        if (cmdLev) cmdLev.textContent = d.recommended_leverage + 'x';
 
-                // 경고 배지 숨김
-                const badge = document.getElementById('margin-guard-badge');
-                if (badge) badge.classList.add('hidden');
-                const cmdWarn = document.getElementById('cmd-margin-warn');
-                if (cmdWarn) cmdWarn.classList.add('hidden');
+        // grace period 설정 — syncBotStatus 재실행 시 배지 즉시 재표시 방지
+        window._mgAppliedAt = Date.now();
 
-                await syncConfig();
-            } catch (err) {
-                showToast('Margin Guard 오류', err.message, 'ERROR');
-            }
-            break;
-        }
+        // 경고 배지 숨김
+        const badge = document.getElementById('margin-guard-badge');
+        if (badge) badge.classList.add('hidden');
+        const cmdWarn = document.getElementById('cmd-margin-warn');
+        if (cmdWarn) cmdWarn.classList.add('hidden');
+
+        await syncConfig();
+    } catch (err) {
+        showToast('Margin Guard 오류', err.message, 'ERROR');
     }
 }
