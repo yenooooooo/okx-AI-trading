@@ -943,6 +943,11 @@ async function applyPreset(presetName) {
     const config = PRESET_CONFIGS[presetName];
     if (!config) return;
 
+    // [BUGFIX] 프리셋 저장 전 보호 키(leverage, risk_per_trade)를 백엔드에서 강제 동기화
+    // openTuningModal()의 syncConfig()가 완료되기 전 프리셋 클릭 시 슬라이더가 HTML 기본값
+    // (value="1")인 채로 saveTuningConfig()가 실행되어 leverage=1이 저장되는 레이스 컨디션 방지
+    await syncConfig(currentSymbol);
+
     // 1. 숫자/범위 인풋: TUNING_INPUT_MAP 기준으로 ID 해석 → 값 주입 + 애니메이션 + input 이벤트
     // [Phase 18.1] PRESET_PROTECTED_KEYS(risk_per_trade, leverage)는 절대 건드리지 않음
     for (const [key, { id }] of Object.entries(TUNING_INPUT_MAP)) {
