@@ -3948,11 +3948,8 @@ async function applyRecommendedLeverage() {
     if (!d || !d.needs_change || !d.recommended_leverage) return;
 
     try {
-        // 심볼 전용 + GLOBAL 동시 저장
-        await Promise.all([
-            fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}&symbol=${encodeURIComponent(_applyActiveSym)}`, { method: 'POST' }),
-            fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}`, { method: 'POST' }),
-        ]);
+        // 심볼 전용으로만 저장 (GLOBAL 저장 제거 — 타 심볼 레버리지 오염 방지)
+        await fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}&symbol=${encodeURIComponent(_applyActiveSym)}`, { method: 'POST' });
         showToast('Margin Guard', `[${_applyActiveSym.split(':')[0]}] 레버리지 ${d.current_leverage}x → ${d.recommended_leverage}x 적용 완료`, 'SUCCESS');
 
         // UI 즉시 갱신
