@@ -485,7 +485,11 @@ async def _margin_guard_bg_loop():
             if _engine and _engine.exchange and bot_global_state["balance"] > 0:
                 _mgbg_bal = bot_global_state["balance"]
                 _mgbg_safe = _mgbg_bal * 0.90
-                for _mgbg_sym in list(bot_global_state["symbols"].keys()):
+                # [Bug Fix] active_target만 증거금 경고 — 비활성 심볼 텔레그램 스팸 방지
+                _mgbg_sym_conf = get_config('symbols')
+                _mgbg_active = _mgbg_sym_conf[0] if isinstance(_mgbg_sym_conf, list) and _mgbg_sym_conf else None
+                _mgbg_check_list = [_mgbg_active] if _mgbg_active else list(bot_global_state["symbols"].keys())
+                for _mgbg_sym in _mgbg_check_list:
                     try:
                         _mgbg_mkt = _engine.exchange.market(_mgbg_sym)
                         _mgbg_cs = float(_mgbg_mkt.get('contractSize', 0.01))
@@ -1964,7 +1968,18 @@ async def async_trading_loop():
                                         error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
                                         bot_global_state["logs"].append(error_msg)
                                         logger.error(error_msg)
-                                        send_telegram_sync(_tg_exit(symbol, position_side, current_price, 0.0, 0.0, 0.0, 0.0, action, is_test=bot_global_state["symbols"][symbol].get("is_paper", False)))
+                                        # [Bug Fix] 청산 실패 텔레그램 스팸 방지 — 5분 쿨다운
+                                        _close_fail_key = f"_close_fail_tg_ts_{symbol}"
+                                        _close_fail_last = float(bot_global_state["symbols"][symbol].get(_close_fail_key, 0))
+                                        if _time.time() - _close_fail_last > 300:  # 5분
+                                            bot_global_state["symbols"][symbol][_close_fail_key] = _time.time()
+                                            send_telegram_sync(
+                                                f"🚨 <b>청산 실패 반복 경고</b>\n"
+                                                f"코인: <code>{symbol.split(':')[0]}</code>\n"
+                                                f"포지션: {position_side} | 사유: {action}\n"
+                                                f"오류: {str(e)[:100]}\n"
+                                                f"⚠️ OKX에서 수동 청산 필요"
+                                            )
 
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
