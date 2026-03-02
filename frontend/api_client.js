@@ -1812,11 +1812,7 @@ async function syncChart() {
             }
         } catch(e) { /* status 실패 무시 */ }
 
-        // ── ⑨ 차트 헤더 업데이트 ─────────────────────────────────────────────
-        const coinName = requestedSymbol.split('/')[0];
-        const cn = document.getElementById('chart-coin-name');
-        if (cn) cn.textContent = coinName;
-
+        // ── ⑨ 차트 헤더 업데이트 (우상단 오버레이) ──────────────────────────
         // 다음 캔들 카운트다운
         if (candles.length > 1) {
             const tfSec = candles[candles.length - 1].time - candles[candles.length - 2].time;
