@@ -626,7 +626,7 @@ async function syncBrain() {
 
         // [A] 진입 관문 체크리스트
         if (brainState.gates) {
-            renderGates(brainState.gates, brainState.gates_passed || 0);
+            renderGates(brainState.gates, brainState.gates_passed || 0, brainState.live_gates || null);
         }
         // [B] 봇 혼잣말 피드
         if (brainState.monologue) {
@@ -763,7 +763,7 @@ async function syncBrain() {
 }
 
 // --- [A] 진입 관문 체크리스트 렌더링 ---
-function renderGates(gates, passed) {
+function renderGates(gates, passed, liveGates) {
     const passedEl = document.getElementById('gates-passed');
     const barEl = document.getElementById('gates-bar');
     if (!gates || !passedEl || !barEl) return;
@@ -805,11 +805,58 @@ function renderGates(gates, passed) {
         // UI 개선: 세로 구분선(border-l)과 '목표:' 레이블을 추가하여 가독성 극대화
         const targetHtml = g.target ? `<span class="text-[9px] text-gray-500 ml-1.5 border-l border-gray-600/50 pl-1.5 tracking-wider">목표: ${g.target}</span>` : '';
 
+        let baseHtml = '';
         if (g.pass) {
-            el.innerHTML = `<span class="text-neon-green text-[10px] mr-1">✅</span><span class="text-neon-green font-bold text-[11px]">${g.value}</span>${targetHtml}`;
+            baseHtml = `<span class="text-neon-green text-[10px] mr-1">✅</span><span class="text-neon-green font-bold text-[11px]">${g.value}</span>${targetHtml}`;
         } else {
-            el.innerHTML = `<span class="text-neon-red text-[10px] mr-1">❌</span><span class="text-gray-400 font-bold text-[11px]">${g.value}</span>${targetHtml}`;
+            baseHtml = `<span class="text-neon-red text-[10px] mr-1">❌</span><span class="text-gray-400 font-bold text-[11px]">${g.value}</span>${targetHtml}`;
         }
+
+        // ── 라이브 값 + 게이지바 (현재 캔들 실시간 수치) ──
+        let liveHtml = '';
+        if (liveGates && liveGates[key]) {
+            const live = liveGates[key];
+            const lv = live.value;
+            const gauge = Math.max(0, Math.min(100, live.gauge || 0));
+
+            // 확정봉 값 파싱 (비교용)
+            let confirmed = 0;
+            if (key === 'macd_rsi') {
+                const m = g.value.match(/[\d.]+/);
+                confirmed = m ? parseFloat(m[0]) : 0;
+            } else if (key === 'macro') {
+                confirmed = null; // 추세 라벨이라 수치 비교 불가
+            } else {
+                confirmed = parseFloat(g.value) || 0;
+            }
+
+            // 화살표 방향
+            let arrow = '\u2192'; // →
+            let arrowCls = 'text-gray-500';
+            if (confirmed !== null) {
+                if (lv > confirmed) { arrow = '\u2191'; arrowCls = 'text-neon-green'; }  // ↑
+                else if (lv < confirmed) { arrow = '\u2193'; arrowCls = 'text-neon-red'; } // ↓
+            } else {
+                // macro: 양수면 상승, 음수면 하락
+                if (lv > 0) { arrow = '\u2191'; arrowCls = 'text-neon-green'; }
+                else if (lv < 0) { arrow = '\u2193'; arrowCls = 'text-neon-red'; }
+            }
+
+            // 라이브 값 포맷팅
+            let liveStr = '';
+            if (key === 'volume') liveStr = `${lv}x`;
+            else if (key === 'disparity') liveStr = `${lv}%`;
+            else if (key === 'macd_rsi') liveStr = `RSI ${lv}`;
+            else if (key === 'macro') liveStr = `${lv > 0 ? '+' : ''}${lv}%`;
+            else liveStr = `${lv}`;
+
+            // 게이지 색상
+            const gColor = gauge >= 70 ? '#00ff88' : gauge >= 40 ? '#facc15' : '#ff4d4d';
+
+            liveHtml = `<span class="flex items-center gap-0.5 mt-0.5"><span class="text-[8px] text-gray-600">\u279C</span><span class="text-[9px] ${arrowCls} font-mono">${liveStr}</span><span class="text-[8px] ${arrowCls}">${arrow}</span></span><span class="block w-full h-[2px] rounded-full mt-0.5 overflow-hidden" style="background:rgba(15,23,42,0.6)"><span class="block h-full rounded-full" style="width:${gauge}%;background:${gColor};transition:width .5s ease,background .3s ease"></span></span>`;
+        }
+
+        el.innerHTML = baseHtml + liveHtml;
 
         // [UI Overhaul] 파이프라인 노드 시각 업데이트 (데스크톱 원형 + 커넥터)
         const gateAttr = gateAttrMap[key];

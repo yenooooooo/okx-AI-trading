@@ -1256,6 +1256,43 @@ async def async_trading_loop():
                         "macro_ema_200": float(macro_ema_200) if macro_ema_200 is not None else None,
                     })
 
+                    # ── [라이브 지표] 현재 캔들(미완성) 기준 실시간 수치 (표시 전용, 봇 판정에 사용 안 함) ──
+                    _live_row = df.iloc[-1]
+                    _live_adx   = round(float(_live_row['adx']),  1) if 'adx'  in _live_row.index and not pd.isna(_live_row['adx'])  else 0.0
+                    _live_chop  = round(float(_live_row['chop']), 1) if 'chop' in _live_row.index and not pd.isna(_live_row['chop']) else 50.0
+                    _live_rsi   = round(float(_live_row['rsi']),  1) if 'rsi'  in _live_row.index and not pd.isna(_live_row['rsi'])  else 50.0
+                    _live_macd  = round(float(_live_row['macd']), 2) if 'macd' in _live_row.index and not pd.isna(_live_row['macd']) else 0.0
+                    _live_msig  = round(float(_live_row['macd_signal']), 2) if 'macd_signal' in _live_row.index and not pd.isna(_live_row['macd_signal']) else 0.0
+                    _live_vol   = float(_live_row['volume'])      if not pd.isna(_live_row['volume'])      else 0.0
+                    _live_vsma  = float(_live_row['vol_sma_20'])  if 'vol_sma_20' in _live_row.index and not pd.isna(_live_row['vol_sma_20']) else 1.0
+                    _live_ema20 = float(_live_row['ema_20'])      if 'ema_20' in _live_row.index and not pd.isna(_live_row['ema_20']) else (current_price or 1)
+                    _live_vol_ratio = round(_live_vol / _live_vsma, 2) if _live_vsma > 0 else 0.0
+                    _live_disparity = round(abs((current_price - _live_ema20) / _live_ema20) * 100, 2) if current_price and _live_ema20 else 0.0
+
+                    # 게이지 % 계산 — 임계값 근접도 (0=경계, 100=안전)
+                    _lg_adx_min = strategy_instance.adx_threshold
+                    _lg_adx_max = strategy_instance.adx_max
+                    _lg_chop_max = strategy_instance.chop_threshold
+                    _lg_vol_mul = strategy_instance.volume_surge_multiplier
+                    _g_adx  = max(0, min(100, int((_live_adx - _lg_adx_min) / max(1, _lg_adx_max - _lg_adx_min) * 100))) if _live_adx >= _lg_adx_min else max(0, int(_live_adx / max(1, _lg_adx_min) * 50))
+                    _g_chop = max(0, min(100, int((_lg_chop_max - _live_chop) / max(1, _lg_chop_max) * 100)))
+                    _g_vol  = max(0, min(100, int(_live_vol_ratio / max(0.01, _lg_vol_mul) * 100)))
+                    _g_disp = max(0, min(100, int((0.8 - _live_disparity) / 0.8 * 100))) if _live_disparity < 0.8 else 0
+                    _g_rsi  = 100 if 30 <= _live_rsi <= 70 else max(0, 100 - int(abs(_live_rsi - 50) * 2))
+                    _g_macro = 0
+                    if macro_ema_200 is not None and current_price:
+                        _ema_diff_pct = (current_price - float(macro_ema_200)) / float(macro_ema_200) * 100
+                        _g_macro = max(0, min(100, int(50 + _ema_diff_pct * 10)))
+
+                    ai_brain_state["symbols"][symbol]["live_gates"] = {
+                        "adx":       {"value": _live_adx,        "gauge": _g_adx},
+                        "chop":      {"value": _live_chop,        "gauge": _g_chop},
+                        "volume":    {"value": _live_vol_ratio,   "gauge": _g_vol},
+                        "disparity": {"value": _live_disparity,   "gauge": _g_disp},
+                        "macd_rsi":  {"value": _live_rsi,         "gauge": _g_rsi,  "macd": _live_macd, "macd_signal": _live_msig},
+                        "macro":     {"value": round((current_price - float(macro_ema_200)) / float(macro_ema_200) * 100, 2) if macro_ema_200 and current_price else 0.0, "gauge": _g_macro},
+                    }
+
                     # ── [확정봉 기반] 진입 관문 체크리스트 + 봇 혼잣말 (새 봉 완성 시만 갱신) ──
                     if _new_candle:
                         import datetime as _dt
