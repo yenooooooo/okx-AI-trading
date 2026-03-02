@@ -620,7 +620,7 @@
         <!-- CENTER: Main Intelligence (6 cols) -->
         <div class="col-span-12 lg:col-span-6 flex flex-col gap-4">
             <!-- Hero Chart -->
-            <div class="glass-panel p-1 relative flex flex-col h-[420px]">
+            <div class="glass-panel p-1 relative flex flex-col h-[600px]">
                 <div id="chart-overlay"
                     class="absolute inset-0 bg-navy-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center rounded-xl transition-opacity duration-300 hidden">
                     <svg class="animate-spin h-8 w-8 text-neon-green mb-4" xmlns="http://www.w3.org/2000/svg"
@@ -646,7 +646,26 @@
                     <div class="text-3xl font-mono font-bold text-white flash-target" id="hero-price">0.00</div>
                     <div class="text-xs text-gray-500 font-mono">Current Mark Price</div>
                 </div>
-                <div id="chart-container" class="w-full h-full rounded-lg overflow-hidden"></div>
+                <!-- 차트 헤더 -->
+                <div id="chart-header" class="flex items-center justify-between px-3 py-1.5 flex-shrink-0">
+                    <div class="flex items-center gap-2">
+                        <span id="chart-coin-name" class="text-xs font-mono font-bold text-white"></span>
+                        <span id="chart-timeframe-badge" class="text-[10px] font-mono text-gray-400 border border-gray-600/50 px-1.5 py-0.5 rounded"></span>
+                        <span id="chart-position-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded hidden"></span>
+                    </div>
+                    <span id="chart-candle-countdown" class="text-[10px] font-mono text-gray-500"></span>
+                </div>
+
+                <!-- 메인 캔들 차트 -->
+                <div id="chart-container" class="w-full flex-1 min-h-0 rounded-lg overflow-hidden relative">
+                    <div id="chart-pos-tint" class="absolute inset-0 pointer-events-none z-0 rounded-lg opacity-0 transition-opacity duration-700"></div>
+                </div>
+
+                <!-- RSI 서브 패널 -->
+                <div id="rsi-chart-container" class="w-full h-[90px] flex-shrink-0 border-t border-gray-700/50"></div>
+
+                <!-- MACD 서브 패널 -->
+                <div id="macd-chart-container" class="w-full h-[90px] flex-shrink-0 border-t border-gray-700/50"></div>
             </div>
 
             <!-- Indicator Gauges -->

@@ -1045,7 +1045,8 @@ async def async_trading_loop():
                         "bb_lower": round(latest_lower, 2) if not pd.isna(latest_lower) else 0.0,
                         "adx": round(latest_adx, 2) if not pd.isna(latest_adx) else 0.0,
                         "chop": round(float(df['chop'].iloc[-1]), 1) if 'chop' in df.columns and not pd.isna(df['chop'].iloc[-1]) else 0.0,
-                        "decision": analysis_msg
+                        "decision": analysis_msg,
+                        "macro_ema_200": float(macro_ema_200) if macro_ema_200 is not None else None,
                     })
 
                     # ── [UI A+B] 실시간 진입 관문 체크리스트 + 봇 혼잣말 생성 ──
@@ -2962,6 +2963,33 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
                 base_price = close_p # 다음 캔들 기준가 업데이트
             return mock_ohlcv
 
+        # ── 지표 계산 (strategy_instance 있을 때만) ──────────────────────────
+        try:
+            if strategy_instance is not None:
+                _df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                for col in ['open', 'high', 'low', 'close', 'volume']:
+                    _df[col] = _df[col].astype(float)
+                _df = strategy_instance.calculate_indicators(_df)
+
+                result = []
+                for _, row in _df.iterrows():
+                    result.append({
+                        'timestamp': int(row['timestamp']),
+                        'open':   float(row['open']),
+                        'high':   float(row['high']),
+                        'low':    float(row['low']),
+                        'close':  float(row['close']),
+                        'volume': float(row['volume']),
+                        'ema_20':      round(float(row['ema_20']),      4) if 'ema_20'      in _df.columns and not pd.isna(row['ema_20'])      else None,
+                        'rsi':         round(float(row['rsi']),         2) if 'rsi'         in _df.columns and not pd.isna(row['rsi'])         else None,
+                        'macd':        round(float(row['macd']),        6) if 'macd'        in _df.columns and not pd.isna(row['macd'])        else None,
+                        'macd_signal': round(float(row['macd_signal']), 6) if 'macd_signal' in _df.columns and not pd.isna(row['macd_signal']) else None,
+                    })
+                return result
+        except Exception as _ie:
+            logger.warning(f"OHLCV 지표 계산 실패 (fallback): {_ie}")
+
+        # fallback: 지표 없이 원시 OHLCV만 반환
         result = []
         for candle in ohlcv:
             result.append({
