@@ -1079,13 +1079,16 @@ async def async_trading_loop():
                     _chop_max = strategy_instance.chop_threshold
                     _vol_mul  = strategy_instance.volume_surge_multiplier
 
+                    _bypass_disp = bool(strategy_instance.bypass_disparity)
+                    _bypass_ind  = bool(strategy_instance.bypass_indicator)
+                    _bypass_mac  = bool(strategy_instance.bypass_macro)
                     _gates = {
-                        "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max), "value": f"{_adx_v:.1f}",      "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
-                        "chop":      {"pass": bool(_chop_v < _chop_max),             "value": f"{_chop_v:.1f}",     "target": f"< {_chop_max:.1f}"},
-                        "volume":    {"pass": bool(_vol_ratio >= _vol_mul),          "value": f"{_vol_ratio:.2f}x", "target": f"≥ {_vol_mul:.1f}x"},
-                        "disparity": {"pass": bool(_disparity < 0.8),               "value": f"{_disparity:.2f}%", "target": "< 0.8%"},
-                        "macd_rsi":  {"pass": bool(_mr_ok),                         "value": f"RSI {_rsi_v:.1f}",  "target": "크로스+구간"},
-                        "macro":     {"pass": bool(_macro_ok),                      "value": _macro_lbl,           "target": "EMA200"},
+                        "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max),     "value": f"{_adx_v:.1f}",                                                   "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
+                        "chop":      {"pass": bool(_chop_v < _chop_max),                "value": f"{_chop_v:.1f}",                                                  "target": f"< {_chop_max:.1f}"},
+                        "volume":    {"pass": bool(_vol_ratio >= _vol_mul),             "value": f"{_vol_ratio:.2f}x",                                              "target": f"≥ {_vol_mul:.1f}x"},
+                        "disparity": {"pass": bool(_bypass_disp or _disparity < 0.8),  "value": f"{_disparity:.2f}%" + (" [우회]" if _bypass_disp else ""),        "target": "< 0.8%"},
+                        "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),            "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "크로스+구간"},
+                        "macro":     {"pass": bool(_bypass_mac  or _macro_ok),         "value": _macro_lbl             + (" [우회]" if _bypass_mac  else ""),       "target": "EMA200"},
                     }
                     _passed = int(sum(1 for g in _gates.values() if g["pass"]))
                     ai_brain_state["symbols"][symbol]["gates"]        = _gates
@@ -1108,13 +1111,13 @@ async def async_trading_loop():
                             _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. {_adx_max:.0f} 아래로 식을 때까지 관망 중... ({_passed}/6)"
                     elif _chop_v >= _chop_max:
                         _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. {_chop_max:.1f} 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
-                    elif _disparity >= 0.8:
+                    elif (not _bypass_disp) and _disparity >= 0.8:
                         _mono = f"[{_ts}] 이격도 {_disparity:.2f}% — 이미 너무 달렸어. EMA20에 붙을 때까지 기다리는 중... ({_passed}/6)"
                     elif _vol_ratio < _vol_mul:
                         _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. {_vol_mul:.1f}x 이상 폭발 대기 중... ({_passed}/6)"
-                    elif not _macro_ok:
+                    elif (not _bypass_mac) and not _macro_ok:
                         _mono = f"[{_ts}] EMA200 역방향({_macro_lbl}) — 큰 흐름 거슬러 들어가면 안 돼. 추세 전환 대기 중... ({_passed}/6)"
-                    elif not _mr_ok:
+                    elif (not _bypass_ind) and not _mr_ok:
                         if _long_macd and not _long_rsi:
                             _mono = f"[{_ts}] MACD 상향 ✓, RSI {_rsi_v:.1f} — LONG 진입 구간(30~55)으로 내려올 때까지 대기... ({_passed}/6)"
                         elif _short_macd and not _short_rsi:
