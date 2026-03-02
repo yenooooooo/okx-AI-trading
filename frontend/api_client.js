@@ -34,6 +34,12 @@ function parseTimeframeMs(tf) {
     return 900000; // fallback 15m
 }
 
+// --- Modal Scroll Lock ---
+/** 모달 열릴 때 배경 스크롤 차단 */
+function lockBodyScroll() { document.body.style.overflow = 'hidden'; }
+/** 모달 닫힐 때 배경 스크롤 복원 */
+function unlockBodyScroll() { document.body.style.overflow = ''; }
+
 // --- UI Utilities ---
 
 /**
@@ -1170,6 +1176,7 @@ async function applyPreset(presetName) {
 async function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
+    lockBodyScroll();
     // [Phase 18.1] 현재 심볼의 전용 설정값을 즉시 로드하여 입력창 갱신
     await syncConfig(currentSymbol);
 }
@@ -1225,6 +1232,18 @@ async function toggleAutoPreset(enabled) {
     }
 }
 
+function closeDiagnosticModal() {
+    const modal = document.getElementById('diagnostic-modal');
+    if (modal) modal.classList.add('hidden');
+    unlockBodyScroll();
+}
+
+function closeHealthModal() {
+    const modal = document.getElementById('health-modal');
+    if (modal) modal.classList.add('hidden');
+    unlockBodyScroll();
+}
+
 // [Phase 27] 전체 서브시스템 자가 진단 (Full Diagnostic)
 async function runDiagnostic() {
     const btn = document.getElementById('diagnostic-btn');
@@ -1238,6 +1257,7 @@ async function runDiagnostic() {
 
     // 모달 열기
     if (modal) modal.classList.remove('hidden');
+    lockBodyScroll();
     if (container) container.innerHTML = '<div class="text-center text-gray-500 font-mono text-xs py-8 animate-pulse">🔍 10개 서브시스템 점검 중...</div>';
 
     try {
@@ -1325,6 +1345,7 @@ async function runHealthCheck() {
 
     if (btn) { btn.textContent = '⏳ 점검 중...'; btn.disabled = true; }
     if (modal) modal.classList.remove('hidden');
+    lockBodyScroll();
     if (body) body.innerHTML = '<div class="text-center text-gray-500 font-mono text-xs py-8 animate-pulse">🔗 전체 연결 상태 종합 점검 중...</div>';
 
     let totalOk = 0, totalFail = 0, totalWarn = 0, totalChecks = 0;
@@ -1648,6 +1669,7 @@ async function onModalSymbolChange(newSymbol) {
 function closeTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.add('hidden');
+    unlockBodyScroll();
 }
 
 async function saveTuningConfig() {
@@ -3018,6 +3040,7 @@ async function openHistoryModal() {
     if (monthlyBody) monthlyBody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-gray-600 font-mono text-[11px]">데이터 로딩 중...</td></tr>`;
 
     modal.classList.remove('hidden');
+    lockBodyScroll();
     switchHistoryTab('daily');
 
     try {
@@ -3037,6 +3060,7 @@ async function openHistoryModal() {
 function closeHistoryModal() {
     const modal = document.getElementById('history-modal');
     if (modal) modal.classList.add('hidden');
+    unlockBodyScroll();
 }
 
 function switchHistoryTab(tab) {
@@ -3435,11 +3459,13 @@ let _currentXrayTab = 'loop';
 
 function openXrayModal() {
     document.getElementById('xray-modal').classList.remove('hidden');
+    lockBodyScroll();
     switchXrayTab('loop');
 }
 
 function closeXrayModal() {
     document.getElementById('xray-modal').classList.add('hidden');
+    unlockBodyScroll();
 }
 
 function switchXrayTab(tab) {
