@@ -1708,7 +1708,13 @@ async def async_trading_loop():
                                     if not _heal_sl_id and entry > 0:
                                         try:
                                             _heal_close_side = "sell" if position_side == "LONG" else "buy"
-                                            _heal_amt = float(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                            _heal_amt = float(bot_global_state["symbols"][symbol].get("contracts", 0))
+                                            if _heal_amt <= 0:
+                                                try:
+                                                    _heal_amt = await asyncio.to_thread(engine_api.get_position_contracts, symbol)
+                                                except Exception:
+                                                    _heal_amt = 1.0
+                                            _heal_amt = max(1.0, _heal_amt)
                                             # SL 가격: real_sl이 있으면 사용, 없으면 hard_stop_loss_rate 기반 계산
                                             if _heal_real_sl > 0:
                                                 _heal_sl_price = _heal_real_sl
@@ -1796,7 +1802,15 @@ async def async_trading_loop():
                                 if action != "KEEP":
                                     # 1. 청산 실행 (Paper/Real 분기)
                                     try:
-                                        amount = int(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                        amount = int(bot_global_state["symbols"][symbol].get("contracts", 0))
+                                        # [Bug Fix] 내부 contracts가 0이면 거래소 실제 수량으로 복구
+                                        if amount <= 0:
+                                            try:
+                                                _actual_contracts = await asyncio.to_thread(engine_api.get_position_contracts, symbol)
+                                                amount = int(_actual_contracts) if _actual_contracts > 0 else 1
+                                                logger.warning(f"[{symbol}] ⚠️ 내부 contracts=0 → 거래소 실제 수량 {amount}으로 복구")
+                                            except Exception:
+                                                amount = 1  # 최후 방어: 최소 1계약
                                         _is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
                                         _paper_tag = "[👻 PAPER] " if _is_paper else ""
 
@@ -1996,6 +2010,17 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            # [Bug Fix] active_target 외 심볼 신규 진입 차단
+                            # 봇은 모든 심볼을 감시하지만, 신규 진입은 active_target에만 허용
+                            # 기존 포지션 관리(TP/SL/트레일링)는 모든 심볼에서 계속 동작
+                            _active_symbols = get_config('symbols')
+                            _active_target = _active_symbols[0] if isinstance(_active_symbols, list) and _active_symbols else None
+                            if _active_target and symbol != _active_target:
+                                _block_msg = f"[{symbol}] ⛔ 비활성 타겟 진입 차단 — 현재 활성 타겟: {_active_target}"
+                                logger.info(_block_msg)
+                                _log_trade_attempt(symbol, signal, "BLOCKED", "not_active_target")
+                                continue
+
                             # [Phase 24 Fix] LONG/SHORT 신호가 실제 평가되는 시점에 캔들 잠금
                             # → 같은 캔들에서 중복 진입 방지 (원래 목적 유지)
                             # → HOLD 신호에서는 잠금 없음 → 이후 루프에서 재평가 가능
@@ -2017,8 +2042,22 @@ async def async_trading_loop():
                             try:
                                 # 수동 오버라이드 or [v2.2] ATR 기반 동적 포지션 사이징
                                 manual_override = str(get_config('manual_override_enabled')).lower() == 'true'
-                                # [Phase 18.1] 코인별 레버리지 로드 (심볼 전용 우선, GLOBAL Fallback)
-                                trade_leverage = max(1, min(100, int(get_config('manual_leverage' if manual_override else 'leverage', symbol) or 1)))
+                                # [Bug Fix] 레버리지 심볼별 완전 격리
+                                # get_config(key, symbol)은 GLOBAL fallback 내장 → 직접 심볼 키 조회로 격리
+                                if manual_override:
+                                    trade_leverage = max(1, min(100, int(get_config('manual_leverage', symbol) or get_config('manual_leverage') or 1)))
+                                else:
+                                    # 1차: 심볼 전용 키 직접 조회 (GLOBAL fallback 우회)
+                                    _sym_lev_direct = get_config(f"{symbol}::leverage")
+                                    if _sym_lev_direct is not None:
+                                        trade_leverage = max(1, min(100, int(_sym_lev_direct)))
+                                    else:
+                                        # 2차: GLOBAL leverage (마스터 튜닝 패널 설정값)
+                                        _global_lev = get_config('leverage')
+                                        trade_leverage = max(1, min(100, int(_global_lev or 1)))
+                                        # [Safety] 소액 계좌 + GLOBAL fallback + 고레버리지 = 위험 경고
+                                        if trade_leverage > 5 and curr_bal < 100:
+                                            logger.warning(f"[{symbol}] ⚠️ 심볼 전용 레버리지 없음 → GLOBAL {trade_leverage}x 사용 (소액 계좌 ${curr_bal:.2f})")
                                 try:
                                     contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
                                 except Exception:
@@ -2038,6 +2077,18 @@ async def async_trading_loop():
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
                                         curr_bal, current_price, trade_leverage, contract_size, _risk_rate
                                     )
+                                # [Bug Fix] 소액 계좌 방어: 1계약 증거금이 잔고의 50%를 초과하면 진입 차단
+                                _min_1_contract_margin = (contract_size * current_price) / trade_leverage
+                                if _min_1_contract_margin > curr_bal * 0.50:
+                                    _micro_msg = (
+                                        f"[{symbol}] ⛔ 소액 계좌 방어 발동: 1계약 증거금 ${_min_1_contract_margin:.2f} > "
+                                        f"잔고 50% ${curr_bal * 0.50:.2f} — 이 코인은 현재 자본으로 거래 불가"
+                                    )
+                                    bot_global_state["logs"].append(_micro_msg)
+                                    logger.warning(_micro_msg)
+                                    _log_trade_attempt(symbol, signal, "BLOCKED", "micro_account_protection")
+                                    continue  # 이 심볼 진입 건너뛰기
+
                                 # [Phase 31] 증거금 사전 검증 — 거래소 거부(51008) 선제 차단
                                 _margin_needed = (contract_size * current_price * trade_amount) / trade_leverage
                                 if curr_bal * 0.90 < _margin_needed:

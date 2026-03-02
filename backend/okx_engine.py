@@ -123,18 +123,50 @@ class OKXEngine:
             print(f"[조회 오류] 포지션 조회 실패: {e}")
             return []
 
+    def get_position_contracts(self, symbol: str) -> float:
+        """거래소에서 해당 심볼의 실제 포지션 계약 수 조회 (청산 시 정확한 수량 보장)"""
+        if not self.exchange:
+            return 0
+        try:
+            positions = self.exchange.fetch_positions([symbol])
+            for pos in positions:
+                if pos.get('symbol') == symbol and float(pos.get('contracts', 0)) > 0:
+                    return float(pos['contracts'])
+        except Exception as e:
+            print(f"[조회 오류] 포지션 수량 조회 실패 ({symbol}): {e}")
+        return 0
+
     def close_position(self, symbol: str, side: str, amount: float):
         """
         포지션 시장가 청산 명령만 수행 후 order_id 반환
+        [Bug Fix] 내부 amount가 0이거나 최소 미달이면 거래소 실제 수량으로 대체
         """
         if not self.exchange:
             raise Exception("OKX 거래소가 연결되지 않았습니다.")
-            
+
+        # [방어] 전달받은 amount가 0 이하이면 거래소 실제 포지션 수량으로 대체
+        if amount <= 0:
+            actual = self.get_position_contracts(symbol)
+            if actual > 0:
+                amount = actual
+            else:
+                raise Exception(f"청산 불가: 내부 수량 {amount}, 거래소 수량 {actual} — 포지션 없음")
+
+        # [방어] OKX 최소 계약 단위 보장 (BTC: 1계약 = 0.01)
+        try:
+            market = self.exchange.market(symbol)
+            min_amount = float(market.get('limits', {}).get('amount', {}).get('min', 1))
+            if amount < min_amount:
+                actual = self.get_position_contracts(symbol)
+                amount = max(actual, min_amount) if actual > 0 else min_amount
+        except Exception:
+            pass
+
         if side.upper() == "LONG":
             order = self.exchange.create_market_sell_order(symbol, amount)
         else:
             order = self.exchange.create_market_buy_order(symbol, amount)
-            
+
         return order.get('id')
 
     def cancel_order(self, order_id: str, symbol: str):
