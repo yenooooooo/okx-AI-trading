@@ -249,6 +249,18 @@ async function syncBotStatus() {
             // 웹소켓(priceWs)이 연결되어 있을 때는 REST API 구형 가격/수익률 데이터 표시는 무시.
             // (단, 포지션 유무, 진입가, 목표가 등 고정데이터는 계속 연동)
             updateText('pos-type', symbolData.position);
+            // [UI Overhaul] 방향 배지 색상 동적 적용
+            const posTypeEl2 = document.getElementById('pos-type');
+            if (posTypeEl2) {
+                const posStr = String(symbolData.position).toUpperCase();
+                if (posStr.includes('LONG')) {
+                    posTypeEl2.className = 'text-sm font-black font-mono tracking-tight flash-target text-white px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-green-500 border border-emerald-400/30 shadow-lg';
+                } else if (posStr.includes('SHORT')) {
+                    posTypeEl2.className = 'text-sm font-black font-mono tracking-tight flash-target text-white px-3 py-1.5 rounded-lg bg-gradient-to-r from-red-600 to-rose-500 border border-red-400/30 shadow-lg';
+                } else {
+                    posTypeEl2.className = 'text-sm font-black font-mono tracking-tight flash-target text-white px-3 py-1.5 rounded-lg bg-gradient-to-r from-gray-700 to-gray-600 border border-gray-500/30 shadow-lg';
+                }
+            }
             updateNumberText('pos-entry', symbolData.entry_price);
             // TP/SL 상태 동기화 (백엔드 실시간 계산값 기반)
             const realSl = parseFloat(symbolData.real_sl || 0);
@@ -302,17 +314,36 @@ async function syncBotStatus() {
 
             // 색상 및 글로우 동적 적용 (숏/롱 관계없이 수익 여부에 따름)
             if (pnl > 0) {
-                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-green';
-                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-green';
+                roiEl.className = 'text-3xl font-mono font-bold leading-none flash-target text-neon-green block';
+                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono font-bold block mt-0.5 flash-target text-neon-green';
                 posCard.className = "glass-panel p-5 transition-all duration-500 flex flex-col relative overflow-hidden glow-green";
             } else if (pnl < 0) {
-                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-neon-red';
-                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-neon-red';
+                roiEl.className = 'text-3xl font-mono font-bold leading-none flash-target text-neon-red block';
+                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono font-bold block mt-0.5 flash-target text-neon-red';
                 posCard.className = "glass-panel p-5 transition-all duration-500 flex flex-col relative overflow-hidden glow-red";
             } else {
-                roiEl.className = 'text-2xl font-mono font-bold leading-none flash-target text-gray-400';
-                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono block mt-1 flash-target text-gray-400';
+                roiEl.className = 'text-3xl font-mono font-bold leading-none flash-target text-gray-400 block';
+                if (pnlUsdtEl) pnlUsdtEl.className = 'text-xs font-mono font-bold block mt-0.5 flash-target text-gray-400';
                 posCard.className = "glass-panel p-5 transition-all duration-500 border-navy-border flex flex-col relative overflow-hidden";
+            }
+
+            // [UI Overhaul] TP/SL 프로그레스 바 업데이트
+            const _entry = parseFloat(symbolData.entry_price || 0);
+            const _current = parseFloat(symbolData.current_price || 0);
+            const _tp = parseFloat(symbolData.take_profit_price || 0);
+            if (_entry > 0 && _current > 0 && realSl > 0 && _tp > 0) {
+                const priceMarker = document.getElementById('pos-price-marker');
+                const tpSlBar = document.getElementById('pos-tp-sl-bar');
+                if (priceMarker && tpSlBar) {
+                    const range = _tp - realSl;
+                    if (range > 0) {
+                        const progress = Math.max(0, Math.min(100, ((_current - realSl) / range) * 100));
+                        priceMarker.style.left = progress + '%';
+                        // 바 색상: SL쪽(왼쪽)은 적색, TP쪽(오른쪽)은 녹색
+                        tpSlBar.style.width = '100%';
+                        tpSlBar.style.transform = 'none';
+                    }
+                }
             }
         }
 
@@ -403,6 +434,30 @@ async function syncBotStatus() {
                 tierBadge.textContent = '🛡️ OFF — 수동 모드';
                 tierBadge.className = 'inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold tracking-wider border border-gray-600/50 bg-gray-800/50 text-gray-500';
             }
+        }
+
+        // 6. [UI Overhaul] Command Bar 미러링 — 핵심 데이터를 상단 바에 실시간 반영
+        const cmdBalMirror = document.getElementById('cmd-balance-mirror');
+        if (cmdBalMirror) cmdBalMirror.textContent = '$' + parseFloat(data.balance || 0).toFixed(2);
+
+        if (symbolData && symbolData.position !== 'NONE') {
+            const _pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
+            const _pnlSign = _pnl >= 0 ? '+' : '';
+            const cmdPnlMirror = document.getElementById('cmd-pnl-mirror');
+            if (cmdPnlMirror) {
+                cmdPnlMirror.textContent = `${_pnlSign}${_pnl.toFixed(2)}%`;
+                cmdPnlMirror.className = `font-mono text-xs font-bold ${_pnl >= 0 ? 'text-neon-green' : 'text-neon-red'}`;
+            }
+            const cmdPriceMirror = document.getElementById('cmd-price-mirror');
+            if (cmdPriceMirror) {
+                const _p = parseFloat(symbolData.current_price || 0);
+                cmdPriceMirror.textContent = '$' + (_p < 100 ? _p.toFixed(4) : _p.toFixed(2));
+            }
+        } else {
+            const cmdPnlMirror = document.getElementById('cmd-pnl-mirror');
+            if (cmdPnlMirror) { cmdPnlMirror.textContent = '--'; cmdPnlMirror.className = 'font-mono text-xs font-bold text-gray-500'; }
+            const cmdPriceMirror = document.getElementById('cmd-price-mirror');
+            if (cmdPriceMirror) cmdPriceMirror.textContent = '--';
         }
 
     } catch (error) {
@@ -594,6 +649,9 @@ function renderGates(gates, passed) {
         macd_rsi: 'gate-macd-rsi',
         macro: 'gate-macro',
     };
+    // 게이트 이름 → data-gate 속성 매핑
+    const gateAttrMap = { adx: 'adx', chop: 'chop', volume: 'volume', disparity: 'disparity', macd_rsi: 'macd-rsi', macro: 'macro' };
+
     for (const [key, elId] of Object.entries(gateMap)) {
         const el = document.getElementById(elId);
         if (!el || !gates[key]) continue;
@@ -607,6 +665,28 @@ function renderGates(gates, passed) {
         } else {
             el.innerHTML = `<span class="text-neon-red text-[10px] mr-1">❌</span><span class="text-gray-400 font-bold text-[11px]">${g.value}</span>${targetHtml}`;
         }
+
+        // [UI Overhaul] 파이프라인 노드 시각 업데이트 (데스크톱 원형 + 커넥터)
+        const gateAttr = gateAttrMap[key];
+        const pipeNodes = document.querySelectorAll(`.gate-node[data-gate="${gateAttr}"]`);
+        pipeNodes.forEach(node => {
+            node.classList.toggle('gate-pass', !!g.pass);
+            node.classList.toggle('gate-fail', !g.pass);
+            // 원형 아이콘 색상 변경
+            const circle = node.querySelector('.gate-circle');
+            if (circle) {
+                if (g.pass) {
+                    circle.className = 'w-8 h-8 rounded-full border-2 border-neon-green bg-neon-green/15 flex items-center justify-center text-[10px] font-bold text-neon-green transition-all mb-1 gate-circle shadow-[0_0_8px_rgba(0,255,136,0.3)]';
+                } else {
+                    circle.className = 'w-8 h-8 rounded-full border-2 border-neon-red/60 bg-neon-red/10 flex items-center justify-center text-[10px] font-bold text-neon-red/70 transition-all mb-1 gate-circle';
+                }
+            }
+            // 모바일 미러 값 동기화
+            const mirrorVal = node.querySelector('.gate-val-mirror');
+            if (mirrorVal) {
+                mirrorVal.innerHTML = el.innerHTML;
+            }
+        });
     }
 }
 
@@ -684,6 +764,28 @@ function updateActiveTuningBadge() {
         badge.textContent = '🛠️ 커스텀';
         badge.className = 'px-1.5 py-0.5 rounded font-mono text-[9px] border text-purple-300 border-purple-500/50 bg-purple-500/10 transition-all';
     }
+
+    // [UI Overhaul] Command Bar 프리셋 배지 미러
+    const cmdPresetBadge = document.getElementById('cmd-preset-badge');
+    if (cmdPresetBadge) cmdPresetBadge.textContent = matchedLabel || '커스텀';
+
+    // [UI Overhaul] Preset Card 활성 하이라이트
+    let matchedPresetName = null;
+    for (const [presetName] of Object.entries(PRESET_CONFIGS)) {
+        const keys = Object.keys(TUNING_INPUT_MAP);
+        const isMatch = keys.every(key => {
+            const { parse } = TUNING_INPUT_MAP[key];
+            const cur = currentVals[key];
+            const pre = PRESET_CONFIGS[presetName][key];
+            if (pre === undefined) return true;
+            if (parse === parseInt) return Math.round(cur) === Math.round(pre);
+            return Math.abs(cur - pre) < 0.00001;
+        });
+        if (isMatch) { matchedPresetName = presetName; break; }
+    }
+    document.querySelectorAll('.preset-card').forEach(card => {
+        card.classList.toggle('preset-active', card.dataset.preset === matchedPresetName);
+    });
 }
 
 async function toggleBot() {
@@ -850,6 +952,9 @@ async function syncConfig(symbol = null) {
                 // [Phase 18.1] 좌측 패널 레버리지 배지 갱신
                 const leftLevBadge = document.getElementById('left-panel-lev-badge');
                 if (leftLevBadge) leftLevBadge.textContent = parseInt(val) + 'x';
+                // [UI Overhaul] Command Bar 레버리지 미러
+                const cmdLevBadge = document.getElementById('cmd-lev-badge');
+                if (cmdLevBadge) cmdLevBadge.textContent = parseInt(val) + 'x';
             } else if (key === 'direction_mode') {
                 // [Phase 18.1] 방향 모드 버튼 UI 동기화
                 _applyDirectionModeUI(String(val).toUpperCase());
@@ -862,6 +967,9 @@ async function syncConfig(symbol = null) {
                 // [Phase 18.1] 좌측 패널 심볼 배지 갱신
                 const leftSymBadge = document.getElementById('left-panel-symbol-badge');
                 if (leftSymBadge && activeSymbol) leftSymBadge.textContent = activeSymbol.split(':')[0];
+                // [UI Overhaul] Command Bar 심볼 미러
+                const cmdSymMirror = document.getElementById('cmd-symbol-mirror');
+                if (cmdSymMirror && activeSymbol) cmdSymMirror.textContent = activeSymbol.split(':')[0];
                 // [Phase 18.1] 모달 심볼 드롭다운 동기화
                 const modalSymSel = document.getElementById('modal-target-symbol');
                 if (modalSymSel && activeSymbol) modalSymSel.value = activeSymbol;
@@ -2713,6 +2821,9 @@ async function fetchLiveTickers() {
 
 // --- Init & Intervals (Parallel Optimization) ---
 async function initializeApp() {
+    // [UI Overhaul] 테마 초기화 (localStorage 기반 — 깜빡임 방지를 위해 최우선 실행)
+    initTheme();
+
     // [Phase 18.2] 부팅 시퀀스 교정: 백엔드에서 현재 타겟(Symbol)을 가장 먼저 알아옴
     await syncConfig();
 
@@ -3565,4 +3676,121 @@ async function _xrayLoadOkxDeepVerify(container) {
 
     html += '</div>';
     container.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// [UI Overhaul] Tab System, FAB, Theme System
+// ════════════════════════════════════════════════════════════════════════════
+
+// --- Tab Switching ---
+function switchMainTab(tabName) {
+    ['trading', 'analytics', 'settings'].forEach(t => {
+        const panel = document.getElementById(`tab-${t}`);
+        if (panel) panel.classList.toggle('hidden', t !== tabName);
+    });
+    document.querySelectorAll('.main-tab-btn').forEach(btn => {
+        btn.classList.toggle('tab-active', btn.dataset.tab === tabName);
+    });
+    // Analytics 탭 전환 시 데이터 새로고침
+    if (tabName === 'analytics') {
+        syncStats();
+        fetchAndRenderHeatmap();
+    }
+}
+
+// --- FAB (Floating Action Button) ---
+function toggleFAB() {
+    const menu = document.getElementById('fab-menu');
+    const mainBtn = document.getElementById('fab-main-btn');
+    if (!menu || !mainBtn) return;
+    const isOpen = !menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', isOpen);
+    mainBtn.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(45deg)';
+}
+
+async function emergencyCloseAll() {
+    const confirmed = confirm('🚨 긴급 전량 청산\n\n현재 보유 중인 모든 포지션을 즉시 시장가로 청산합니다.\n정말 실행하시겠습니까?');
+    if (!confirmed) return;
+    try {
+        const response = await fetch(`${API_URL}/close-position`, { method: 'POST' });
+        const result = await response.json();
+        if (result.status === 'success' || result.message) {
+            showToast('긴급 청산', '전량 청산 요청이 전송되었습니다.', 'SUCCESS');
+        } else {
+            showToast('청산 실패', result.error || '알 수 없는 오류', 'ERROR');
+        }
+    } catch (error) {
+        showToast('청산 오류', error.message, 'ERROR');
+    }
+    toggleFAB(); // 메뉴 닫기
+}
+
+// --- Theme System ---
+function getThemeColor(varName) {
+    return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function toggleTheme() {
+    const html = document.documentElement;
+    const isLight = html.getAttribute('data-theme') === 'light';
+    if (isLight) {
+        html.removeAttribute('data-theme');
+        localStorage.setItem('ag-theme', 'dark');
+    } else {
+        html.setAttribute('data-theme', 'light');
+        localStorage.setItem('ag-theme', 'light');
+    }
+    updateThemeIcon();
+    updateChartTheme();
+}
+
+function initTheme() {
+    const saved = localStorage.getItem('ag-theme');
+    if (saved === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+    }
+    updateThemeIcon();
+}
+
+function updateThemeIcon() {
+    const btn = document.getElementById('theme-toggle-btn');
+    if (!btn) return;
+    const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    btn.innerHTML = isLight ? '🌙' : '☀️';
+    btn.title = isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode';
+}
+
+function updateChartTheme() {
+    const textColor = getThemeColor('--text-secondary');
+    const borderColor = getThemeColor('--border-primary');
+    const gridColor = getThemeColor('--border-subtle') || 'rgba(48,54,61,0.5)';
+    const greenColor = getThemeColor('--neon-green');
+    const redColor = getThemeColor('--neon-red');
+
+    const layoutOpts = {
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: textColor },
+        grid: { vertLines: { color: gridColor }, horzLines: { color: gridColor } },
+        timeScale: { borderColor: borderColor },
+        rightPriceScale: { borderColor: borderColor },
+    };
+
+    if (chart) {
+        chart.applyOptions(layoutOpts);
+        if (candleSeries) {
+            candleSeries.applyOptions({
+                upColor: greenColor, downColor: redColor,
+                wickUpColor: greenColor, wickDownColor: redColor,
+            });
+        }
+    }
+
+    const subChartOpts = {
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: textColor },
+        grid: { vertLines: { visible: false }, horzLines: { color: gridColor } },
+        timeScale: { borderColor: borderColor },
+        rightPriceScale: { borderColor: borderColor },
+    };
+
+    if (rsiChart) rsiChart.applyOptions(subChartOpts);
+    if (macdChart) macdChart.applyOptions(subChartOpts);
 }

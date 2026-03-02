@@ -15,7 +15,8 @@
       "Bash(cmd.exe:*)",
       "Bash(powershell.exe:*)",
       "Bash(curl:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(python3:*)"
     ]
   }
 }
