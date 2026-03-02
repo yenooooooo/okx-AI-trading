@@ -2188,28 +2188,94 @@ async function syncStats() {
         const response = await fetch(`${API_URL}/stats`);
         const stats = await response.json();
 
-        updateNumberText('stats-total-trades', stats.total_trades || 0, val => Math.floor(val));
-        updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
+        // ── Hero PnL ──────────────────────────────────────────────────────────
+        const totalNetVal = parseFloat(stats.total_net_pnl || 0);
+        const dailyNetVal = parseFloat(stats.daily_net_pnl || 0);
 
-        // Daily Net PnL — 양수 초록 / 음수 빨강 동적 스타일
-        const dailyNetEl = document.getElementById('stats-daily-net');
-        if (dailyNetEl) {
-            const dailyNetVal = parseFloat(stats.daily_net_pnl || 0);
-            const dailyNetSign = dailyNetVal >= 0 ? '+' : '';
-            dailyNetEl.textContent = `${dailyNetSign}${dailyNetVal.toFixed(2)} USDT`;
-            dailyNetEl.className = dailyNetEl.className.replace(/text-neon-(green|red)/g, '') + (dailyNetVal >= 0 ? ' text-neon-green' : ' text-neon-red');
-        }
-
-        // Total Net PnL — 양수 초록 / 음수 빨강 동적 스타일
         const totalNetEl = document.getElementById('stats-total-net');
         if (totalNetEl) {
-            const totalNetVal = parseFloat(stats.total_net_pnl || 0);
-            const totalNetSign = totalNetVal >= 0 ? '+' : '';
-            totalNetEl.textContent = `${totalNetSign}${totalNetVal.toFixed(2)} USDT`;
+            totalNetEl.textContent = (totalNetVal >= 0 ? '+' : '') + totalNetVal.toFixed(2);
             totalNetEl.className = totalNetEl.className.replace(/text-neon-(green|red)/g, '') + (totalNetVal >= 0 ? ' text-neon-green' : ' text-neon-red');
         }
+        const dailyNetEl = document.getElementById('stats-daily-net');
+        if (dailyNetEl) {
+            dailyNetEl.textContent = (dailyNetVal >= 0 ? '+' : '') + dailyNetVal.toFixed(2);
+            dailyNetEl.className = dailyNetEl.className.replace(/text-neon-(green|red)/g, '') + (dailyNetVal >= 0 ? ' text-neon-green' : ' text-neon-red');
+        }
+        const dailySub = document.getElementById('stats-daily-sub');
+        if (dailySub) {
+            const dt = stats.daily_trades || 0;
+            const dw = stats.daily_wins || 0;
+            dailySub.textContent = `USDT 오늘 ${dt}회 (${dw}승)`;
+        }
 
-        // --- NEW: Recent Executions ---
+        // ── Win/Loss 프로그레스 바 ────────────────────────────────────────────
+        const winTrades = stats.win_trades || 0;
+        const lossTrades = stats.loss_trades || 0;
+        const totalT = stats.total_trades || 0;
+        const winPct = totalT > 0 ? (winTrades / totalT * 100) : 0;
+
+        const winBar = document.getElementById('stats-win-bar');
+        if (winBar) winBar.style.width = winPct.toFixed(1) + '%';
+        const wlLabel = document.getElementById('stats-wl-label');
+        if (wlLabel) wlLabel.textContent = `${winTrades}W · ${lossTrades}L`;
+
+        // ── 4-stat 그리드 ─────────────────────────────────────────────────────
+        updateNumberText('stats-total-trades', totalT, val => Math.floor(val));
+        updateNumberText('stats-win-rate', stats.win_rate || 0, val => `${val.toFixed(2)}%`);
+
+        const maxDdEl = document.getElementById('stats-max-dd');
+        if (maxDdEl) maxDdEl.textContent = (stats.max_drawdown || 0).toFixed(2) + '%';
+
+        const avgEl = document.getElementById('stats-avg-trade');
+        if (avgEl) {
+            const avg = parseFloat(stats.avg_net_pnl || 0);
+            avgEl.textContent = (avg >= 0 ? '+' : '') + avg.toFixed(2);
+            avgEl.className = avgEl.className.replace(/text-neon-(green|red)/g, '') + (avg >= 0 ? ' text-neon-green' : ' text-neon-red');
+        }
+
+        // ── Best / Worst ──────────────────────────────────────────────────────
+        const bestEl = document.getElementById('stats-best');
+        if (bestEl) {
+            const v = parseFloat(stats.best_trade || 0);
+            bestEl.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + ' U';
+        }
+        const worstEl = document.getElementById('stats-worst');
+        if (worstEl) {
+            const v = parseFloat(stats.worst_trade || 0);
+            worstEl.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + ' U';
+        }
+
+        // ── Sharpe Ratio ──────────────────────────────────────────────────────
+        const sharpeEl = document.getElementById('stats-sharpe');
+        if (sharpeEl) {
+            const s = parseFloat(stats.sharpe_ratio || 0);
+            sharpeEl.textContent = s.toFixed(2);
+            sharpeEl.className = sharpeEl.className.replace(/text-neon-(green|red)/g, '') + (s >= 1 ? ' text-neon-green' : s < 0 ? ' text-neon-red' : '');
+        }
+
+        // ── Streak ────────────────────────────────────────────────────────────
+        const streakEl = document.getElementById('stats-streak');
+        const streakIcon = document.getElementById('stats-streak-icon');
+        if (streakEl) {
+            const sc = stats.streak_count || 0;
+            const st = stats.streak_type || 'W';
+            if (sc === 0) {
+                streakEl.textContent = '—';
+                streakEl.className = streakEl.className.replace(/text-neon-(green|red)/g, '');
+                if (streakIcon) streakIcon.textContent = '➖';
+            } else if (st === 'W') {
+                streakEl.textContent = `${sc}연승`;
+                streakEl.className = streakEl.className.replace(/text-neon-(green|red)/g, '') + ' text-neon-green';
+                if (streakIcon) streakIcon.textContent = sc >= 3 ? '🔥' : '✅';
+            } else {
+                streakEl.textContent = `${sc}연패`;
+                streakEl.className = streakEl.className.replace(/text-neon-(green|red)/g, '') + ' text-neon-red';
+                if (streakIcon) streakIcon.textContent = sc >= 3 ? '❄️' : '⚠️';
+            }
+        }
+
+        // ── Recent Executions ─────────────────────────────────────────────────
         try {
             const tradesRes = await fetch(`${API_URL}/trades`);
             const trades = await tradesRes.json();
@@ -2217,7 +2283,6 @@ async function syncStats() {
             const historyContainer = document.getElementById('recent-executions-list');
             if (historyContainer && trades && Array.isArray(trades) && trades.length > 0) {
                 let histHtml = '';
-                // The API /api/v1/trades returns latest 100 trades (DESC order mapped from DB)
                 trades.slice(0, 3).forEach(t => {
                     const pnlVal = parseFloat(t.pnl || 0);
                     const isProfit = pnlVal >= 0;

@@ -986,49 +986,99 @@
             </div>
 
             <!-- Stats -->
-            <div class="glass-panel p-5 flex flex-col gap-3 text-xs">
-                <h3 class="text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2">
-                    누적 성과 지표 (Performance Metrics)</h3>
+            <div class="glass-panel p-5 flex flex-col gap-3.5 text-xs">
+                <!-- 헤더 + OKX 실전 배지 -->
+                <div class="flex items-center justify-between border-b border-navy-border pb-2">
+                    <h3 class="text-gray-400 uppercase tracking-widest text-[10px]">누적 성과 지표</h3>
+                    <span class="text-[8px] font-mono bg-neon-green/10 border border-neon-green/30 text-neon-green px-2 py-0.5 rounded-full tracking-wide">OKX 실전</span>
+                </div>
 
-                <div class="grid grid-cols-2 gap-3">
-                    <!-- Trades -->
-                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Trades</span>
-                        <span id="stats-total-trades"
-                            class="font-mono text-base md:text-lg font-bold text-text-main flash-target">0</span>
-                        <span class="text-[10px] text-gray-600">완료된 총 거래 횟수</span>
+                <!-- Hero: Total PnL + Daily PnL -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-navy-900/60 rounded-xl p-3 border border-navy-border relative overflow-hidden">
+                        <div class="absolute inset-0 bg-gradient-to-br from-neon-green/5 to-transparent pointer-events-none rounded-xl"></div>
+                        <div class="text-[8px] text-gray-500 uppercase tracking-widest mb-1 font-semibold">Total PnL</div>
+                        <div id="stats-total-net" class="font-mono text-lg font-black text-neon-green flash-target leading-none">+0.00</div>
+                        <div class="text-[8px] text-gray-600 mt-1">USDT 누적 순손익</div>
                     </div>
-
-                    <!-- Win Rate -->
-                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Win Rate</span>
-                        <span id="stats-win-rate"
-                            class="font-mono text-base md:text-lg font-bold text-neon-green flash-target">0.00%</span>
-                        <span class="text-[10px] text-gray-600">수익 거래 승률</span>
+                    <div class="bg-navy-900/60 rounded-xl p-3 border border-navy-border relative overflow-hidden">
+                        <div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent pointer-events-none rounded-xl"></div>
+                        <div class="text-[8px] text-gray-500 uppercase tracking-widest mb-1 font-semibold">Daily PnL</div>
+                        <div id="stats-daily-net" class="font-mono text-lg font-black text-neon-green flash-target leading-none">+0.00</div>
+                        <div id="stats-daily-sub" class="text-[8px] text-gray-600 mt-1">USDT 오늘 0회</div>
                     </div>
+                </div>
 
-                    <!-- Daily Net PnL -->
-                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Daily Net PnL</span>
-                        <span id="stats-daily-net"
-                            class="font-mono text-base md:text-lg font-bold text-neon-green flash-target">+0.00
-                            USDT</span>
-                        <span class="text-[10px] text-gray-600">오늘 하루 최종 순손익 (USDT)</span>
+                <!-- Win/Loss 프로그레스 바 -->
+                <div class="flex flex-col gap-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[9px] text-gray-500 uppercase tracking-widest">Win / Loss</span>
+                        <span id="stats-wl-label" class="text-[9px] font-mono text-gray-400">0W · 0L</span>
                     </div>
+                    <div class="relative h-1.5 rounded-full bg-navy-900/80 overflow-hidden border border-navy-border/40">
+                        <div id="stats-win-bar" class="absolute left-0 top-0 h-full bg-neon-green transition-all duration-700 rounded-full" style="width:0%"></div>
+                    </div>
+                </div>
 
-                    <!-- Total Net PnL -->
-                    <div class="bg-navy-900/60 rounded-lg p-3 border border-navy-border flex flex-col gap-1">
-                        <span class="text-[10px] text-gray-500 uppercase tracking-wider">Total Net PnL</span>
-                        <span id="stats-total-net"
-                            class="font-mono text-base md:text-lg font-bold text-neon-green flash-target">+0.00
-                            USDT</span>
-                        <span class="text-[10px] text-gray-600">누적 최종 순손익 (USDT)</span>
+                <!-- 4-stat 그리드: Trades / Win Rate / Max DD / Avg -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-navy-900/40 rounded-lg p-2.5 border border-navy-border/60 flex flex-col gap-0.5">
+                        <span class="text-[8px] text-gray-500 uppercase tracking-wider">Trades</span>
+                        <span id="stats-total-trades" class="font-mono text-sm font-bold text-text-main flash-target">0</span>
+                        <span class="text-[8px] text-gray-600">완료된 총 거래</span>
+                    </div>
+                    <div class="bg-navy-900/40 rounded-lg p-2.5 border border-navy-border/60 flex flex-col gap-0.5">
+                        <span class="text-[8px] text-gray-500 uppercase tracking-wider">Win Rate</span>
+                        <span id="stats-win-rate" class="font-mono text-sm font-bold text-neon-green flash-target">0.00%</span>
+                        <span class="text-[8px] text-gray-600">수익 거래 승률</span>
+                    </div>
+                    <div class="bg-navy-900/40 rounded-lg p-2.5 border border-navy-border/60 flex flex-col gap-0.5">
+                        <span class="text-[8px] text-gray-500 uppercase tracking-wider">Max Drawdown</span>
+                        <span id="stats-max-dd" class="font-mono text-sm font-bold text-neon-red flash-target">0.00%</span>
+                        <span class="text-[8px] text-gray-600">최대 낙폭</span>
+                    </div>
+                    <div class="bg-navy-900/40 rounded-lg p-2.5 border border-navy-border/60 flex flex-col gap-0.5">
+                        <span class="text-[8px] text-gray-500 uppercase tracking-wider">Avg / Trade</span>
+                        <span id="stats-avg-trade" class="font-mono text-sm font-bold text-text-main flash-target">+0.00</span>
+                        <span class="text-[8px] text-gray-600">거래당 평균 USDT</span>
+                    </div>
+                </div>
+
+                <!-- Best / Worst / Sharpe / Streak -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="flex items-center gap-2 bg-neon-green/5 border border-neon-green/20 rounded-lg px-2.5 py-2">
+                        <span class="text-sm leading-none">🏆</span>
+                        <div class="flex flex-col min-w-0">
+                            <span class="text-[8px] text-gray-500 uppercase tracking-wider">Best</span>
+                            <span id="stats-best" class="font-mono text-[11px] font-bold text-neon-green leading-tight truncate">+0.00</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 bg-neon-red/5 border border-neon-red/20 rounded-lg px-2.5 py-2">
+                        <span class="text-sm leading-none">💀</span>
+                        <div class="flex flex-col min-w-0">
+                            <span class="text-[8px] text-gray-500 uppercase tracking-wider">Worst</span>
+                            <span id="stats-worst" class="font-mono text-[11px] font-bold text-neon-red leading-tight truncate">-0.00</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 bg-navy-900/40 border border-navy-border/60 rounded-lg px-2.5 py-2">
+                        <span class="text-sm leading-none">📐</span>
+                        <div class="flex flex-col">
+                            <span class="text-[8px] text-gray-500 uppercase tracking-wider">Sharpe</span>
+                            <span id="stats-sharpe" class="font-mono text-[11px] font-bold text-text-main leading-tight">0.00</span>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 bg-navy-900/40 border border-navy-border/60 rounded-lg px-2.5 py-2">
+                        <span class="text-sm leading-none" id="stats-streak-icon">➖</span>
+                        <div class="flex flex-col">
+                            <span class="text-[8px] text-gray-500 uppercase tracking-wider">Streak</span>
+                            <span id="stats-streak" class="font-mono text-[11px] font-bold text-text-main leading-tight">—</span>
+                        </div>
                     </div>
                 </div>
 
                 <!-- 히스토리 열람 버튼 -->
                 <button onclick="openHistoryModal()"
-                    class="w-full mt-2 py-2 px-3 rounded-lg border border-navy-border bg-navy-900/60 text-[11px] font-mono text-gray-400 hover:text-text-main hover:border-gray-500 hover:bg-navy-800/80 transition-all duration-200 flex items-center justify-center gap-2">
+                    class="w-full py-2 px-3 rounded-lg border border-navy-border bg-navy-900/60 text-[11px] font-mono text-gray-400 hover:text-text-main hover:border-gray-500 hover:bg-navy-800/80 transition-all duration-200 flex items-center justify-center gap-2">
                     <span>📜</span>
                     <span>과거 기록 열람 (Daily / Monthly)</span>
                 </button>

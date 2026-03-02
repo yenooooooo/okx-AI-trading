@@ -2698,6 +2698,7 @@ async def fetch_statistics():
     total_trades = len(trades)
     # None 안전 처리 (DB에 NULL 저장된 경우 TypeError 방지)
     win_trades = len([t for t in trades if (t.get('pnl_percent') or 0) > 0])
+    loss_trades = total_trades - win_trades
     win_rate = (win_trades / total_trades * 100) if total_trades > 0 else 0
 
     total_pnl_percent = sum([(t.get('pnl_percent') or 0) for t in trades])
@@ -2744,21 +2745,51 @@ async def fetch_statistics():
         except Exception:
             return ""
 
-    today_trades = [t for t in trades if _parse_kst_date(t.get('created_at')) == today_kst]
+    today_trades_list = [t for t in trades if _parse_kst_date(t.get('created_at')) == today_kst]
+    daily_trades = len(today_trades_list)
+    daily_wins = len([t for t in today_trades_list if (t.get('pnl_percent') or 0) > 0])
     # daily_net_pnl: KST 기준 오늘 모든 거래의 순손익(fee 차감) 합산 — 양수/음수 가능
-    daily_net_pnl = sum((t.get('pnl') or 0) for t in today_trades)
+    daily_net_pnl = sum((t.get('pnl') or 0) for t in today_trades_list)
     # total_net_pnl: 전체 기간 모든 거래의 순손익 합산
     total_net_pnl = sum((t.get('pnl') or 0) for t in trades)
     # ─────────────────────────────────────────────────────────────────────────
 
+    # 신규 집계 지표
+    avg_net_pnl = total_net_pnl / total_trades if total_trades > 0 else 0
+    pnl_values = [(t.get('pnl') or 0) for t in trades]
+    best_trade = max(pnl_values) if pnl_values else 0
+    worst_trade = min(pnl_values) if pnl_values else 0
+
+    # 현재 연속 기록 (trades는 DESC 정렬 — 최신 거래가 index 0)
+    streak_count = 0
+    streak_type = 'W'
+    if trades:
+        first_pct = (trades[0].get('pnl_percent') or 0)
+        streak_type = 'W' if first_pct > 0 else 'L'
+        for t in trades:
+            pct = t.get('pnl_percent') or 0
+            if (streak_type == 'W' and pct > 0) or (streak_type == 'L' and pct <= 0):
+                streak_count += 1
+            else:
+                break
+
     return {
         'total_trades': total_trades,
+        'win_trades': win_trades,
+        'loss_trades': loss_trades,
         'win_rate': round(win_rate, 2),
         'total_pnl_percent': round(total_pnl_percent, 2),
         'max_drawdown': round(max_drawdown * 100, 2),
         'sharpe_ratio': round(sharpe_ratio, 2),
         'daily_net_pnl': round(daily_net_pnl, 4),
+        'daily_trades': daily_trades,
+        'daily_wins': daily_wins,
         'total_net_pnl': round(total_net_pnl, 4),
+        'avg_net_pnl': round(avg_net_pnl, 4),
+        'best_trade': round(best_trade, 4),
+        'worst_trade': round(worst_trade, 4),
+        'streak_count': streak_count,
+        'streak_type': streak_type,
     }
 
 
