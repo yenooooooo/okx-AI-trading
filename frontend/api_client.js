@@ -2804,52 +2804,57 @@ function renderHeatmap(dailyData) {
     const container = document.getElementById('pnl-heatmap');
     if (!container) return;
 
-    // ── PnL 맵 구성 ──
-    const pnlMap = {}; // { 'YYYY-MM-DD': { net_pnl, total_trades } }
+    // ── PnL 맵 구성 (win_rate, gross_pnl 포함) ──
+    const pnlMap = {};
     if (Array.isArray(dailyData)) {
         dailyData.forEach(d => {
-            pnlMap[d.date] = { net_pnl: parseFloat(d.net_pnl || 0), total_trades: d.total_trades || 0 };
+            pnlMap[d.date] = {
+                net_pnl: parseFloat(d.net_pnl || 0),
+                gross_pnl: parseFloat(d.gross_pnl || 0),
+                total_trades: d.total_trades || 0,
+                win_rate: parseFloat(d.win_rate || 0),
+            };
         });
     }
 
-    // ── 색상 스케일 기준값 산출 (빈 배열 안전 처리) ──
+    // ── 색상 스케일 (sqrt 정규화 — 소액 거래 색상 구분력 향상) ──
     const profits = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v > 0);
-    const losses = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v < 0);
+    const losses  = Object.values(pnlMap).map(v => v.net_pnl).filter(v => v < 0);
     const maxProfit = profits.length > 0 ? Math.max(...profits) : 1;
-    const maxLoss = losses.length > 0 ? Math.abs(Math.min(...losses)) : 1;
+    const maxLoss   = losses.length  > 0 ? Math.abs(Math.min(...losses)) : 1;
 
     function _cellColor(dateStr) {
         const d = pnlMap[dateStr];
-        if (!d || d.net_pnl === 0) return '#161b22'; // 거래 없음
+        if (!d || d.total_trades === 0) return '#161b22';
         const pnl = d.net_pnl;
-        if (pnl > 0) {
-            const r = Math.min(pnl / maxProfit, 1);
+        if (pnl >= 0) {
+            if (pnl === 0) return '#1c2128';
+            const r = Math.sqrt(Math.min(pnl / maxProfit, 1));
             if (r < 0.25) return '#0e4429';
-            if (r < 0.5) return '#006d32';
+            if (r < 0.5)  return '#006d32';
             if (r < 0.75) return '#26a641';
             return '#39d353';
         } else {
-            const r = Math.min(Math.abs(pnl) / maxLoss, 1);
+            const r = Math.sqrt(Math.min(Math.abs(pnl) / maxLoss, 1));
             if (r < 0.25) return '#3d0000';
-            if (r < 0.5) return '#7a0000';
+            if (r < 0.5)  return '#7a0000';
             if (r < 0.75) return '#b00020';
             return '#ff4d4d';
         }
     }
 
-    // ── 날짜 범위 생성: KST 기준 오늘부터 26주(182일) 전까지 ──
-    // KST 오늘 날짜를 UTC Date 객체로 계산
-    const kstNow = new Date(Date.now() + 9 * 3600 * 1000);
+    // ── KST 기준 오늘 날짜 ──
+    const kstNow  = new Date(Date.now() + 9 * 3600 * 1000);
     const todayKst = new Date(Date.UTC(kstNow.getUTCFullYear(), kstNow.getUTCMonth(), kstNow.getUTCDate()));
     const todayStr = todayKst.toISOString().split('T')[0];
 
-    // 26주 전 일요일(getUTCDay()=0)까지 롤백하여 그리드 시작점 확정
+    // ── 26주 전 일요일부터 시작 ──
     const startDate = new Date(todayKst);
     startDate.setUTCDate(startDate.getUTCDate() - 26 * 7);
-    const startOffset = startDate.getUTCDay(); // 0=Sun ... 6=Sat
-    startDate.setUTCDate(startDate.getUTCDate() - startOffset); // 해당 주의 일요일로 정렬
+    startDate.setUTCDate(startDate.getUTCDate() - startDate.getUTCDay());
+    const startStr = startDate.toISOString().split('T')[0];
 
-    // ── 주(Week) 단위 열 생성 ──
+    // ── 주 단위 배열 생성 ──
     const weeks = [];
     const cur = new Date(startDate);
     while (cur <= todayKst) {
@@ -2861,48 +2866,137 @@ function renderHeatmap(dailyData) {
         weeks.push(week);
     }
 
-    // ── HTML 구성 ──
+    // ── 월 레이블 행 렌더링 (JS — heatmap-month-labels) ──
+    const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthLabelsEl = document.getElementById('heatmap-month-labels');
+    if (monthLabelsEl) {
+        let lastMonth = -1;
+        let mHtml = '';
+        weeks.forEach(week => {
+            const m = parseInt(week[0].split('-')[1]) - 1;
+            const show = (m !== lastMonth);
+            if (show) lastMonth = m;
+            mHtml += `<div style="width:12px;height:12px;flex-shrink:0;font-size:8px;font-family:monospace;color:${show ? '#6e7681' : 'transparent'};overflow:visible;white-space:nowrap;">${MONTH_ABBR[m]}</div>`;
+        });
+        monthLabelsEl.innerHTML = mHtml;
+    }
+
+    // ── 셀 HTML 생성 ──
     let html = '';
     weeks.forEach(week => {
         html += `<div class="flex flex-col shrink-0" style="gap:2px;">`;
         week.forEach(dateStr => {
             const isFuture = dateStr > todayStr;
+            const isToday  = dateStr === todayStr;
             if (isFuture) {
-                // 미래 날짜: 투명 칸
-                html += `<div style="width:11px;height:11px;border-radius:2px;background:transparent;"></div>`;
+                html += `<div style="width:12px;height:12px;border-radius:2px;background:transparent;"></div>`;
                 return;
             }
             const color = _cellColor(dateStr);
             const d = pnlMap[dateStr];
-            const pnlVal = d ? d.net_pnl : 0;
-            const pnlStr = pnlVal >= 0 ? `+${pnlVal.toFixed(2)}` : `${pnlVal.toFixed(2)}`;
-            const trades = d ? d.total_trades : 0;
+            const pnlVal  = d ? d.net_pnl    : 0;
+            const grossVal = d ? d.gross_pnl  : 0;
+            const trades  = d ? d.total_trades : 0;
+            const wr      = d ? d.win_rate    : 0;
+            const todayStyle = isToday ? 'outline:1.5px solid #58a6ff;outline-offset:-1px;' : '';
             html += `<div
                 class="heatmap-cell"
-                style="width:11px;height:11px;border-radius:2px;background:${color};cursor:default;"
+                style="width:12px;height:12px;border-radius:2px;background:${color};cursor:default;${todayStyle}"
                 data-date="${dateStr}"
                 data-pnl="${pnlVal}"
+                data-gross="${grossVal}"
                 data-trades="${trades}"
-                data-label="${dateStr} | Net PnL: ${pnlStr} USDT | 거래: ${trades}건"
+                data-wr="${wr}"
             ></div>`;
         });
         html += `</div>`;
     });
     container.innerHTML = html;
 
-    // ── 커스텀 툴팁 이벤트 바인딩 ──
+    // ── 26주 통계 바 렌더링 ──
+    const statsEl = document.getElementById('heatmap-stats-bar');
+    if (statsEl) {
+        const rangeData = Array.isArray(dailyData) ? dailyData.filter(d => d.date >= startStr) : [];
+        if (rangeData.length > 0) {
+            const totalPnl    = rangeData.reduce((s, d) => s + parseFloat(d.net_pnl || 0), 0);
+            const totalTrades = rangeData.reduce((s, d) => s + (d.total_trades || 0), 0);
+            const totalWins   = rangeData.reduce((s, d) => s + Math.round(parseFloat(d.win_rate || 0) / 100 * (d.total_trades || 0)), 0);
+            const overallWR   = totalTrades > 0 ? (totalWins / totalTrades * 100) : 0;
+            const activeDays  = rangeData.filter(d => d.total_trades > 0).length;
+            const sorted      = [...rangeData].sort((a, b) => parseFloat(b.net_pnl) - parseFloat(a.net_pnl));
+            const bestDay     = sorted[0];
+            const worstDay    = sorted[sorted.length - 1];
+            const pnlColor    = totalPnl >= 0 ? '#39d353' : '#ff4d4d';
+            const pnlSign     = totalPnl >= 0 ? '+' : '';
+            const bestPnl     = parseFloat(bestDay.net_pnl);
+            const worstPnl    = parseFloat(worstDay.net_pnl);
+
+            statsEl.innerHTML = `
+                <div class="flex items-center gap-4 flex-wrap">
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-mono text-gray-600 uppercase tracking-wider">26주 누적 PnL</span>
+                        <span class="text-[13px] font-mono font-bold leading-tight" style="color:${pnlColor}">${pnlSign}${totalPnl.toFixed(2)} <span class="text-[9px] font-normal text-gray-600">USDT</span></span>
+                    </div>
+                    <div class="w-px self-stretch bg-navy-border/50 shrink-0"></div>
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-mono text-gray-600 uppercase tracking-wider">총 거래</span>
+                        <span class="text-[13px] font-mono font-bold text-gray-300 leading-tight">${totalTrades}<span class="text-[9px] font-normal text-gray-600"> 건</span></span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-mono text-gray-600 uppercase tracking-wider">활성일</span>
+                        <span class="text-[13px] font-mono font-bold text-gray-400 leading-tight">${activeDays}<span class="text-[9px] font-normal text-gray-600"> 일</span></span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-mono text-gray-600 uppercase tracking-wider">승률</span>
+                        <span class="text-[13px] font-mono font-bold text-blue-400 leading-tight">${overallWR.toFixed(1)}<span class="text-[9px] font-normal text-gray-600"> %</span></span>
+                    </div>
+                    <div class="w-px self-stretch bg-navy-border/50 shrink-0"></div>
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-mono text-gray-600 uppercase tracking-wider">최고일</span>
+                        <span class="text-[11px] font-mono font-bold text-neon-green leading-tight">${bestPnl >= 0 ? '+' : ''}${bestPnl.toFixed(2)}</span>
+                        <span class="text-[8px] font-mono text-gray-600">${bestDay.date}</span>
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-[8px] font-mono text-gray-600 uppercase tracking-wider">최악일</span>
+                        <span class="text-[11px] font-mono font-bold text-red-400 leading-tight">${worstPnl.toFixed(2)}</span>
+                        <span class="text-[8px] font-mono text-gray-600">${worstDay.date}</span>
+                    </div>
+                </div>`;
+        } else {
+            statsEl.innerHTML = `<div class="text-[10px] font-mono text-gray-600">실전 거래 데이터가 쌓이면 26주 통계가 표시됩니다.</div>`;
+        }
+    }
+
+    // ── 리치 툴팁 이벤트 바인딩 ──
     const tooltip = document.getElementById('heatmap-tooltip');
     if (!tooltip) return;
     container.querySelectorAll('.heatmap-cell').forEach(cell => {
         cell.addEventListener('mousemove', (e) => {
-            tooltip.textContent = cell.dataset.label;
+            const trades  = parseInt(cell.dataset.trades || 0);
+            const pnl     = parseFloat(cell.dataset.pnl   || 0);
+            const gross   = parseFloat(cell.dataset.gross  || 0);
+            const wr      = parseFloat(cell.dataset.wr    || 0);
+            const date    = cell.dataset.date;
+            const pnlColor = pnl >= 0 ? '#39d353' : '#ff4d4d';
+            const pnlSign  = pnl >= 0 ? '+' : '';
+            const gSign    = gross >= 0 ? '+' : '';
+            if (trades > 0) {
+                tooltip.innerHTML = `
+                    <div style="color:#8b949e;font-size:9px;margin-bottom:4px;">📅 ${date}</div>
+                    <div style="color:${pnlColor};font-weight:bold;font-size:12px;">💰 ${pnlSign}${pnl.toFixed(2)} USDT</div>
+                    <div style="color:#6e7681;font-size:9px;margin-top:1px;">Gross ${gSign}${gross.toFixed(2)} USDT</div>
+                    <div style="border-top:1px solid #21262d;margin:4px 0;"></div>
+                    <div style="color:#c9d1d9;font-size:9px;">거래 ${trades}건 &nbsp;·&nbsp; 승률 ${wr.toFixed(0)}%</div>`;
+            } else {
+                tooltip.innerHTML = `
+                    <div style="color:#8b949e;font-size:9px;">📅 ${date}</div>
+                    <div style="color:#484f58;font-size:9px;margin-top:2px;">거래없음</div>`;
+            }
             tooltip.classList.remove('hidden');
             tooltip.style.left = (e.clientX + 14) + 'px';
-            tooltip.style.top = (e.clientY - 32) + 'px';
+            tooltip.style.top  = (e.clientY - 75) + 'px';
         });
-        cell.addEventListener('mouseleave', () => {
-            tooltip.classList.add('hidden');
-        });
+        cell.addEventListener('mouseleave', () => tooltip.classList.add('hidden'));
     });
 }
 
