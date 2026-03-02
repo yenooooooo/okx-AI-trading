@@ -811,6 +811,9 @@ async function syncConfig(symbol = null) {
             } else if (key === 'symbols') {
                 const activeSymbol = Array.isArray(val) && val.length > 0 ? val[0] : null;
                 if (activeSymbol) currentSymbol = activeSymbol;
+                // 차트 상단 조준경 배지 갱신
+                const targetBadge = document.getElementById('hero-target-badge');
+                if (targetBadge && activeSymbol) targetBadge.textContent = activeSymbol;
                 // [Phase 18.1] 좌측 패널 심볼 배지 갱신
                 const leftSymBadge = document.getElementById('left-panel-symbol-badge');
                 if (leftSymBadge && activeSymbol) leftSymBadge.textContent = activeSymbol.split(':')[0];
