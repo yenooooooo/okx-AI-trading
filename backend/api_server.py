@@ -364,6 +364,7 @@ trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
 _broadcast_task = None  # /ws/dashboard 브로드캐스트 태스크 (클라이언트 연결 시 on-demand 시작)
 _private_ws_task = None  # [Phase 33] Private WS 루프 태스크 추적 (헬스체크용)
+_margin_guard_bg_task = None  # Margin Guard 백그라운드 모니터링 태스크
 _engine: OKXEngine = None  # 싱글톤 OKX 엔진 (매 요청마다 재생성 방지)
 _active_strategy: TradingStrategy = None  # 활성 전략 인스턴스 레퍼런스 (wipe_db 인메모리 리셋용)
 
@@ -474,10 +475,61 @@ async def private_ws_loop():
                 logger.error("[Private WS] → IP 화이트리스트 차단 의심 — OKX API 설정 확인 필요")
             await asyncio.sleep(5)
 
+async def _margin_guard_bg_loop():
+    """독립 백그라운드: 증거금 부족 텔레그램 사전 경고 (60초 주기, 5분 쿨다운)
+    대시보드 종속성 없이 서버 가동 중이면 항상 동작."""
+    import math as _mgbg_math
+    await asyncio.sleep(10)  # 서버 초기화 대기
+    while True:
+        try:
+            if _engine and _engine.exchange and bot_global_state["balance"] > 0:
+                _mgbg_bal = bot_global_state["balance"]
+                _mgbg_safe = _mgbg_bal * 0.90
+                for _mgbg_sym in list(bot_global_state["symbols"].keys()):
+                    try:
+                        _mgbg_mkt = _engine.exchange.market(_mgbg_sym)
+                        _mgbg_cs = float(_mgbg_mkt.get('contractSize', 0.01))
+                        _mgbg_lev = max(1, int(get_config('leverage', _mgbg_sym) or 1))
+                        _mgbg_price = float(bot_global_state["symbols"][_mgbg_sym].get("current_price", 0))
+                        if _mgbg_price <= 0:
+                            continue
+
+                        # N-contract 추정 (strategy.py calculate_position_size_dynamic 인라인)
+                        _mgbg_risk = float(get_config('risk_per_trade', _mgbg_sym) or 0.02)
+                        if _mgbg_risk >= 1.0:
+                            _mgbg_risk /= 100.0
+                        _mgbg_notional = _mgbg_bal * _mgbg_risk * _mgbg_lev
+                        _mgbg_estimated = max(1, round((_mgbg_notional / _mgbg_price) / _mgbg_cs))
+                        _mgbg_margin_per = (_mgbg_cs * _mgbg_price) / _mgbg_lev
+                        _mgbg_max = int(_mgbg_safe / _mgbg_margin_per) if _mgbg_margin_per > 0 else 0
+                        if _mgbg_max >= 1:
+                            _mgbg_estimated = min(_mgbg_estimated, _mgbg_max)
+
+                        _mgbg_margin_total = (_mgbg_cs * _mgbg_price * _mgbg_estimated) / _mgbg_lev
+                        _mgbg_feasible = _mgbg_safe >= _mgbg_margin_total
+
+                        if not _mgbg_feasible:
+                            _mgbg_rec = min(100, _mgbg_math.ceil((_mgbg_cs * _mgbg_price * _mgbg_estimated) / _mgbg_safe)) if _mgbg_safe > 0 else 100
+                            _mgbg_alert_key = f"_margin_guard_last_alert_{_mgbg_sym}"
+                            _mgbg_last_ts = float(get_config(_mgbg_alert_key) or 0)
+                            if _time.time() - _mgbg_last_ts > 300:  # 5분 쿨다운
+                                set_config(_mgbg_alert_key, str(_time.time()))
+                                try:
+                                    send_telegram_sync(_tg_margin_guard(
+                                        _mgbg_sym, _mgbg_lev, _mgbg_rec, _mgbg_bal, _mgbg_margin_total
+                                    ))
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        await asyncio.sleep(60)
+
 @app_server.on_event("startup")
 async def startup_event():
     """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
-    global _engine, _private_ws_task
+    global _engine, _private_ws_task, _margin_guard_bg_task
     init_db()
     bot_global_state["logs"].append("[봇] 🔴 실전망(LIVE) 서버 시스템 가동 시작 - 실전 API 연동 완료")
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
@@ -499,6 +551,8 @@ async def startup_event():
             logger.warning(f"[Phase 32] 시작 시 포지션 감지 실패: {_pos_err}")
         _private_ws_task = asyncio.create_task(private_ws_loop())  # OKX 프라이빗 WS 시작
         logger.info("Private WebSocket 태스크 시작")
+        _margin_guard_bg_task = asyncio.create_task(_margin_guard_bg_loop())  # Margin Guard 백그라운드 시작
+        logger.info("Margin Guard 백그라운드 모니터링 태스크 시작")
     else:
         logger.error("OKXEngine 초기화 실패 - .env 키 확인 필요")
 
@@ -2652,7 +2706,7 @@ async def fetch_current_status():
         engine_mode = "AUTO"
         active_risk = "AI Dynamic"
 
-    # ── Margin Guard: 심볼별 증거금 사전 검증 (진입 전 경고 + 추천 레버리지) ──
+    # ── Margin Guard: 심볼별 증거금 사전 검증 (N-contract 추정 기반 정확도 보장) ──
     import math as _mg_math
     _margin_guard = {}
     _mg_bal = bot_global_state["balance"]
@@ -2668,19 +2722,31 @@ async def fetch_current_status():
                     _mg_safe = _mg_bal * 0.90  # 매매루프(line 1945)와 동일 90% 기준
                     _mg_margin_per = (_mg_cs * _mg_price) / _mg_lev
                     _mg_max = int(_mg_safe / _mg_margin_per) if _mg_margin_per > 0 else 0
-                    _mg_feasible = _mg_max >= 1
 
-                    # 추천 레버리지 역산: 최소 1계약 진입 가능한 최소 레버리지
+                    # N-contract 추정 (strategy.py calculate_position_size_dynamic 인라인)
+                    _mg_risk = float(get_config('risk_per_trade', _mg_sym) or 0.02)
+                    if _mg_risk >= 1.0:
+                        _mg_risk /= 100.0
+                    _mg_notional = _mg_bal * _mg_risk * _mg_lev
+                    _mg_estimated = max(1, round((_mg_notional / _mg_price) / _mg_cs))
+                    if _mg_max >= 1:
+                        _mg_estimated = min(_mg_estimated, _mg_max)
+
+                    # 추정 계약수 기준 증거금 검증 (1-contract가 아닌 실제 사이징 기준)
+                    _mg_margin_total = (_mg_cs * _mg_price * _mg_estimated) / _mg_lev
+                    _mg_feasible = _mg_safe >= _mg_margin_total
+
+                    # 추천 레버리지 역산: 추정 계약수 기준
                     _mg_rec_lev = _mg_lev
                     if not _mg_feasible and _mg_safe > 0:
-                        _mg_min_margin_1x = _mg_cs * _mg_price  # 1x 기준 1계약 증거금
-                        _mg_rec_lev = min(100, _mg_math.ceil(_mg_min_margin_1x / _mg_safe))
+                        _mg_rec_lev = min(100, _mg_math.ceil((_mg_cs * _mg_price * _mg_estimated) / _mg_safe))
 
                     _margin_guard[_mg_sym] = {
                         "feasible": _mg_feasible,
                         "current_leverage": _mg_lev,
                         "recommended_leverage": _mg_rec_lev,
                         "max_contracts": _mg_max,
+                        "estimated_contracts": _mg_estimated,
                         "margin_per_contract": round(_mg_margin_per, 2),
                         "available_margin": round(_mg_safe, 2),
                         "needs_change": not _mg_feasible,
@@ -2689,21 +2755,6 @@ async def fetch_current_status():
                     _margin_guard[_mg_sym] = {"feasible": True, "needs_change": False}
             except Exception:
                 _margin_guard[_mg_sym] = {"feasible": True, "needs_change": False}
-
-    # ── Margin Guard 텔레그램 사전 경고 (봇 미실행 시에도 알림, 5분 쿨다운) ──
-    for _mg_sym_key, _mg_data in _margin_guard.items():
-        if _mg_data.get("needs_change"):
-            _mg_alert_key = f"_margin_guard_last_alert_{_mg_sym_key}"
-            _mg_last_ts = float(get_config(_mg_alert_key) or 0)
-            if _time.time() - _mg_last_ts > 300:  # 5분 쿨다운
-                set_config(_mg_alert_key, str(_time.time()))
-                try:
-                    send_telegram_sync(_tg_margin_guard(
-                        _mg_sym_key, _mg_data["current_leverage"], _mg_data["recommended_leverage"],
-                        _mg_bal, _mg_data["margin_per_contract"]
-                    ))
-                except Exception:
-                    pass  # 텔레그램 실패 시 status 응답 보호
 
     return {
         "is_running": bot_global_state["is_running"],
@@ -3243,11 +3294,12 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
         return {"error": str(e)}
 
 @app_server.post("/api/v1/backtest")
-async def run_backtest(symbol: str = "BTC/USDT:USDT", timeframe: str = "1m", limit: int = 100):
-    """백테스팅 실행"""
+async def run_backtest(symbol: str = "BTC/USDT:USDT", timeframe: str = "1m", limit: int = 100, slippage_bps: float = 5.0):
+    """백테스팅 실행 (슬리피지 시뮬레이션 포함)"""
     try:
-        backtester = Backtester(initial_seed=75.0, engine=_engine)
+        backtester = Backtester(initial_seed=75.0, engine=_engine, slippage_bps=slippage_bps)
         result = backtester.run(symbol=symbol, timeframe=timeframe, limit=limit)
+        result["slippage_bps"] = slippage_bps
         return result
     except Exception as e:
         logger.error(f"백테스팅 실패: {e}")

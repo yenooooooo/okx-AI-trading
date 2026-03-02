@@ -9,10 +9,21 @@ logger = get_logger(__name__)
 class Backtester:
     """과거 데이터를 이용한 백테스팅 엔진"""
 
-    def __init__(self, initial_seed: float = 100000.0, engine=None):
+    def __init__(self, initial_seed: float = 100000.0, engine=None, slippage_bps: float = 5.0):
         self.initial_seed = initial_seed
+        self.slippage_bps = slippage_bps  # 슬리피지 (basis points, 5 = 0.05%)
         self.engine = engine if engine else OKXEngine()  # 싱글톤 주입 또는 자체 생성
         self.strategy = TradingStrategy(initial_seed=initial_seed)
+
+    def _apply_slippage(self, price: float, side: str, is_entry: bool) -> float:
+        """슬리피지 적용: 진입/청산 시 불리한 방향으로 가격 조정"""
+        factor = self.slippage_bps / 10000.0
+        if is_entry:
+            # 진입: LONG은 비싸게, SHORT은 싸게 (불리한 방향)
+            return price * (1 + factor) if side == "LONG" else price * (1 - factor)
+        else:
+            # 청산: LONG은 싸게, SHORT은 비싸게 (불리한 방향)
+            return price * (1 - factor) if side == "LONG" else price * (1 + factor)
 
     def run(self, symbol: str = "BTC/USDT:USDT", timeframe: str = "1m", limit: int = 100) -> Dict[str, Any]:
         """
@@ -80,12 +91,13 @@ class Backtester:
                     )
 
                     if action != "KEEP":
-                        # 포지션 청산
+                        # 포지션 청산 (슬리피지 적용)
+                        exit_price = self._apply_slippage(current_price, position, is_entry=False)
                         pnl = 0
                         if position == "LONG":
-                            pnl = (current_price - entry_price) / entry_price
+                            pnl = (exit_price - entry_price) / entry_price
                         elif position == "SHORT":
-                            pnl = (entry_price - current_price) / entry_price
+                            pnl = (entry_price - exit_price) / entry_price
 
                         pnl_percent = pnl * 100
                         balance = balance * (1 + pnl)
@@ -94,7 +106,7 @@ class Backtester:
                             'entry_idx': entry_idx,
                             'entry_price': entry_price,
                             'exit_idx': idx,
-                            'exit_price': current_price,
+                            'exit_price': exit_price,
                             'position': position,
                             'pnl_percent': pnl_percent,
                             'exit_reason': action,
@@ -114,22 +126,23 @@ class Backtester:
 
                     if signal in ["LONG", "SHORT"]:
                         position = signal
-                        entry_price = current_price
+                        entry_price = self._apply_slippage(current_price, position, is_entry=True)
                         entry_idx = idx
 
-            # 백테스팅 종료 시점에 남은 오픈 포지션 마지막 가격으로 강제 청산
+            # 백테스팅 종료 시점에 남은 오픈 포지션 마지막 가격으로 강제 청산 (슬리피지 적용)
             if position:
                 last_price = df.iloc[-1]['close']
+                exit_price = self._apply_slippage(last_price, position, is_entry=False)
                 if position == "LONG":
-                    final_pnl = (last_price - entry_price) / entry_price
+                    final_pnl = (exit_price - entry_price) / entry_price
                 else:
-                    final_pnl = (entry_price - last_price) / entry_price
+                    final_pnl = (entry_price - exit_price) / entry_price
                 balance = balance * (1 + final_pnl)
                 trades_log.append({
                     'entry_idx': entry_idx,
                     'entry_price': entry_price,
                     'exit_idx': len(df) - 1,
-                    'exit_price': last_price,
+                    'exit_price': exit_price,
                     'position': position,
                     'pnl_percent': final_pnl * 100,
                     'exit_reason': 'END_OF_DATA',
