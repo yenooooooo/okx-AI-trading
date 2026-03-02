@@ -35,24 +35,37 @@ function parseTimeframeMs(tf) {
 }
 
 // --- Gate 수동 새로고침 ---
-/** Entry Readiness 패널 즉시 새로고침 (방식 A: syncBrain 즉시 1회 호출) */
+/** Entry Readiness 패널 즉시 새로고침 (방식 A: syncBrain 즉시 1회 호출 + 시각 피드백) */
 async function forceRefreshGates() {
     const btn = document.getElementById('gate-refresh-btn');
+    const label = document.getElementById('gate-candle-label');
     if (btn) {
         btn.style.pointerEvents = 'none';
         btn.style.opacity = '0.4';
         btn.style.transform = 'rotate(360deg)';
         btn.style.transition = 'transform 0.4s ease';
     }
+    // 라벨에 갱신 중 표시
+    const prevLabel = label ? label.textContent : '';
+    if (label) {
+        label.textContent = '갱신 중...';
+        label.className = 'font-mono text-[10px] text-yellow-400 animate-pulse tracking-wide';
+    }
     await syncBrain();
     if (btn) {
         btn.style.pointerEvents = '';
         btn.style.opacity = '';
-        // 회전 리셋 (재클릭 시 다시 돌도록)
         setTimeout(() => {
             btn.style.transform = '';
             btn.style.transition = '';
         }, 450);
+    }
+    // 갱신 완료 피드백 (0.8초 동안 초록색 플래시)
+    if (label) {
+        label.className = 'font-mono text-[10px] text-neon-green tracking-wide';
+        setTimeout(() => {
+            label.className = 'font-mono text-[10px] text-cyan-400 tracking-wide';
+        }, 800);
     }
 }
 
@@ -575,10 +588,12 @@ async function syncBrain() {
         if (brainState.confirmed_candle_ts) {
             window._confirmedCandleTs = brainState.confirmed_candle_ts;
             window._currentTimeframe = brainState.timeframe || '15m';
-            // 확정봉 시각 라벨 표시 (KST = UTC+9)
-            const candleDate = new Date(brainState.confirmed_candle_ts);
-            const hh = String(candleDate.getHours()).padStart(2, '0');
-            const mm = String(candleDate.getMinutes()).padStart(2, '0');
+            // 확정봉 시각 라벨 표시 — 캔들 종료 시각 = 시작 + 타임프레임
+            // 예: 02:15 시작 + 15분 = "02:30 봉 기준" (02:30에 확정된 데이터 기준)
+            const tfMs = parseTimeframeMs(window._currentTimeframe);
+            const candleCloseDate = new Date(brainState.confirmed_candle_ts + tfMs);
+            const hh = String(candleCloseDate.getHours()).padStart(2, '0');
+            const mm = String(candleCloseDate.getMinutes()).padStart(2, '0');
             const candleLabel = document.getElementById('gate-candle-label');
             if (candleLabel) candleLabel.textContent = `${hh}:${mm} 봉 기준`;
         }
@@ -2979,12 +2994,14 @@ async function initializeApp() {
     refreshStressBypassUI();
 
     // [확정봉 카운트다운] 1초 인터벌 — 다음 봉 완성까지 남은 시간 표시
+    // 확정봉 ts = 캔들 시작 시각. 다음 확정봉 갱신 = ts + 2*tfMs
+    // 예: 02:15봉(시작) → +15분=02:30(종료) → +15분=02:45(다음 캔들 종료 = 다음 갱신)
     setInterval(() => {
         const el = document.getElementById('gate-countdown');
         if (!el || !window._confirmedCandleTs || !window._currentTimeframe) return;
         const tfMs = parseTimeframeMs(window._currentTimeframe);
-        const nextCandle = window._confirmedCandleTs + tfMs;
-        const remaining = nextCandle - Date.now();
+        const nextUpdate = window._confirmedCandleTs + (tfMs * 2);
+        const remaining = nextUpdate - Date.now();
         if (remaining <= 0) {
             el.textContent = '새 봉 확인 중...';
             el.className = 'font-mono text-[10px] text-yellow-400 animate-pulse';
