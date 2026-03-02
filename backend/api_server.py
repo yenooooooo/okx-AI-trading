@@ -1767,11 +1767,13 @@ async def async_trading_loop():
                     # 포지션 없을 때 진입 신호 체크
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
                         # [Phase 24] 캔들 단위 진입 시그널 중복 방지 — 같은 캔들에서 재평가 스킵
+                        # [Fix] LONG/SHORT 신호 발생 시에만 캔들 잠금 → HOLD 상태에서는 매 루프 재평가
+                        # 기존: HOLD여도 첫 루프에서 잠금 → 이후 LONG 신호 와도 진입 불가 버그 수정
                         _cur_candle_ts = int(df['timestamp'].iloc[-1])
                         _last_signal_ts = bot_global_state["symbols"][symbol].get("last_signal_candle_ts", 0)
                         if _last_signal_ts == _cur_candle_ts:
-                            continue  # 이미 이 캔들에서 시그널 평가 완료 → 다음 캔들까지 대기
-                        bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
+                            continue  # 이미 이 캔들에서 LONG/SHORT 시그널 평가 완료 → 다음 캔들까지 대기
+                        # 캔들 잠금은 LONG/SHORT 신호가 실제로 평가될 때만 (line 1808 진입 시점에서 설정)
 
                         # [Phase 19] 퇴근 모드 작동 시 신규 진입 강제 차단
                         if _exit_only:
@@ -1806,6 +1808,10 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            # [Phase 24 Fix] LONG/SHORT 신호가 실제 평가되는 시점에 캔들 잠금
+                            # → 같은 캔들에서 중복 진입 방지 (원래 목적 유지)
+                            # → HOLD 신호에서는 잠금 없음 → 이후 루프에서 재평가 가능
+                            bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
                             _signal_start_time = _time.time()  # [Phase 21.1] A.D.S 레이턴시 측정 시작점
                             # [Phase 18.1] 방향 모드 필터 (LONG/SHORT/AUTO) — 코인별 독립 설정
                             _direction_mode = str(get_config('direction_mode', symbol) or 'AUTO').upper()
