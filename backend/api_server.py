@@ -115,6 +115,20 @@ def _tg_scanner(symbols: list) -> str:
         f"{_TG_LINE}"
     )
 
+def _tg_margin_guard(symbol: str, current_lev: int, rec_lev: int, balance: float, margin_needed: float) -> str:
+    return (
+        f"⚡ <b>ANTIGRAVITY</b>  |  증거금 경고\n"
+        f"{_TG_LINE}\n"
+        f"⚠️ <b>MARGIN GUARD</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{_TG_LINE}\n"
+        f"잔고    │  <code>${balance:.2f}</code>\n"
+        f"필요    │  <code>${margin_needed:.2f}</code>\n"
+        f"현재    │  <code>{current_lev}x (진입 불가)</code>\n"
+        f"추천    │  <b><code>{rec_lev}x (진입 가능)</code></b>\n"
+        f"{_TG_LINE}\n"
+        f"웹 대시보드에서 원클릭 변경 가능"
+    )
+
 def _tg_circuit_breaker(symbol: str, balance: float) -> str:
     return (
         f"⚡ <b>ANTIGRAVITY</b>  |  경고\n"
@@ -1947,6 +1961,21 @@ async def async_trading_loop():
                                     bot_global_state["logs"].append(_margin_msg)
                                     logger.warning(_margin_msg)
                                     _log_trade_attempt(symbol, signal, "BLOCKED", "margin_insufficient")
+                                    # [Margin Guard] 추천 레버리지 역산 + 텔레그램 알림 (5분 쿨다운)
+                                    import math as _mg_math2
+                                    _mg_safe_bal = curr_bal * 0.90
+                                    _mg_1x_margin = contract_size * current_price
+                                    _mg_rec = min(100, _mg_math2.ceil(_mg_1x_margin / _mg_safe_bal)) if _mg_safe_bal > 0 else 100
+                                    if _mg_rec > trade_leverage:
+                                        _mg_alert_key = f"_margin_guard_last_alert_{symbol}"
+                                        _mg_last = float(get_config(_mg_alert_key) or 0)
+                                        if _time.time() - _mg_last > 300:  # 5분 쿨다운
+                                            set_config(_mg_alert_key, str(_time.time()))
+                                            try:
+                                                _mg_tg = _tg_margin_guard(symbol, trade_leverage, _mg_rec, curr_bal, _margin_needed)
+                                                send_telegram_sync(_mg_tg)
+                                            except Exception:
+                                                pass  # 텔레그램 실패 시 매매 흐름 보호
                                     continue  # 이 심볼 진입 건너뛰기
                                 # 레버리지 거래소 적용
                                 try:
@@ -2623,6 +2652,44 @@ async def fetch_current_status():
         engine_mode = "AUTO"
         active_risk = "AI Dynamic"
 
+    # ── Margin Guard: 심볼별 증거금 사전 검증 (진입 전 경고 + 추천 레버리지) ──
+    import math as _mg_math
+    _margin_guard = {}
+    _mg_bal = bot_global_state["balance"]
+    if _engine and _engine.exchange and _mg_bal > 0:
+        for _mg_sym in bot_global_state["symbols"]:
+            try:
+                _mg_mkt = _engine.exchange.market(_mg_sym)
+                _mg_cs = float(_mg_mkt.get('contractSize', 0.01))
+                _mg_lev = max(1, int(get_config('leverage', _mg_sym) or 1))
+                _mg_price = float(bot_global_state["symbols"][_mg_sym].get("current_price", 0))
+
+                if _mg_price > 0:
+                    _mg_safe = _mg_bal * 0.90  # 매매루프(line 1945)와 동일 90% 기준
+                    _mg_margin_per = (_mg_cs * _mg_price) / _mg_lev
+                    _mg_max = int(_mg_safe / _mg_margin_per) if _mg_margin_per > 0 else 0
+                    _mg_feasible = _mg_max >= 1
+
+                    # 추천 레버리지 역산: 최소 1계약 진입 가능한 최소 레버리지
+                    _mg_rec_lev = _mg_lev
+                    if not _mg_feasible and _mg_safe > 0:
+                        _mg_min_margin_1x = _mg_cs * _mg_price  # 1x 기준 1계약 증거금
+                        _mg_rec_lev = min(100, _mg_math.ceil(_mg_min_margin_1x / _mg_safe))
+
+                    _margin_guard[_mg_sym] = {
+                        "feasible": _mg_feasible,
+                        "current_leverage": _mg_lev,
+                        "recommended_leverage": _mg_rec_lev,
+                        "max_contracts": _mg_max,
+                        "margin_per_contract": round(_mg_margin_per, 2),
+                        "available_margin": round(_mg_safe, 2),
+                        "needs_change": not _mg_feasible,
+                    }
+                else:
+                    _margin_guard[_mg_sym] = {"feasible": True, "needs_change": False}
+            except Exception:
+                _margin_guard[_mg_sym] = {"feasible": True, "needs_change": False}
+
     return {
         "is_running": bot_global_state["is_running"],
         "balance": bot_global_state["balance"],
@@ -2633,6 +2700,7 @@ async def fetch_current_status():
             "mode": engine_mode,
             "risk": active_risk,
         },
+        "margin_guard": _margin_guard,
     }
 
 @app_server.get("/api/v1/brain")

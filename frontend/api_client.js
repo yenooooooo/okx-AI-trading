@@ -460,6 +460,44 @@ async function syncBotStatus() {
             if (cmdPriceMirror) cmdPriceMirror.textContent = '--';
         }
 
+        // 7. [Margin Guard] 증거금 사전 경고 렌더링
+        if (data.margin_guard) {
+            const mgBadge = document.getElementById('margin-guard-badge');
+            const cmdMgWarn = document.getElementById('cmd-margin-warn');
+            let _mgHasWarn = false;
+            let _mgSym = '', _mgCurLev = 0, _mgRecLev = 0;
+
+            for (const [sym, mg] of Object.entries(data.margin_guard)) {
+                if (mg.needs_change) {
+                    _mgHasWarn = true;
+                    _mgSym = sym.split(':')[0];
+                    _mgCurLev = mg.current_leverage;
+                    _mgRecLev = mg.recommended_leverage;
+                    break;
+                }
+            }
+
+            if (_mgHasWarn && mgBadge) {
+                mgBadge.classList.remove('hidden');
+                const mgSymEl = document.getElementById('mg-symbol');
+                const mgCurEl = document.getElementById('mg-current-lev');
+                const mgRecEl = document.getElementById('mg-rec-lev');
+                if (mgSymEl) mgSymEl.textContent = _mgSym;
+                if (mgCurEl) mgCurEl.textContent = _mgCurLev + 'x';
+                if (mgRecEl) mgRecEl.textContent = _mgRecLev + 'x';
+                // 토스트: 5분 쿨다운
+                if (!window._mgLastToast || Date.now() - window._mgLastToast > 300000) {
+                    window._mgLastToast = Date.now();
+                    showToast('Margin Guard', `${_mgSym} 증거금 부족 — ${_mgRecLev}x 추천`, 'ERROR');
+                }
+            } else if (mgBadge) {
+                mgBadge.classList.add('hidden');
+            }
+
+            if (cmdMgWarn) cmdMgWarn.classList.toggle('hidden', !_mgHasWarn);
+            window._marginGuardData = data.margin_guard;
+        }
+
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncBotStatus 실패 (엔드포인트: /api/v1/status):", error);
     }
@@ -3793,4 +3831,38 @@ function updateChartTheme() {
 
     if (rsiChart) rsiChart.applyOptions(subChartOpts);
     if (macdChart) macdChart.applyOptions(subChartOpts);
+}
+
+// --- Margin Guard: 원클릭 추천 레버리지 적용 ---
+async function applyRecommendedLeverage() {
+    const mg = window._marginGuardData;
+    if (!mg) return;
+
+    for (const [sym, d] of Object.entries(mg)) {
+        if (d.needs_change && d.recommended_leverage) {
+            try {
+                await fetch(`${API_URL}/config?key=leverage&value=${d.recommended_leverage}`, { method: 'POST' });
+                showToast('Margin Guard', `레버리지 ${d.current_leverage}x → ${d.recommended_leverage}x 적용 완료`, 'SUCCESS');
+
+                // UI 즉시 갱신
+                const levInput = document.getElementById('config-leverage');
+                if (levInput) { levInput.value = d.recommended_leverage; levInput.dispatchEvent(new Event('input')); }
+                const leftLev = document.getElementById('left-panel-lev-badge');
+                if (leftLev) leftLev.textContent = d.recommended_leverage + 'x';
+                const cmdLev = document.getElementById('cmd-lev-badge');
+                if (cmdLev) cmdLev.textContent = d.recommended_leverage + 'x';
+
+                // 경고 배지 숨김
+                const badge = document.getElementById('margin-guard-badge');
+                if (badge) badge.classList.add('hidden');
+                const cmdWarn = document.getElementById('cmd-margin-warn');
+                if (cmdWarn) cmdWarn.classList.add('hidden');
+
+                await syncConfig();
+            } catch (err) {
+                showToast('Margin Guard 오류', err.message, 'ERROR');
+            }
+            break;
+        }
+    }
 }

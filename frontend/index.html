@@ -379,6 +379,7 @@
                 <span id="cmd-balance-mirror" class="font-mono text-[10px] font-bold text-text-main">0.00</span>
                 <span class="text-gray-600 text-[10px]">|</span>
                 <span id="cmd-lev-badge" class="font-mono text-[9px] font-bold text-orange-300 bg-orange-500/10 border border-orange-500/30 px-1.5 py-0.5 rounded">1x</span>
+                <span id="cmd-margin-warn" class="hidden text-yellow-400 text-xs font-bold animate-pulse cursor-pointer" title="증거금 부족 — 클릭하여 추천 레버리지 적용" onclick="applyRecommendedLeverage()">⚠️</span>
                 <span id="cmd-preset-badge" class="font-mono text-[9px] text-purple-300 bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.5 rounded">--</span>
             </div>
 
@@ -421,6 +422,25 @@
                     <span class="text-sm text-gray-500 font-mono">USDT</span>
                 </div>
                 <div class="text-xs font-mono text-neon-green flash-target z-10" id="balance-krw">≈ 0 KRW</div>
+
+                <!-- [Margin Guard] 증거금 사전 경고 배지 -->
+                <div id="margin-guard-badge" class="hidden mt-2 z-10">
+                    <div class="flex items-center gap-2 px-3 py-2 rounded-lg border border-yellow-500/50 bg-yellow-500/10">
+                        <span class="text-yellow-400 text-sm">⚠️</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-[10px] font-mono font-bold text-yellow-300 uppercase tracking-wider">Margin Guard</div>
+                            <div class="text-[11px] font-mono text-yellow-200 truncate">
+                                <span id="mg-symbol">--</span> · 현재 <span id="mg-current-lev">--</span> →
+                                추천 <span id="mg-rec-lev" class="font-bold text-white">--</span>
+                            </div>
+                        </div>
+                        <button id="mg-apply-btn" onclick="applyRecommendedLeverage()"
+                            class="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-yellow-500 text-navy-900 hover:bg-yellow-400 transition-all whitespace-nowrap flex-shrink-0">
+                            적용
+                        </button>
+                    </div>
+                </div>
+
                 <!-- [Phase 25] Adaptive Shield 방어 티어 배지 -->
                 <div class="mt-2 z-10 flex items-center gap-2">
                     <span id="adaptive-tier-badge"
