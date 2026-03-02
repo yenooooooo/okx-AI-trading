@@ -34,6 +34,28 @@ function parseTimeframeMs(tf) {
     return 900000; // fallback 15m
 }
 
+// --- Gate 수동 새로고침 ---
+/** Entry Readiness 패널 즉시 새로고침 (방식 A: syncBrain 즉시 1회 호출) */
+async function forceRefreshGates() {
+    const btn = document.getElementById('gate-refresh-btn');
+    if (btn) {
+        btn.style.pointerEvents = 'none';
+        btn.style.opacity = '0.4';
+        btn.style.transform = 'rotate(360deg)';
+        btn.style.transition = 'transform 0.4s ease';
+    }
+    await syncBrain();
+    if (btn) {
+        btn.style.pointerEvents = '';
+        btn.style.opacity = '';
+        // 회전 리셋 (재클릭 시 다시 돌도록)
+        setTimeout(() => {
+            btn.style.transform = '';
+            btn.style.transition = '';
+        }, 450);
+    }
+}
+
 // --- Modal Scroll Lock ---
 /** 모달 열릴 때 배경 스크롤 차단 */
 function lockBodyScroll() { document.body.style.overflow = 'hidden'; }
