@@ -794,6 +794,19 @@
                         <span id="gate-macro" class="text-gray-600">--</span>
                     </div>
                 </div>
+                <div class="mt-3 pt-3 border-t border-navy-border/50 flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-mono text-gray-400 uppercase tracking-wider">Scalp Fitness</span>
+                        <span id="scalp-fitness-badge" class="px-2 py-1 rounded font-mono text-[10px] font-bold text-gray-500 border border-gray-600/50 bg-gray-600/10 transition-all">대기 (0/8)</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span id="scalp-fitness-score" class="text-[11px] font-mono font-bold text-gray-500">0</span>
+                        <span class="text-[9px] font-mono text-gray-600">/8</span>
+                        <div class="w-16 bg-navy-900 h-1.5 rounded-full overflow-hidden border border-navy-border">
+                            <div id="scalp-fitness-bar" class="h-full bg-neon-green transition-all duration-700 rounded-full" style="width:0%;"></div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- [B] 봇 혼잣말 라이브 피드 -->
@@ -1784,6 +1797,14 @@
                                             · R:R 1:2 강제</span>
                                     </div>
                                     <p class="text-gray-400 font-mono text-[9.5px] mt-1">소액 최적화 · 저빈도 고확률 · 최소 익절 1% · 30분 쿨다운</p>
+                                </button>
+                                <button onclick="applyPreset('scalp_context')" type="button"
+                                    class="w-full text-left px-3 py-2.5 rounded border border-cyan-500/50 bg-cyan-500/10 hover:bg-cyan-500/20 hover:border-cyan-400 transition-all group">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs font-mono font-bold text-cyan-300">🎯 SCALP CONTEXT</span>
+                                        <span class="text-[9px] font-mono text-gray-400 group-hover:text-cyan-300 transition-colors">타이트 · 매크로 유지</span>
+                                    </div>
+                                    <p class="text-gray-400 font-mono text-[9.5px] mt-1">ADX 20~50 · SL 0.3% · 트레일링 0.15% · 이격도+RSI 해제 · EMA200 유지</p>
                                 </button>
                             </div>
                         </div>

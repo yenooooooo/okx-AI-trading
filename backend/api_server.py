@@ -342,6 +342,7 @@ def _reset_position_state(sym_state: dict):
 ai_brain_state = {
     "symbols": {}  # symbol별 뇌 상태
 }
+_scalp_fitness_alert_state = {}  # 스캘핑 적합도 TG 알림 쿨다운 상태
 
 trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
@@ -1094,6 +1095,33 @@ async def async_trading_loop():
                     _passed = int(sum(1 for g in _gates.values() if g["pass"]))
                     ai_brain_state["symbols"][symbol]["gates"]        = _gates
                     ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
+
+                    # ── [Scalp Fitness] 스캘핑 적합도 점수 ──
+                    _sf_score = 0
+                    if _adx_v >= 30: _sf_score += 2
+                    if _chop_v < 50: _sf_score += 2
+                    if _vol_ratio >= 2.0: _sf_score += 2
+                    if _macro_ok: _sf_score += 1
+                    if 30 <= _rsi_v <= 70: _sf_score += 1
+                    ai_brain_state["symbols"][symbol]["scalp_fitness"] = _sf_score
+                    ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _sf_score >= 6 else "대기"
+
+                    # TG 알림 (6+ 시, 5분 쿨다운, was_fit 플래그)
+                    _sf_now = _time.time()
+                    if symbol not in _scalp_fitness_alert_state:
+                        _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "was_fit": False}
+                    _sf_st = _scalp_fitness_alert_state[symbol]
+                    _sf_is_fit = (_sf_score >= 6)
+                    if _sf_is_fit and ((not _sf_st["was_fit"]) or (_sf_now - _sf_st["last_alert_time"] >= 300)):
+                        send_telegram_sync(
+                            f"⚡ <b>스캘핑 적합 구간 감지!</b>\n{_TG_LINE}\n"
+                            f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                            f"점수 │ <b>{_sf_score}/8</b>\n{_TG_LINE}\n"
+                            f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
+                            f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}"
+                        )
+                        _sf_st["last_alert_time"] = _sf_now
+                    _sf_st["was_fit"] = _sf_is_fit
 
                     # 봇 혼잣말 — 지금 무엇을 기다리는지 한 줄 생성
                     _KST = _dt.timezone(_dt.timedelta(hours=9))

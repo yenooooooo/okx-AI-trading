@@ -537,6 +537,26 @@ async function syncBrain() {
                 }
             }
         }
+
+        // ── Scalp Fitness 적합도 배지 ──
+        if (brainState.scalp_fitness !== undefined) {
+            const sfScore = parseInt(brainState.scalp_fitness) || 0;
+            const sfLabel = brainState.scalp_fitness_label || '대기';
+            const sfBadge = document.getElementById('scalp-fitness-badge');
+            const sfScoreEl = document.getElementById('scalp-fitness-score');
+            const sfBar = document.getElementById('scalp-fitness-bar');
+            if (sfScoreEl) sfScoreEl.textContent = sfScore;
+            if (sfBar) sfBar.style.width = `${Math.round((sfScore / 8) * 100)}%`;
+            if (sfBadge) {
+                if (sfScore >= 6) {
+                    sfBadge.textContent = `⚡ ${sfLabel} (${sfScore}/8)`;
+                    sfBadge.className = 'px-2 py-1 rounded font-mono text-[10px] font-bold text-neon-green border border-neon-green/50 bg-neon-green/10 shadow-[0_0_8px_rgba(0,255,136,0.3)] transition-all';
+                } else {
+                    sfBadge.textContent = `${sfLabel} (${sfScore}/8)`;
+                    sfBadge.className = 'px-2 py-1 rounded font-mono text-[10px] font-bold text-gray-500 border border-gray-600/50 bg-gray-600/10 transition-all';
+                }
+            }
+        }
     } catch (error) {
         console.error("[ANTIGRAVITY 디버그] syncBrain 실패 (엔드포인트: /api/v1/brain):", error);
     }
@@ -632,7 +652,9 @@ function updateActiveTuningBadge() {
         scalper: ['⚡ 스캘퍼', 'text-neon-green border-neon-green/50 bg-neon-green/10'],
         iron_dome: ['🛡️ 아이언돔', 'text-orange-300 border-orange-500/50 bg-orange-500/10'],
         factory_reset: ['🏭 팩토리', 'text-gray-300 border-gray-500/50 bg-gray-500/10'],
+        frenzy: ['🔥 FRENZY', 'text-red-400 border-red-500/50 bg-red-500/10'],
         micro_seed: ['💎 마이크로', 'text-emerald-300 border-emerald-500/50 bg-emerald-500/10'],
+        scalp_context: ['🎯 스캘프CTX', 'text-cyan-300 border-cyan-500/50 bg-cyan-500/10'],
     };
 
     let matchedLabel = null;
@@ -736,6 +758,22 @@ const PRESET_CONFIGS = {
         min_take_profit_rate: 0.01,      // 1.0% 최소 익절 목표 (R:R 1:2 강제)
         cooldown_losses_trigger: 2,      // 2연패 시 쿨다운 (빠른 방어)
         cooldown_duration_sec: 1800,     // 30분 쿨다운 (충분한 냉각)
+    },
+    // [Scalp Context] 스캘핑 적합 구간 전용 — 이격도+RSI 해제, 매크로 유지, SL 타이트
+    scalp_context: {
+        adx_threshold: 20.0,             // ADX 하한 낮춤 (더 많은 진입 기회)
+        adx_max: 50.0,                   // ADX 상한 확대
+        chop_threshold: 61.8,            // CHOP 기본 유지
+        volume_surge_multiplier: 1.2,    // 볼륨 기준 완화 (스캘핑 빈도 확보)
+        fee_margin: 0.0015,              // 수수료 마진 타이트
+        hard_stop_loss_rate: 0.003,      // 0.3% SL (스캘핑 타이트)
+        trailing_stop_activation: 0.002, // 0.2% 수익 후 트레일링
+        trailing_stop_rate: 0.0015,      // 0.15% 트레일링 거리
+        cooldown_losses_trigger: 3,      // 3연패 쿨다운
+        cooldown_duration_sec: 900,      // 15분 쿨다운
+        bypass_macro: 'false',           // 거시추세 필터 유지 (안전장치)
+        bypass_disparity: 'true',        // 이격도 해제 (빠른 진입)
+        bypass_indicator: 'true',        // RSI 해제 (빠른 진입)
     },
 };
 
