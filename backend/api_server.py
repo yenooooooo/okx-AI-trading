@@ -3343,6 +3343,11 @@ async def fetch_statistics():
     from datetime import datetime, timezone, timedelta
     trades = get_trades(limit=1000)
 
+    # [Season Filter] season_start_date 설정 시 그 이후 거래만 집계
+    _season_start = get_config('season_start_date')
+    if _season_start:
+        trades = [t for t in trades if (t.get('created_at') or '') >= str(_season_start)]
+
     total_trades = len(trades)
     # None 안전 처리 (DB에 NULL 저장된 경우 TypeError 방지)
     win_trades = len([t for t in trades if (t.get('pnl_percent') or 0) > 0])
@@ -3448,6 +3453,11 @@ async def fetch_history_stats():
     from collections import defaultdict
 
     trades = get_trades(limit=99999)
+
+    # [Season Filter] season_start_date 설정 시 그 이후 거래만 집계
+    _season_start = get_config('season_start_date')
+    if _season_start:
+        trades = [t for t in trades if (t.get('created_at') or '') >= str(_season_start)]
     KST = timezone(timedelta(hours=9))
 
     daily_map = defaultdict(lambda: {'total': 0, 'wins': 0, 'gross_pnl': 0.0, 'net_pnl': 0.0})
