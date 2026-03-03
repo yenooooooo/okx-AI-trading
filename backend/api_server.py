@@ -3022,7 +3022,7 @@ async def fetch_current_status():
                 _mg_price = float(bot_global_state["symbols"][_mg_sym].get("current_price", 0))
 
                 if _mg_price > 0:
-                    _mg_safe = _mg_bal * 0.90  # 매매루프(line 1945)와 동일 90% 기준
+                    _mg_safe = _mg_bal * 0.50  # [Fix] micro_account_protection(50%) 기준과 통일 — 추천 레버리지 정확도 보장
                     _mg_margin_per = (_mg_cs * _mg_price) / _mg_lev
                     _mg_max = int(_mg_safe / _mg_margin_per) if _mg_margin_per > 0 else 0
 
