@@ -3650,13 +3650,13 @@ async def fetch_ohlcv(symbol: str = "BTC/USDT:USDT", limit: int = 100):
                 base_price = close_p # 다음 캔들 기준가 업데이트
             return mock_ohlcv
 
-        # ── 지표 계산 (strategy_instance 있을 때만) ──────────────────────────
+        # ── 지표 계산 (_active_strategy 있을 때만) ───────────────────────────
         try:
-            if strategy_instance is not None:
+            if _active_strategy is not None:
                 _df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 for col in ['open', 'high', 'low', 'close', 'volume']:
                     _df[col] = _df[col].astype(float)
-                _df = strategy_instance.calculate_indicators(_df)
+                _df = _active_strategy.calculate_indicators(_df)
 
                 result = []
                 for _, row in _df.iterrows():
