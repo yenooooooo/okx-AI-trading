@@ -2222,10 +2222,9 @@ async def async_trading_loop():
                                 _log_trade_attempt(symbol, signal, "BLOCKED", "not_active_target")
                                 continue
 
-                            # [Phase 24 Fix] LONG/SHORT 신호가 실제 평가되는 시점에 캔들 잠금
-                            # → 같은 캔들에서 중복 진입 방지 (원래 목적 유지)
-                            # → HOLD 신호에서는 잠금 없음 → 이후 루프에서 재평가 가능
-                            bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
+                            # [Phase 24 Fix] 캔들 잠금은 주문 성공 후로 지연 (아래 _log_trade_attempt SUCCESS 직전)
+                            # → micro_account_protection / margin_insufficient 차단 시 같은 캔들에서 재시도 가능
+                            # → 유저가 레버리지 변경 후 즉시 재진입 허용
                             _signal_start_time = _time.time()  # [Phase 21.1] A.D.S 레이턴시 측정 시작점
                             # [Phase 18.1] 방향 모드 필터 (LONG/SHORT/AUTO) — 코인별 독립 설정
                             _direction_mode = str(get_config('direction_mode', symbol) or 'AUTO').upper()
@@ -2392,6 +2391,7 @@ async def async_trading_loop():
                                         send_telegram_sync(_sh_tg_msg)
                                     except Exception as _sh_err:
                                         logger.error(f"[{symbol}] 🐸 Shadow Hunting 주문 실패: {_sh_err}")
+                                        bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts  # 실패 시 캔들 잠금
                                         _log_trade_attempt(symbol, signal, "FAILED", f"shadow_hunting: {str(_sh_err)[:80]}")
                                         continue  # 실패 시 이번 사이클 스킵
 
@@ -2418,6 +2418,8 @@ async def async_trading_loop():
                                         # [Phase 28] 레버리지 저장 (체결 후 텔레그램 알림에서 참조)
                                         bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
 
+                                    # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
+                                    bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
                                     _log_trade_attempt(symbol, signal, "SUCCESS")
                                     entry_emoji = "⏳"
                                     entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
@@ -2440,6 +2442,8 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
                                         bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
 
+                                    # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
+                                    bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
                                     _log_trade_attempt(symbol, signal, "SUCCESS")
                                     # [Phase 21.1] A.D.S 자가 진단: 레이턴시 & 슬리피지 측정
                                     _latency_ms = (_time.time() - _signal_start_time) * 1000
@@ -2510,6 +2514,7 @@ async def async_trading_loop():
                                             logger.error(f"[{symbol}] 🚨 초기 방어막(Limit/Stop) 전송 실패. 거래소 수동 확인 요망: {limit_err}")
 
                             except Exception as e:
+                                bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts  # 실패 시 캔들 잠금
                                 _log_trade_attempt(symbol, signal, "FAILED", str(e)[:100])
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
                                 bot_global_state["logs"].append(error_msg)
