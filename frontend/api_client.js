@@ -1735,7 +1735,6 @@ async function _hcFetchBackend() {
 
 async function _hcPingSweep(progressEl) {
     const getEndpoints = [
-        { path: '/status', name: '봇 상태 (status)' },
         { path: '/brain', name: 'AI 뇌 (brain)' },
         { path: '/config', name: '설정 (config)' },
         { path: '/trades', name: '거래 내역 (trades)' },
@@ -1746,8 +1745,11 @@ async function _hcPingSweep(progressEl) {
         { path: '/ohlcv?symbol=BTC/USDT:USDT&limit=1', name: '차트 데이터 (ohlcv)' },
         { path: '/stress_bypass', name: '바이패스 (stress_bypass)' },
         { path: '/history_stats', name: '기간별 통계 (history_stats)' },
-        { path: '/diagnostic', name: '시스템 진단 (diagnostic)' },
-        { path: '/health_check', name: '연결 점검 (health_check)' },
+        // [Fix] /status, /diagnostic, /health_check 는 외부 API 호출(OKX+TG) 포함 → ping sweep 제외
+        // /status: fetch_balance + fetch_positions (OKX 2회)
+        // /diagnostic: 거래소 API 다수 호출
+        // /health_check: fetch_balance + TG getMe + 자기 자신 재귀 호출 위험
+        // 이 3개는 _hcFetchBackend()에서 이미 개별 점검됨 → 중복 제거
         { path: '/export_csv', name: 'CSV 내보내기 (export_csv)' },
     ];
 
