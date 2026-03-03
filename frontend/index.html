@@ -1399,6 +1399,18 @@
                         </div>
                     </div>
 
+                    <!-- 거래소 실제 주문가 (Exchange Pending Orders) -->
+                    <div id="exchange-orders-row" class="hidden grid grid-cols-2 gap-2 mb-3 text-[10px]">
+                        <div class="bg-navy-900/20 rounded px-2 py-1.5 border border-neon-green/20">
+                            <span class="text-gray-500 font-mono block">거래소 TP</span>
+                            <span id="pos-exchange-tp" class="font-mono font-bold text-neon-green/80">-</span>
+                        </div>
+                        <div class="bg-navy-900/20 rounded px-2 py-1.5 border border-neon-red/20">
+                            <span class="text-gray-500 font-mono block">거래소 SL</span>
+                            <span id="pos-exchange-sl" class="font-mono font-bold text-neon-red/80">-</span>
+                        </div>
+                    </div>
+
                     <!-- 보유 시간 -->
                     <div class="flex items-center justify-between text-[10px] bg-navy-900/30 rounded-lg px-3 py-1.5 border border-navy-border/30 mb-2">
                         <span class="text-gray-500 font-mono">보유 시간</span>

@@ -382,6 +382,7 @@ def _reset_position_state(sym_state: dict):
     sym_state["leverage"] = 1
     sym_state["exchange_tp_filled"] = False
     sym_state["tp_order_amount"] = 0
+    sym_state["breakeven_stop_active"] = False  # [Breakeven Stop] 래칫 플래그 초기화
     # PENDING 관련 동적 필드 제거
     for _pk in ["pending_order_id", "pending_order_time", "pending_amount", "pending_price"]:
         sym_state.pop(_pk, None)
@@ -1168,6 +1169,7 @@ async def async_trading_loop():
                             "leverage": 1,
                             "unrealized_pnl_percent": 0.0,
                             "partial_tp_executed": False,
+                            "breakeven_stop_active": False,  # [Breakeven Stop] 래칫 플래그
                         }
 
                     # [Phase 18.1] 코인별 뇌 구조 독립 동기화 (심볼 전용 설정 우선, 없으면 GLOBAL Fallback)
@@ -1704,9 +1706,32 @@ async def async_trading_loop():
                                 # (action, real_sl, trailing_active, trailing_target)를 단일 소스(strategy.py)에서만 계산
                                 partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
                                 _pos_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
+                                _breakeven_active = bot_global_state["symbols"][symbol].get("breakeven_stop_active", False)
                                 action, _real_sl, _trailing_active, _trailing_target = strategy_instance.evaluate_risk_management(
-                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed, _pos_contracts
+                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed, _pos_contracts, _breakeven_active
                                 )
+
+                                # [Breakeven Stop] 래칫(Ratchet) — 1계약 trailing 최초 활성화 시 SL → 진입가 업그레이드
+                                # 한번 True가 되면 포지션 종료까지 절대 False로 돌아가지 않음
+                                if _trailing_active and _pos_contracts <= 1 and not partial_tp_executed and not _breakeven_active:
+                                    bot_global_state["symbols"][symbol]["breakeven_stop_active"] = True
+                                    _breakeven_active = True
+                                    # [즉시 반영] 방금 활성화 → strategy.py는 아직 모르므로 직접 SL 바닥 적용
+                                    if position_side == "LONG":
+                                        _real_sl = max(_real_sl, entry)
+                                    else:
+                                        _real_sl = min(_real_sl, entry)
+                                    # 텔레그램 알림
+                                    _tf_label = str(get_config('timeframe') or '15m')
+                                    _be_msg = (
+                                        f"🛡️ <b>본전 방어 활성화</b>\n"
+                                        f"{_TG_LINE}\n"
+                                        f"<code>{_sym_short(symbol)}</code>  ·  ⏱️ <code>{_tf_label}</code>\n"
+                                        f"SL이 진입가(${entry:,.2f})로 업그레이드\n"
+                                        f"이후 최소 본전 청산 보장"
+                                    )
+                                    send_telegram_sync(_be_msg)
+                                    bot_global_state["logs"].append(f"🛡️ [{symbol}] SL → 진입가 업그레이드 (Breakeven Stop)")
 
                                 bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                                 bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active

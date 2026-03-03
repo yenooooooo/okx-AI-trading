@@ -250,7 +250,7 @@ class TradingStrategy:
 
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} / ADX {adx_val:.1f} - 타점 탐색 중", None
 
-    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False, contracts=1):
+    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False, contracts=1, breakeven_stop_active=False):
         """
         파산 방지 핵심 모듈 — 하드코딩 제거 및 UI 튜닝 파라미터(%) 직결 완료
         반환값: (action, effective_sl, trailing_active, trailing_target)
@@ -296,6 +296,9 @@ class TradingStrategy:
                 # 다계약은 기존 로직 유지 (min_take_profit_rate 충족 필요)
                 if _is_single_contract and partial_tp_executed:
                     return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
+                elif _is_single_contract and breakeven_stop_active:
+                    # [Breakeven Stop] 래칫 활성 후 트레일링 풀백 시 즉시 EXIT (최소 본전 보장)
+                    return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
                 elif profit_rate >= self.min_take_profit_rate:
                     return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
 
@@ -304,12 +307,21 @@ class TradingStrategy:
         if trailing_active and trailing_target > 0:
             profit_rate = profit_usdt / entry_price if entry_price > 0 else 0.0
             # [Phase TF] 1계약 조기 트레일링: 본전 방어 후 즉시 SL이 트레일링 위치를 추적
-            _sl_upgrade_allowed = (_is_single_contract and partial_tp_executed) or (profit_rate >= self.min_take_profit_rate)
+            # [Breakeven Stop] breakeven_stop_active 래칫 활성 시에도 SL 업그레이드 허용
+            _sl_upgrade_allowed = (_is_single_contract and partial_tp_executed) or (_is_single_contract and breakeven_stop_active) or (profit_rate >= self.min_take_profit_rate)
             if _sl_upgrade_allowed:
                 if position_side == "LONG":
                     effective_sl = max(hard_sl_price, trailing_target)
                 else:
                     effective_sl = min(hard_sl_price, trailing_target)
+
+        # [Breakeven Stop] 1계약 조기 본전 방어 — 래칫 보장 (max/min으로 유리한 방향만 선택)
+        # trailing_target이 entry보다 유리하면 trailing_target 유지, 아니면 entry가 최소 보장선
+        if breakeven_stop_active and _is_single_contract and not partial_tp_executed:
+            if position_side == "LONG":
+                effective_sl = max(effective_sl, entry_price)
+            else:
+                effective_sl = min(effective_sl, entry_price)
 
         return "KEEP", effective_sl, trailing_active, trailing_target
 

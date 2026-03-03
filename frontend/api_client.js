@@ -451,7 +451,35 @@ async function syncBotStatus() {
             }
 
             updateNumberText('pos-sl', realSl > 0 ? realSl : 0);
-            updateText('pos-sl-expect', realSl > 0 ? '(Dynamic)' : '');
+            // [Breakeven Stop] SL 상태 라벨: TRAILING > BREAKEVEN > PROTECTED > Dynamic
+            const beActive = symbolData.breakeven_stop_active === true;
+            const ptpDone = symbolData.partial_tp_executed === true;
+            if (trailingActive && trailingTarget > 0) {
+                updateText('pos-sl-expect', '(TRAILING)');
+            } else if (beActive) {
+                updateText('pos-sl-expect', '(BREAKEVEN)');
+            } else if (ptpDone) {
+                updateText('pos-sl-expect', '(PROTECTED)');
+            } else {
+                updateText('pos-sl-expect', realSl > 0 ? '(Dynamic)' : '');
+            }
+
+            // [거래소 실제 주문가] Exchange Pending Order Prices
+            const exchangeTp = parseFloat(symbolData.last_placed_tp_price || 0);
+            const exchangeSl = parseFloat(symbolData.last_placed_sl_price || 0);
+            const exchangeOrdersRow = document.getElementById('exchange-orders-row');
+            if (exchangeOrdersRow) {
+                const isPaper = symbolData.is_paper === true;
+                if (!isPaper && (exchangeTp > 0 || exchangeSl > 0)) {
+                    exchangeOrdersRow.classList.remove('hidden');
+                    const tpDecimals = exchangeTp > 0 && exchangeTp < 100 ? 4 : 2;
+                    const slDecimals = exchangeSl > 0 && exchangeSl < 100 ? 4 : 2;
+                    updateText('pos-exchange-tp', exchangeTp > 0 ? `$${exchangeTp.toFixed(tpDecimals)}` : '미등록');
+                    updateText('pos-exchange-sl', exchangeSl > 0 ? `$${exchangeSl.toFixed(slDecimals)}` : '미등록');
+                } else {
+                    exchangeOrdersRow.classList.add('hidden');
+                }
+            }
 
             // PnL(%) 및 USDT 수익금 동기화
             const pnl = parseFloat(symbolData.unrealized_pnl_percent || 0);
