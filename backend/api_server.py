@@ -356,6 +356,40 @@ def _log_trade_attempt(symbol: str, signal: str, result: str, reason: str = ""):
     if result == "SUCCESS":
         _loop_xray_state["last_successful_entry_time"] = _time.time()
         _loop_xray_state["last_successful_entry_symbol"] = symbol
+
+# ════════════ [Flight Recorder] Decision Trail — 진입 파이프라인 전체 기록 ════════════
+_decision_trail_log = []   # 링 버퍼 (최대 20건)
+_DECISION_TRAIL_MAX = 20
+_ALL_PIPELINE_STEPS = [
+    "active_target", "direction_mode", "position_sizing",
+    "micro_account", "margin_check", "order_execution"
+]
+
+def _log_decision_trail(symbol: str, signal: str, result: str, pipeline: list):
+    """[Flight Recorder] 진입 파이프라인 스냅샷 기록"""
+    import datetime as _dt
+    _kst = _dt.timezone(_dt.timedelta(hours=9))
+    entry = {
+        "timestamp": _dt.datetime.now(_kst).isoformat(),
+        "symbol": symbol,
+        "signal": signal,
+        "result": result,
+        "pipeline": pipeline,
+    }
+    _decision_trail_log.append(entry)
+    if len(_decision_trail_log) > _DECISION_TRAIL_MAX:
+        _decision_trail_log.pop(0)
+
+def _finalize_pipeline(pipeline: list) -> list:
+    """미도달 스텝을 SKIPPED로 채우고 정렬"""
+    recorded = {p["step"] for p in pipeline}
+    for step in _ALL_PIPELINE_STEPS:
+        if step not in recorded:
+            pipeline.append({"step": step, "status": "SKIPPED", "detail": ""})
+    order = {s: i for i, s in enumerate(_ALL_PIPELINE_STEPS)}
+    pipeline.sort(key=lambda p: order.get(p["step"], 99))
+    return pipeline
+
 # [Phase 20.1] 동시성 충돌 방어용 절대 자물쇠 (Mutex Lock)
 state_lock = asyncio.Lock()
 
@@ -1470,6 +1504,115 @@ async def async_trading_loop():
                             _ml = _ml[-30:]
                         ai_brain_state["symbols"][symbol]["monologue"] = _ml
 
+                    # ══════════ [Flight Recorder] Guard Wall — 진입 방벽 실시간 상태 ══════════
+                    # 매 루프마다 10개 가드의 CLEAR/BLOCKING 상태를 ai_brain_state에 주입
+                    # → /api/v1/brain 응답에 자동 포함, 프론트엔드 Guard Wall 패널에서 3초 갱신
+                    _gw = {}
+                    _gw_sym_state = bot_global_state["symbols"][symbol]
+
+                    # 1. 캔들 잠금
+                    _gw_candle_ts = int(df['timestamp'].iloc[-1])
+                    _gw_last_sig = _gw_sym_state.get("last_signal_candle_ts", 0)
+                    _gw["candle_lock"] = {
+                        "status": "BLOCKING" if _gw_last_sig == _gw_candle_ts else "CLEAR",
+                        "detail": "현재 캔들 평가 완료" if _gw_last_sig == _gw_candle_ts else "대기 중"
+                    }
+
+                    # 2. 퇴근 모드
+                    _gw["exit_only"] = {
+                        "status": "BLOCKING" if _exit_only else "CLEAR",
+                        "detail": "퇴근 모드 활성화" if _exit_only else "정상"
+                    }
+
+                    # 3. 재진입 쿨다운 (60초)
+                    _gw_last_exit = _gw_sym_state.get("last_exit_time", 0)
+                    _gw_cd_remain = max(0, 60 - (_time.time() - _gw_last_exit)) if _gw_last_exit > 0 else 0
+                    _gw_cd_bypass = _is_bypass_active('stress_bypass_reentry_cd')
+                    _gw["reentry_cd"] = {
+                        "status": "BLOCKING" if _gw_cd_remain > 0 and not _gw_cd_bypass else "CLEAR",
+                        "detail": f"남은 {int(_gw_cd_remain)}초" if _gw_cd_remain > 0 and not _gw_cd_bypass else ("바이패스" if _gw_cd_bypass and _gw_cd_remain > 0 else "정상")
+                    }
+
+                    # 4. 타 포지션 보유
+                    _gw_other = [(k, s.get("position", "NONE")) for k, s in bot_global_state["symbols"].items() if k != symbol and s.get("position", "NONE") != "NONE"]
+                    _gw["other_position"] = {
+                        "status": "BLOCKING" if _gw_other else "CLEAR",
+                        "detail": f"{_gw_other[0][0].split('/')[0]} {_gw_other[0][1]}" if _gw_other else "없음"
+                    }
+
+                    # 5. 킬스위치 (일일 손실 한도)
+                    _gw_ks = strategy_instance.kill_switch_active and _time.time() < strategy_instance.kill_switch_until
+                    _gw_ks_bypass = _is_bypass_active('stress_bypass_daily_loss')
+                    _gw["kill_switch"] = {
+                        "status": "BLOCKING" if _gw_ks and not _gw_ks_bypass else "CLEAR",
+                        "detail": "일일 손실 한도 발동" if _gw_ks and not _gw_ks_bypass else ("바이패스" if _gw_ks_bypass and _gw_ks else "정상")
+                    }
+
+                    # 6. 연패 쿨다운
+                    _gw_lcd = _time.time() < strategy_instance.loss_cooldown_until
+                    _gw_lcd_bypass = _is_bypass_active('stress_bypass_cooldown_loss')
+                    _gw_lcd_remain = max(0, strategy_instance.loss_cooldown_until - _time.time())
+                    _gw["loss_cooldown"] = {
+                        "status": "BLOCKING" if _gw_lcd and not _gw_lcd_bypass else "CLEAR",
+                        "detail": f"{strategy_instance.consecutive_loss_count}연패 ({int(_gw_lcd_remain)}초)" if _gw_lcd and not _gw_lcd_bypass else f"{strategy_instance.consecutive_loss_count}/{strategy_instance.cooldown_losses_trigger}연패"
+                    }
+
+                    # 7. 활성 타겟
+                    _gw_sym_conf = get_config('symbols')
+                    _gw_active_t = _gw_sym_conf[0] if isinstance(_gw_sym_conf, list) and _gw_sym_conf else None
+                    _gw["active_target"] = {
+                        "status": "BLOCKING" if _gw_active_t and symbol != _gw_active_t else "CLEAR",
+                        "detail": f"타겟: {_gw_active_t}" if _gw_active_t and symbol != _gw_active_t else "본 심볼 활성"
+                    }
+
+                    # 8. 방향 모드
+                    _gw_dir = str(get_config('direction_mode', symbol) or 'AUTO').upper()
+                    _gw["direction_mode"] = {
+                        "status": "N/A" if _gw_dir == "AUTO" else "CLEAR",
+                        "detail": f"{_gw_dir} 전용" if _gw_dir != "AUTO" else "양방향"
+                    }
+
+                    # 9. 소액 계좌 방어 (micro_account_protection)
+                    _gw_lev = max(1, int(get_config('leverage', symbol) or 1))
+                    try:
+                        _gw_cs = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                    except Exception:
+                        _gw_cs = 0.01
+                    _gw_min_margin = (_gw_cs * current_price) / _gw_lev if current_price > 0 and _gw_lev > 0 else 0
+                    _gw["micro_account"] = {
+                        "status": "BLOCKING" if curr_bal > 0 and _gw_min_margin > curr_bal * 0.50 else "CLEAR",
+                        "detail": f"1계약 ${_gw_min_margin:.2f} vs 50% ${curr_bal * 0.50:.2f}" if curr_bal > 0 and _gw_min_margin > 0 else "검증 대기"
+                    }
+
+                    # 10. 증거금 검증
+                    _gw_risk = float(get_config('risk_per_trade', symbol) or 0.02)
+                    if _gw_risk >= 1.0:
+                        _gw_risk /= 100.0
+                    _gw_notional = curr_bal * _gw_risk * _gw_lev
+                    _gw_est_amt = max(1, round((_gw_notional / current_price) / _gw_cs)) if current_price > 0 and _gw_cs > 0 else 1
+                    _gw_margin_need = (_gw_cs * current_price * _gw_est_amt) / _gw_lev if _gw_lev > 0 else 0
+                    _gw["margin_check"] = {
+                        "status": "BLOCKING" if curr_bal > 0 and curr_bal * 0.90 < _gw_margin_need else "CLEAR",
+                        "detail": f"필요 ${_gw_margin_need:.2f} vs 가용 ${curr_bal * 0.90:.2f}" if curr_bal > 0 else "검증 대기"
+                    }
+
+                    ai_brain_state["symbols"][symbol]["entry_guards"] = _gw
+
+                    # ══════════ [Flight Recorder] Config Snapshot — 백엔드 실제 사용 설정값 ══════════
+                    ai_brain_state["symbols"][symbol]["active_config"] = {
+                        "leverage": _gw_lev,
+                        "risk_per_trade": round(_gw_risk * 100, 1),
+                        "hard_stop_loss_rate": round(strategy_instance.hard_stop_loss_rate * 100, 2),
+                        "trailing_stop_activation": round(strategy_instance.trailing_stop_activation * 100, 2),
+                        "trailing_stop_rate": round(strategy_instance.trailing_stop_rate * 100, 2),
+                        "adx_threshold": strategy_instance.adx_threshold,
+                        "chop_threshold": strategy_instance.chop_threshold,
+                        "volume_surge_multiplier": strategy_instance.volume_surge_multiplier,
+                        "disparity_threshold": round(strategy_instance.disparity_threshold * 100, 1),
+                        "direction_mode": _gw_dir,
+                        "timeframe": _tf,
+                    }
+
                     # [Phase 21.4] A.D.S 자가 면역 체계: 전략 영양실조(Starvation) 감시
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
                         _sym_st = bot_global_state["symbols"][symbol]
@@ -2235,6 +2378,9 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            # [Flight Recorder] Decision Trail 파이프라인 추적 시작
+                            _pipeline = []
+
                             # [Bug Fix] active_target 외 심볼 신규 진입 차단
                             # 봇은 모든 심볼을 감시하지만, 신규 진입은 active_target에만 허용
                             # 기존 포지션 관리(TP/SL/트레일링)는 모든 심볼에서 계속 동작
@@ -2244,21 +2390,32 @@ async def async_trading_loop():
                                 _block_msg = f"[{symbol}] ⛔ 비활성 타겟 진입 차단 — 현재 활성 타겟: {_active_target}"
                                 logger.info(_block_msg)
                                 _log_trade_attempt(symbol, signal, "BLOCKED", "not_active_target")
+                                _pipeline.append({"step": "active_target", "status": "BLOCKED", "detail": f"타겟: {_active_target}"})
+                                _log_decision_trail(symbol, signal, "BLOCKED", _finalize_pipeline(_pipeline))
+                                ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                 continue
 
                             # [Phase 24 Fix] 캔들 잠금은 주문 성공 후로 지연 (아래 _log_trade_attempt SUCCESS 직전)
                             # → micro_account_protection / margin_insufficient 차단 시 같은 캔들에서 재시도 가능
                             # → 유저가 레버리지 변경 후 즉시 재진입 허용
+                            _pipeline.append({"step": "active_target", "status": "PASS", "detail": "본 심볼 활성"})
                             _signal_start_time = _time.time()  # [Phase 21.1] A.D.S 레이턴시 측정 시작점
                             # [Phase 18.1] 방향 모드 필터 (LONG/SHORT/AUTO) — 코인별 독립 설정
                             _direction_mode = str(get_config('direction_mode', symbol) or 'AUTO').upper()
                             if _direction_mode == 'LONG' and signal != 'LONG':
                                 _log_trade_attempt(symbol, signal, "BLOCKED", f"direction_mode_{_direction_mode}")
+                                _pipeline.append({"step": "direction_mode", "status": "BLOCKED", "detail": f"LONG 전용: {signal} 차단"})
+                                _log_decision_trail(symbol, signal, "BLOCKED", _finalize_pipeline(_pipeline))
+                                ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                 continue  # LONG 전용 모드: SHORT 신호 차단
                             if _direction_mode == 'SHORT' and signal != 'SHORT':
                                 _log_trade_attempt(symbol, signal, "BLOCKED", f"direction_mode_{_direction_mode}")
+                                _pipeline.append({"step": "direction_mode", "status": "BLOCKED", "detail": f"SHORT 전용: {signal} 차단"})
+                                _log_decision_trail(symbol, signal, "BLOCKED", _finalize_pipeline(_pipeline))
+                                ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                 continue  # SHORT 전용 모드: LONG 신호 차단
 
+                            _pipeline.append({"step": "direction_mode", "status": "PASS", "detail": f"{_direction_mode}"})
                             msg = f"[{symbol}] {signal} 진입 신호 — 현재가: ${current_price}, RSI: {latest_rsi:.1f}"
                             bot_global_state["logs"].append(msg)
                             logger.info(msg)
@@ -2301,6 +2458,7 @@ async def async_trading_loop():
                                     trade_amount = strategy_instance.calculate_position_size_dynamic(
                                         curr_bal, current_price, trade_leverage, contract_size, _risk_rate
                                     )
+                                _pipeline.append({"step": "position_sizing", "status": "PASS", "detail": f"{trade_amount}계약 {trade_leverage}x"})
                                 # [Bug Fix] 소액 계좌 방어: 1계약 증거금이 잔고의 50%를 초과하면 진입 차단
                                 _min_1_contract_margin = (contract_size * current_price) / trade_leverage
                                 if _min_1_contract_margin > curr_bal * 0.50:
@@ -2326,8 +2484,12 @@ async def async_trading_loop():
                                                 send_telegram_sync(_mg_micro_tg)
                                             except Exception:
                                                 pass  # 텔레그램 실패 시 매매 흐름 보호
+                                    _pipeline.append({"step": "micro_account", "status": "BLOCKED", "detail": f"1계약 ${_min_1_contract_margin:.2f} > 50% ${curr_bal * 0.50:.2f}"})
+                                    _log_decision_trail(symbol, signal, "BLOCKED", _finalize_pipeline(_pipeline))
+                                    ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                     continue  # 이 심볼 진입 건너뛰기
 
+                                _pipeline.append({"step": "micro_account", "status": "PASS", "detail": f"1계약 ${_min_1_contract_margin:.2f}"})
                                 # [Phase 31] 증거금 사전 검증 — 거래소 거부(51008) 선제 차단
                                 _margin_needed = (contract_size * current_price * trade_amount) / trade_leverage
                                 if curr_bal * 0.90 < _margin_needed:
@@ -2350,7 +2512,11 @@ async def async_trading_loop():
                                                 send_telegram_sync(_mg_tg)
                                             except Exception:
                                                 pass  # 텔레그램 실패 시 매매 흐름 보호
+                                    _pipeline.append({"step": "margin_check", "status": "BLOCKED", "detail": f"필요 ${_margin_needed:.2f} > 가용 ${curr_bal * 0.90:.2f}"})
+                                    _log_decision_trail(symbol, signal, "BLOCKED", _finalize_pipeline(_pipeline))
+                                    ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                     continue  # 이 심볼 진입 건너뛰기
+                                _pipeline.append({"step": "margin_check", "status": "PASS", "detail": f"증거금 ${_margin_needed:.2f} OK"})
                                 # 레버리지 거래소 적용
                                 try:
                                     await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
@@ -2417,6 +2583,9 @@ async def async_trading_loop():
                                         logger.error(f"[{symbol}] 🐸 Shadow Hunting 주문 실패: {_sh_err}")
                                         bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts  # 실패 시 캔들 잠금
                                         _log_trade_attempt(symbol, signal, "FAILED", f"shadow_hunting: {str(_sh_err)[:80]}")
+                                        _pipeline.append({"step": "order_execution", "status": "FAILED", "detail": f"Shadow: {str(_sh_err)[:50]}"})
+                                        _log_decision_trail(symbol, signal, "FAILED", _finalize_pipeline(_pipeline))
+                                        ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                         continue  # 실패 시 이번 사이클 스킵
 
                                 if not _is_shadow_hunt_order:
@@ -2445,6 +2614,9 @@ async def async_trading_loop():
                                     # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
                                     bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
                                     _log_trade_attempt(symbol, signal, "SUCCESS")
+                                    _pipeline.append({"step": "order_execution", "status": "PASS", "detail": f"Smart Limit ${executed_price:.2f}"})
+                                    _log_decision_trail(symbol, signal, "SUCCESS", _finalize_pipeline(_pipeline))
+                                    ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                     entry_emoji = "⏳"
                                     entry_msg = f"{_paper_tag_p}{entry_emoji} [{symbol}] {signal} 스마트 지정가 주문 접수 | 목표가: ${executed_price:.2f} | {trade_amount}계약 (5분 내 미체결 시 취소)"
                                     bot_global_state["logs"].append(entry_msg)
@@ -2469,6 +2641,9 @@ async def async_trading_loop():
                                     # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
                                     bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
                                     _log_trade_attempt(symbol, signal, "SUCCESS")
+                                    _pipeline.append({"step": "order_execution", "status": "PASS", "detail": f"Market ${executed_price:.2f}"})
+                                    _log_decision_trail(symbol, signal, "SUCCESS", _finalize_pipeline(_pipeline))
+                                    ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                     # [Phase 21.1] A.D.S 자가 진단: 레이턴시 & 슬리피지 측정
                                     _latency_ms = (_time.time() - _signal_start_time) * 1000
                                     _ref_price = payload.get('close', executed_price) if payload else executed_price

@@ -957,6 +957,40 @@
                         </div>
                     </div>
                 </div>
+                <!-- [E] Config Mismatch Warning — 설정 불일치 경고 (Flight Recorder) -->
+                <div id="config-mismatch-indicator" class="hidden mt-2 p-2 rounded border border-yellow-500/30 bg-yellow-500/5">
+                    <div class="text-[9px] text-yellow-400 font-mono uppercase tracking-wider mb-1 flex items-center gap-1">
+                        <span class="animate-pulse">⚠</span> 설정 불일치 감지
+                    </div>
+                </div>
+            </div>
+
+            <!-- [C] Guard Wall — 진입 방벽 실시간 상태 (Flight Recorder) -->
+            <div class="glass-panel p-4">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-2 flex justify-between items-center">
+                    <span class="flex items-center gap-2">
+                        <span>🧱 Guard Wall</span>
+                        <span class="text-[9px] text-gray-500">진입 방벽</span>
+                    </span>
+                    <span id="guard-wall-badge" class="text-gray-500 font-bold text-[10px]">대기 중</span>
+                </h3>
+                <div id="guard-wall-list" class="flex flex-col gap-0.5">
+                    <div class="text-[10px] font-mono text-gray-600 italic">봇 가동 후 표시됩니다...</div>
+                </div>
+            </div>
+
+            <!-- [D] Decision Trail — 진입 파이프라인 결과 (Flight Recorder) -->
+            <div class="glass-panel p-4">
+                <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-2 flex justify-between items-center">
+                    <span class="flex items-center gap-2">
+                        <span>🔬 Decision Trail</span>
+                        <span class="text-[9px] text-gray-500">진입 파이프라인</span>
+                    </span>
+                    <span class="text-[9px] text-gray-600 font-mono">최신 1건</span>
+                </h3>
+                <div id="decision-trail-container" class="max-h-48 overflow-y-auto" style="scrollbar-width:thin;scrollbar-color:#1e2a3a transparent;">
+                    <div class="text-[10px] font-mono text-gray-600 italic">진입 시도 후 표시됩니다...</div>
+                </div>
             </div>
 
             <!-- [B] 봇 혼잣말 라이브 피드 -->

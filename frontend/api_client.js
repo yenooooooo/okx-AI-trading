@@ -754,6 +754,18 @@ async function syncBrain() {
         if (brainState.monologue) {
             renderMonologue(brainState.monologue);
         }
+        // [C] Guard Wall 진입 방벽 실시간 상태 (Flight Recorder)
+        if (brainState.entry_guards) {
+            renderEntryGuards(brainState.entry_guards);
+        }
+        // [D] Decision Trail 진입 파이프라인 (Flight Recorder)
+        if (brainState.latest_decision_trail) {
+            renderDecisionTrail(brainState.latest_decision_trail);
+        }
+        // [E] Config Snapshot Diff 설정 불일치 감지 (Flight Recorder)
+        if (brainState.active_config) {
+            checkConfigMismatch(brainState.active_config);
+        }
 
         // WebSocket 연결 중엔 REST가 hero-price를 덮어쓰지 않음 (실시간 보호)
         if (brainState.price && (!priceWs || priceWs.readyState !== WebSocket.OPEN)) {
@@ -1026,6 +1038,185 @@ function renderMonologue(lines) {
         else cls += ' text-gray-600';
         return `<div class="${cls}">${line}</div>`;
     }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [Flight Recorder] Guard Wall — 진입 방벽 실시간 렌더링
+// ═══════════════════════════════════════════════════════════════
+function renderEntryGuards(guards) {
+    const container = document.getElementById('guard-wall-list');
+    if (!container || !guards) return;
+
+    const guardMeta = {
+        candle_lock:    { label: '캔들 잠금',      icon: '🔒' },
+        exit_only:      { label: '퇴근 모드',      icon: '🛏️' },
+        reentry_cd:     { label: '재진입 쿨다운',   icon: '⏳' },
+        other_position: { label: '타 포지션',       icon: '🔗' },
+        kill_switch:    { label: '킬스위치',        icon: '🚨' },
+        loss_cooldown:  { label: '연패 쿨다운',     icon: '❄️' },
+        active_target:  { label: '활성 타겟',       icon: '🎯' },
+        direction_mode: { label: '방향 모드',       icon: '🧭' },
+        micro_account:  { label: '소액 방어',       icon: '🛡️' },
+        margin_check:   { label: '증거금 검증',     icon: '💰' },
+    };
+
+    let clearCount = 0;
+    let blockCount = 0;
+    const total = Object.keys(guards).length;
+
+    let html = '';
+    for (const [key, g] of Object.entries(guards)) {
+        const meta = guardMeta[key] || { label: key, icon: '?' };
+        const isClear = g.status === 'CLEAR';
+        const isBlocking = g.status === 'BLOCKING';
+        if (isClear) clearCount++;
+        if (isBlocking) blockCount++;
+
+        const dotColor = isClear ? 'bg-neon-green' : (isBlocking ? 'bg-neon-red animate-pulse' : 'bg-gray-600');
+        const textColor = isClear ? 'text-neon-green' : (isBlocking ? 'text-neon-red' : 'text-gray-600');
+
+        html += `<div class="flex items-center justify-between text-[10px] font-mono py-0.5">
+            <span class="flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full ${dotColor} flex-shrink-0"></span>
+                <span class="text-gray-400">${meta.icon} ${meta.label}</span>
+            </span>
+            <span class="${textColor} text-[9px] truncate max-w-[140px]" title="${g.detail || ''}">${g.detail || ''}</span>
+        </div>`;
+    }
+    container.innerHTML = html;
+
+    const badge = document.getElementById('guard-wall-badge');
+    if (badge) {
+        if (blockCount > 0) {
+            badge.textContent = `${blockCount} 차단`;
+            badge.className = 'text-neon-red font-bold text-[10px] animate-pulse';
+        } else {
+            badge.textContent = `${clearCount}/${total} 통과`;
+            badge.className = 'text-neon-green font-bold text-[10px]';
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [Flight Recorder] Decision Trail — 진입 파이프라인 렌더링
+// ═══════════════════════════════════════════════════════════════
+const _PIPELINE_STEP_META = {
+    active_target:   { label: '활성 타겟',    order: 1 },
+    direction_mode:  { label: '방향 모드',    order: 2 },
+    position_sizing: { label: '포지션 사이징', order: 3 },
+    micro_account:   { label: '소액 방어',    order: 4 },
+    margin_check:    { label: '증거금 검증',  order: 5 },
+    order_execution: { label: '주문 실행',    order: 6 },
+};
+
+let _lastTrailTimestamp = '';
+function renderDecisionTrail(trail) {
+    if (!trail || trail.timestamp === _lastTrailTimestamp) return;
+    _lastTrailTimestamp = trail.timestamp;
+
+    const container = document.getElementById('decision-trail-container');
+    if (!container) return;
+
+    const sigColor = trail.signal === 'LONG' ? 'text-emerald-400' : (trail.signal === 'SHORT' ? 'text-red-400' : 'text-gray-500');
+    const resultColor = trail.result === 'SUCCESS' ? 'text-neon-green' : 'text-neon-red';
+    const sym = (trail.symbol || '').split('/')[0] || '';
+    const ts = trail.timestamp ? new Date(trail.timestamp).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', second:'2-digit'}) : '';
+
+    let html = `<div class="flex items-center justify-between mb-2 text-[10px] font-mono">
+        <span class="text-gray-400">${ts}</span>
+        <span class="text-gray-500">${sym}</span>
+        <span class="${sigColor} font-bold">${trail.signal}</span>
+        <span class="${resultColor} font-bold">${trail.result}</span>
+    </div>`;
+
+    const steps = (trail.pipeline || []).sort((a, b) => (_PIPELINE_STEP_META[a.step]?.order || 99) - (_PIPELINE_STEP_META[b.step]?.order || 99));
+
+    html += '<div class="flex flex-col gap-0">';
+    steps.forEach((step, idx) => {
+        const meta = _PIPELINE_STEP_META[step.step] || { label: step.step };
+        let dotClass, textClass;
+        if (step.status === 'PASS') {
+            dotClass = 'bg-neon-green'; textClass = 'text-neon-green';
+        } else if (step.status === 'BLOCKED' || step.status === 'FAILED') {
+            dotClass = 'bg-neon-red'; textClass = 'text-neon-red font-bold';
+        } else {
+            dotClass = 'bg-gray-700'; textClass = 'text-gray-600';
+        }
+
+        const isLast = idx === steps.length - 1;
+        const connector = !isLast ? `<div class="w-px h-2 ${step.status === 'PASS' ? 'bg-neon-green/30' : 'bg-gray-700'} ml-[3px]"></div>` : '';
+
+        html += `<div class="flex items-start gap-2">
+            <div class="flex flex-col items-center flex-shrink-0">
+                <div class="w-[7px] h-[7px] rounded-full ${dotClass} mt-[3px]"></div>
+                ${connector}
+            </div>
+            <div class="flex items-center justify-between flex-1 text-[9px] font-mono min-w-0 pb-0.5">
+                <span class="text-gray-400 flex-shrink-0 w-20">${meta.label}</span>
+                <span class="${textClass} truncate max-w-[120px]" title="${step.detail || ''}">${step.status === 'SKIPPED' ? '—' : (step.detail || step.status)}</span>
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// [Flight Recorder] Config Snapshot Diff — 설정 불일치 감지
+// ═══════════════════════════════════════════════════════════════
+let _lastMismatchReport = '';
+function checkConfigMismatch(activeConfig) {
+    const mismatches = [];
+
+    // 레버리지 비교
+    const levEl = document.getElementById('config-leverage');
+    const frontLev = levEl ? parseInt(levEl.value || 0) : 0;
+    if (frontLev > 0 && frontLev !== activeConfig.leverage) {
+        mismatches.push({ key: '레버리지', front: `${frontLev}x`, back: `${activeConfig.leverage}x` });
+    }
+
+    // 리스크 비교 (both in %)
+    const riskEl = document.getElementById('config-risk_per_trade');
+    const frontRisk = riskEl ? parseFloat(riskEl.value || 0) : 0;
+    if (frontRisk > 0 && Math.abs(frontRisk - activeConfig.risk_per_trade) > 0.05) {
+        mismatches.push({ key: '리스크', front: `${frontRisk}%`, back: `${activeConfig.risk_per_trade}%` });
+    }
+
+    // ADX 비교
+    const adxEl = document.getElementById('config-adx_threshold');
+    const frontAdx = adxEl ? parseFloat(adxEl.value || 0) : 0;
+    if (frontAdx > 0 && Math.abs(frontAdx - activeConfig.adx_threshold) > 0.1) {
+        mismatches.push({ key: 'ADX', front: `${frontAdx}`, back: `${activeConfig.adx_threshold}` });
+    }
+
+    // 불일치 표시
+    const indicator = document.getElementById('config-mismatch-indicator');
+    if (!indicator) return;
+
+    const reportKey = mismatches.map(m => `${m.key}:${m.front}/${m.back}`).join('|');
+    if (reportKey === _lastMismatchReport) return;
+    _lastMismatchReport = reportKey;
+
+    if (mismatches.length === 0) {
+        indicator.classList.add('hidden');
+        return;
+    }
+
+    indicator.classList.remove('hidden');
+    let html = '<div class="text-[9px] text-yellow-400 font-mono uppercase tracking-wider mb-1 flex items-center gap-1"><span class="animate-pulse">⚠</span> 설정 불일치 감지</div>';
+    mismatches.forEach(m => {
+        html += `<div class="flex items-center justify-between text-[9px] font-mono py-0.5">
+            <span class="text-yellow-400">${m.key}</span>
+            <span class="text-gray-400">표시: <span class="text-white">${m.front}</span> · 실제: <span class="text-neon-red">${m.back}</span></span>
+        </div>`;
+    });
+    indicator.innerHTML = html;
+
+    // 토스트 1회만 (키 변경 시에만)
+    if (typeof showToast === 'function') {
+        showToast('설정 불일치', `${mismatches.map(m => m.key).join(', ')} 값이 다릅니다`, 'ERROR');
+    }
 }
 
 // --- [C] 활성 전술 프리셋 감지 및 뱃지 렌더링 ---
