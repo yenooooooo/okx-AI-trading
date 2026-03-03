@@ -363,6 +363,44 @@
             0%, 100% { border-color: rgba(0, 255, 136, 0.3); }
             50% { border-color: rgba(0, 255, 136, 0.8); box-shadow: 0 0 12px rgba(0, 255, 136, 0.3); }
         }
+
+        /* ══════════ Mobile iOS Fixes — 데스크탑 영향 전혀 없음 ══════════ */
+        .mobile-scroll {
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }
+        @media (max-width: 767px) {
+            /* 노치 / 다이나믹 아일랜드 안전 영역 */
+            #toast-container {
+                top: max(1rem, env(safe-area-inset-top));
+                right: max(1rem, env(safe-area-inset-right));
+            }
+            /* iOS 입력창 자동 줌 방지 (font-size < 16px 이면 iOS가 자동 확대) */
+            input[type="text"], input[type="number"], input[type="email"],
+            input[type="password"], select, textarea {
+                font-size: 16px !important;
+            }
+            /* 5m/15m 토글 터치 타겟 확대 */
+            #tf-toggle-container { padding: 4px 2px; }
+            .tf-toggle-btn { padding: 8px 14px !important; min-height: 36px; }
+            /* 모달 닫기 버튼 44px 최소 확보 */
+            #history-modal button[onclick*="close"],
+            #tuning-modal button[onclick*="close"],
+            #diagnostic-modal button[onclick*="close"] {
+                min-height: 44px;
+                min-width: 44px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            /* 하단 탭바 공간 확보 */
+            .main-grid { padding-bottom: 4.5rem; }
+            /* 모바일 탭바 표시 */
+            #mobile-tab-bar { display: flex !important; }
+        }
+        @media (min-width: 768px) {
+            #mobile-tab-bar { display: none !important; }
+        }
     </style>
 </head>
 
@@ -428,9 +466,9 @@
     </div>
 
     <!-- 3-Column Grid -->
-    <main class="grid grid-cols-12 gap-4 flex-grow z-10">
+    <main class="main-grid grid grid-cols-12 gap-4 flex-grow z-10">
         <!-- LEFT: Side Control (3 cols) -->
-        <div class="col-span-12 lg:col-span-3 flex flex-col gap-4">
+        <div id="mobile-section-left" class="col-span-12 lg:col-span-3 flex flex-col gap-4">
             <!-- Asset Status -->
             <div class="glass-panel p-5 flex flex-col gap-2 relative overflow-hidden">
                 <!-- abstract background blur -->
@@ -685,7 +723,7 @@
         </div>
 
         <!-- CENTER: Main Intelligence (6 cols) -->
-        <div class="col-span-12 lg:col-span-6 flex flex-col gap-4">
+        <div id="mobile-section-center" class="col-span-12 lg:col-span-6 flex flex-col gap-4">
             <!-- ══ Tab: Trading (default) ══ -->
             <div id="tab-trading" class="flex flex-col gap-4">
             <!-- Hero Chart -->
@@ -1286,7 +1324,7 @@
         </div>
 
         <!-- RIGHT: Live Execution (3 cols) -->
-        <div class="col-span-12 lg:col-span-3 flex flex-col gap-4">
+        <div id="mobile-section-right" class="col-span-12 lg:col-span-3 flex flex-col gap-4">
             <!-- Active Position -->
             <div id="active-position-card"
                 class="glass-panel p-5 transition-all duration-500 border-navy-border flex-grow flex flex-col relative overflow-hidden">
@@ -1490,10 +1528,11 @@
             </div>
 
             <!-- Table Container -->
-            <div class="px-5 pb-5 overflow-y-auto flex-1 custom-scrollbar">
+            <div class="px-5 pb-5 overflow-y-auto flex-1 custom-scrollbar mobile-scroll">
                 <!-- Daily Tab -->
                 <div id="history-tab-daily">
-                    <table class="w-full text-[11px] font-mono border-collapse">
+                    <div class="overflow-x-auto">
+                    <table class="w-full min-w-[480px] text-[11px] font-mono border-collapse">
                         <thead>
                             <tr class="text-[10px] text-gray-500 uppercase tracking-widest border-b border-navy-border">
                                 <th class="py-2 text-left">날짜 (KST)</th>
@@ -1509,10 +1548,12 @@
                             </tr>
                         </tbody>
                     </table>
+                    </div>
                 </div>
                 <!-- Monthly Tab -->
                 <div id="history-tab-monthly" class="hidden">
-                    <table class="w-full text-[11px] font-mono border-collapse">
+                    <div class="overflow-x-auto">
+                    <table class="w-full min-w-[480px] text-[11px] font-mono border-collapse">
                         <thead>
                             <tr class="text-[10px] text-gray-500 uppercase tracking-widest border-b border-navy-border">
                                 <th class="py-2 text-left">월 (KST)</th>
@@ -1528,6 +1569,7 @@
                             </tr>
                         </tbody>
                     </table>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1772,7 +1814,7 @@
                 </div>
 
                 <!-- ══ Sections 2 & 3: 2-column grid ══ -->
-                <div class="grid grid-cols-1 md:grid-cols-2 flex-1 min-h-0 overflow-y-auto md:overflow-hidden">
+                <div class="grid grid-cols-1 md:grid-cols-2 flex-1 min-h-0 overflow-y-auto md:overflow-hidden mobile-scroll">
 
                 <!-- ══ LEFT: Section 3 - 심층 튜닝 (Deep Brain Tuning) ══ -->
                 <div class="flex flex-col border-b md:border-b-0 md:border-r border-navy-border min-h-0">
@@ -2259,6 +2301,23 @@
             ⚡
         </button>
     </div>
+
+    <!-- ══ MOBILE ONLY: 하단 섹션 탭바 (md 이상 자동 hidden — 데스크탑 영향 없음) ══ -->
+    <nav id="mobile-tab-bar" class="hidden fixed bottom-0 left-0 right-0 z-40 border-t border-navy-border"
+        style="background:var(--bg-secondary); padding-bottom:env(safe-area-inset-bottom);">
+        <button onclick="mobileScrollTo('mobile-section-left')"
+            class="flex-1 py-3 flex flex-col items-center gap-0.5 text-[11px] font-mono text-gray-400 hover:text-neon-green active:text-neon-green transition-colors">
+            <span>⚙️</span><span>제어</span>
+        </button>
+        <button onclick="mobileScrollTo('mobile-section-center')"
+            class="flex-1 py-3 flex flex-col items-center gap-0.5 text-[11px] font-mono text-gray-400 hover:text-neon-green active:text-neon-green transition-colors">
+            <span>📊</span><span>차트</span>
+        </button>
+        <button onclick="mobileScrollTo('mobile-section-right')"
+            class="flex-1 py-3 flex flex-col items-center gap-0.5 text-[11px] font-mono text-gray-400 hover:text-neon-green active:text-neon-green transition-colors">
+            <span>🎯</span><span>포지션</span>
+        </button>
+    </nav>
 
     <script src="https://unpkg.com/lightweight-charts@4.0.0/dist/lightweight-charts.standalone.production.js"></script>
     <script src="api_client.js"></script>

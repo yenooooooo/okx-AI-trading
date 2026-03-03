@@ -34,6 +34,12 @@ function parseTimeframeMs(tf) {
     return 900000; // fallback 15m
 }
 
+// ════════════ [Mobile] 하단 탭바 섹션 스크롤 ════════════
+function mobileScrollTo(id) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 // ════════════ [Phase TF] 원클릭 타임프레임 전환 ════════════
 
 /**
