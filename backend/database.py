@@ -60,6 +60,12 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # [Phase TF] 타임프레임 컬럼 마이그레이션
+    try:
+        cursor.execute('ALTER TABLE trades ADD COLUMN timeframe TEXT DEFAULT "15m"')
+    except sqlite3.OperationalError:
+        pass
+
     # bot_config 테이블
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS bot_config (
@@ -129,7 +135,8 @@ def save_trade(symbol: str, position_type: str, entry_price: float, amount: floa
                fee: float = 0.0, gross_pnl: float = 0.0,
                exit_reason: str = None, leverage: int = 1,
                entry_time=None, exit_time=None,
-               okx_order_id: str = None, source: str = 'BOT'):
+               okx_order_id: str = None, source: str = 'BOT',
+               timeframe: str = '15m'):
     """거래 기록 저장 (OKX 싱크 시 entry_time/exit_time/okx_order_id/source 직접 지정 가능)"""
     conn = get_connection()
     cursor = conn.cursor()
@@ -143,11 +150,11 @@ def save_trade(symbol: str, position_type: str, entry_price: float, amount: floa
         INSERT INTO trades
         (symbol, position_type, entry_price, exit_price, entry_time, exit_time,
          pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage,
-         okx_order_id, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         okx_order_id, source, created_at, timeframe)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (symbol, position_type, entry_price, exit_price, entry_time, exit_time,
           pnl, pnl_percent, fee, gross_pnl, amount, exit_reason, leverage,
-          okx_order_id, source, created_at))
+          okx_order_id, source, created_at, timeframe))
 
     conn.commit()
     trade_id = cursor.lastrowid

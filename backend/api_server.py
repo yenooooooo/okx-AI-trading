@@ -28,10 +28,11 @@ def _sym_short(symbol: str) -> str:
 def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: int, payload: dict = None, is_test: bool = False) -> str:
     d_emoji = "📈" if direction == "LONG" else "📉"
     header = "👻 <b>PAPER TRADING</b>  |  가상 진입" if is_test else "⚡ <b>ANTIGRAVITY (LIVE)</b>  |  실전 진입"
+    _tf_label = str(get_config('timeframe') or '15m')
     msg = (
         f"{header}\n"
         f"{_TG_LINE}\n"
-        f"{d_emoji} <b>{direction}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{d_emoji} <b>{direction}</b>  ·  <code>{_sym_short(symbol)}</code>  ·  ⏱️ <code>{_tf_label}</code>\n"
         f"{_TG_LINE}\n"
         f"가격   │  <code>${price:,.2f}</code>\n"
         f"수량   │  <code>{amount}계약  ·  {leverage}x</code>\n"
@@ -73,10 +74,11 @@ def _tg_exit(symbol: str, direction: str, avg_price: float, gross_pnl: float, fe
     _reason_ko = {"STOP_LOSS": "하드 손절", "TRAILING_STOP_EXIT": "트레일링 익절"}
     reason_ko  = _reason_ko.get(reason, reason)
     header = "👻 <b>PAPER TRADING</b>  |  가상 청산" if is_test else "⚡ <b>ANTIGRAVITY (LIVE)</b>  |  실전 청산"
+    _tf_label = str(get_config('timeframe') or '15m')
     return (
         f"{header}\n"
         f"{_TG_LINE}\n"
-        f"{result_emoji} <b>{direction} {result_label}</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"{result_emoji} <b>{direction} {result_label}</b>  ·  <code>{_sym_short(symbol)}</code>  ·  ⏱️ <code>{_tf_label}</code>\n"
         f"{_TG_LINE}\n"
         f"청산가  │  <code>${avg_price:,.2f}</code>\n"
         f"총수익  │  <code>{sign_gross}{gross_pnl:.4f} USDT</code>\n"
@@ -91,10 +93,11 @@ def _tg_manual_exit(symbol: str, direction: str, avg_price: float, gross_pnl: fl
     is_profit = pnl_pct >= 0
     sign_net = "+" if net_pnl >= 0 else ""
     sign_gross = "+" if gross_pnl >= 0 else ""
+    _tf_label = str(get_config('timeframe') or '15m')
     return (
         f"⚡ <b>ANTIGRAVITY</b>  |  수동청산 감지\n"
         f"{_TG_LINE}\n"
-        f"✋ <b>{direction} 수동청산</b>  ·  <code>{_sym_short(symbol)}</code>\n"
+        f"✋ <b>{direction} 수동청산</b>  ·  <code>{_sym_short(symbol)}</code>  ·  ⏱️ <code>{_tf_label}</code>\n"
         f"{_TG_LINE}\n"
         f"청산가  │  <code>${avg_price:,.2f}</code>\n"
         f"총수익  │  <code>{sign_gross}{gross_pnl:.4f} USDT</code>\n"
@@ -615,7 +618,8 @@ async def _sync_okx_trades(engine):
             gross_pnl=round(gross_pnl, 6), exit_reason='OKX_MANUAL',
             leverage=leverage, entry_time=entry_time,
             exit_time=exit_time, okx_order_id=pos_id,
-            source='OKX_SYNC'
+            source='OKX_SYNC',
+            timeframe=str(get_config('timeframe') or '15m')
         )
         synced += 1
         logger.info(f"[OKX Sync] 싱크: {symbol} {direction} PnL={net_pnl:.4f} (posId={pos_id})")
@@ -817,6 +821,7 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
             amount        = prev_contracts,
             exit_reason   = "MANUAL_CLOSE",
             leverage      = prev_leverage,
+            timeframe     = str(get_config('timeframe') or '15m'),
         )
     except Exception as e:
         logger.error(f"[수동청산 감지] {symbol} DB 저장 오류: {e}")
@@ -2025,7 +2030,8 @@ async def async_trading_loop():
                                                 gross_pnl=round(total_gross_pnl, 4),
                                                 amount=amount,
                                                 exit_reason=action,
-                                                leverage=leverage
+                                                leverage=leverage,
+                                                timeframe=str(get_config('timeframe') or '15m')
                                             )
 
                                         # 3. 청산 알림 (Paper/Real 공통 — 태그만 다름)
@@ -3553,8 +3559,15 @@ async def reset_tuning_to_auto():
         for _sym in _active_syms:
             _sym_cleaned += delete_symbol_configs(_sym)
     _active_strategy = TradingStrategy()
+    # [Phase TF] 리셋 후 현재 타임프레임 프리셋 재적용 (5m 상태에서 리셋 시 15m 기본값으로 돌아가는 것 방지)
+    _current_tf = str(get_config('timeframe') or '15m')
+    _tf_reapplied = False
+    if _current_tf in ALLOWED_TIMEFRAMES:
+        await _apply_timeframe_presets(_current_tf)
+        _tf_reapplied = True
     _reset_detail = f" (심볼별 설정 {_sym_cleaned}건 추가 청소)" if _sym_cleaned > 0 else ""
-    msg = f"[시스템] 사령관 명령 수신: 튜닝 데이터 삭제 및 AI 순정 모드(Tier 1) 딥 리셋 완료.{_reset_detail}"
+    _tf_detail = f" | ⏱️ {_current_tf} 프리셋 재적용" if _tf_reapplied else ""
+    msg = f"[시스템] 사령관 명령 수신: 튜닝 데이터 삭제 및 AI 순정 모드(Tier 1) 딥 리셋 완료.{_reset_detail}{_tf_detail}"
     bot_global_state["logs"].append(msg)
     logger.info(msg)
     return {"success": True, "message": msg}
