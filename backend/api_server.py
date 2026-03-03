@@ -1453,11 +1453,12 @@ async def async_trading_loop():
                         _sf_is_fit = (_sf_score >= 6)
                         if _sf_is_fit and ((not _sf_st["was_fit"]) or (_sf_now - _sf_st["last_alert_time"] >= 300)):
                             send_telegram_sync(
-                                f"⚡ <b>스캘핑 적합 구간 감지!</b>\n{_TG_LINE}\n"
+                                f"📡 <b>스캘프CTX 구간 감지!</b>\n{_TG_LINE}\n"
                                 f"코인 │ <code>{_sym_short(symbol)}</code>\n"
                                 f"점수 │ <b>{_sf_score}/8</b>\n{_TG_LINE}\n"
                                 f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
-                                f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}"
+                                f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}\n"
+                                f"📌 튜닝 패널 → 📡 스캘프CTX 프리셋 적용 권장"
                             )
                             _sf_st["last_alert_time"] = _sf_now
                         _sf_st["was_fit"] = _sf_is_fit

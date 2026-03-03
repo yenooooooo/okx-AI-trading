@@ -1239,7 +1239,7 @@ function updateActiveTuningBadge() {
         factory_reset: ['🏭 팩토리', 'text-gray-300 border-gray-500/50 bg-gray-500/10'],
         frenzy: ['🔥 FRENZY', 'text-red-400 border-red-500/50 bg-red-500/10'],
         micro_seed: ['💎 마이크로', 'text-emerald-300 border-emerald-500/50 bg-emerald-500/10'],
-        scalp_context: ['🎯 스캘프CTX', 'text-cyan-300 border-cyan-500/50 bg-cyan-500/10'],
+        scalp_context: ['📡 스캘프CTX', 'text-cyan-300 border-cyan-500/50 bg-cyan-500/10'],
     };
 
     let matchedLabel = null;
@@ -1272,9 +1272,14 @@ function updateActiveTuningBadge() {
         badge.className = 'px-1.5 py-0.5 rounded font-mono text-[9px] border text-purple-300 border-purple-500/50 bg-purple-500/10 transition-all';
     }
 
-    // [UI Overhaul] Command Bar 프리셋 배지 미러
+    // [UI Overhaul] Command Bar 프리셋 배지 미러 (색상도 Entry Readiness 뱃지와 동기화)
     const cmdPresetBadge = document.getElementById('cmd-preset-badge');
-    if (cmdPresetBadge) cmdPresetBadge.textContent = matchedLabel || '커스텀';
+    if (cmdPresetBadge) {
+        cmdPresetBadge.textContent = matchedLabel || '--';
+        cmdPresetBadge.className = matchedClass
+            ? `font-mono text-[9px] border px-1.5 py-0.5 rounded transition-all ${matchedClass}`
+            : 'font-mono text-[9px] text-purple-300 bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.5 rounded';
+    }
 
     // [UI Overhaul] Preset Card 활성 하이라이트 (타임프레임 인식)
     let matchedPresetName = null;
