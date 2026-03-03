@@ -1675,12 +1675,23 @@ async function applyPreset(presetName) {
         input.dispatchEvent(new Event('input'));
     }
 
-    // 2. [Phase 14.1/14.3] Gate Bypass 체크박스: 프리셋에 포함된 경우 강제 동기화
+    // 2. [Phase 14.1/14.3] Gate Bypass 체크박스 동기화
+    // [Bugfix] bypass 3개는 프리셋에 명시 없으면 항상 false로 강제 초기화
+    // → 이전에 수동으로 켠 bypass가 다른 프리셋 적용 후에도 남아있는 문제 방지 (5m/15m 공통)
+    const _BYPASS_KEYS = new Set(['bypass_macro', 'bypass_disparity', 'bypass_indicator']);
     for (const bkey of ['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled', 'auto_preset_enabled']) {
-        if (!(bkey in config)) continue;
         const el = document.getElementById(`config-${bkey}`);
         if (!el) continue;
-        el.checked = (config[bkey] === 'true' || config[bkey] === true);
+        if (bkey in config) {
+            // 프리셋에 명시된 값 적용
+            el.checked = (config[bkey] === 'true' || config[bkey] === true);
+        } else if (_BYPASS_KEYS.has(bkey)) {
+            // bypass 3개: 프리셋에 없으면 항상 false 강제 초기화 (방어코드)
+            el.checked = false;
+        } else {
+            // exit_only_mode, shadow_hunting_enabled, auto_preset_enabled: 프리셋에 없으면 건드리지 않음
+            continue;
+        }
         el.dispatchEvent(new Event('input'));
     }
 
