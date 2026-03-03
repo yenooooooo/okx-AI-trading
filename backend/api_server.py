@@ -634,7 +634,7 @@ async def _sync_okx_trades(engine):
         gross_pnl = float(pos.get('pnl') or 0)
         fee = float(pos.get('fee') or 0)
         net_pnl = gross_pnl + fee  # fee는 음수
-        leverage = int(pos.get('lever') or 1)
+        leverage = int(float(pos.get('lever') or 1))
         amount = float(pos.get('closeTotalPos') or 0)
 
         # pnl_percent 계산
