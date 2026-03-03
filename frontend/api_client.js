@@ -1149,9 +1149,10 @@ const PRESET_CONFIGS = {
     factory_reset: {
         adx_threshold: 25.0, adx_max: 40.0, chop_threshold: 61.8,
         volume_surge_multiplier: 1.5, fee_margin: 0.0015,
-        hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.005,
-        trailing_stop_rate: 0.002, min_take_profit_rate: 0.008,
+        hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.003,  // [Fix] 15m 기준 0.003 (기존 0.005 오류)
+        trailing_stop_rate: 0.002, min_take_profit_rate: 0.01,        // [Fix] 15m 기준 1.0% (기존 0.8% 오류)
         cooldown_losses_trigger: 3, cooldown_duration_sec: 900,
+        disparity_threshold: 0.8,  // [Fix] 15m 기준 이격도 (TIMEFRAME_PRESETS 동기화)
     },
     // [Phase 14.3] 초단타 광기 모드 — 모든 방어 관문 해제 + 틱 단위 익절
     // [Phase 18.1] risk_per_trade / leverage 는 시드 보호 설정으로 프리셋에서 완전 제거 (PROTECTED_KEYS)
@@ -1214,47 +1215,55 @@ const PRESET_TF_OVERLAY = {
             trailing_stop_rate: 0.002, min_take_profit_rate: 0.005,
             adx_threshold: 33.0, chop_threshold: 50.0,
             volume_surge_multiplier: 2.2, cooldown_duration_sec: 600,
+            disparity_threshold: 1.0,  // [Fix] 5m: 15m(0.8%) 대비 노이즈 허용치 확대
         },
         trend_rider: {
             hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.003,
             trailing_stop_rate: 0.0025, min_take_profit_rate: 0.005,
             adx_threshold: 28.0, chop_threshold: 53.0,
             volume_surge_multiplier: 1.5, cooldown_duration_sec: 300,
+            disparity_threshold: 1.0,  // [Fix] 5m: 15m(0.8%) 대비 노이즈 허용치 확대
         },
         scalper: {
             hard_stop_loss_rate: 0.002, trailing_stop_activation: 0.0015,
             trailing_stop_rate: 0.0015, min_take_profit_rate: 0.003,
             adx_threshold: 22.0, chop_threshold: 60.0,
             volume_surge_multiplier: 1.4, cooldown_duration_sec: 180,
+            disparity_threshold: 1.0,  // [Fix] 5m: 15m(0.8%) 대비 노이즈 허용치 확대
         },
         iron_dome: {
             hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.003,
             trailing_stop_rate: 0.0015, min_take_profit_rate: 0.004,
             adx_threshold: 30.0, chop_threshold: 48.0,
             volume_surge_multiplier: 2.8, cooldown_duration_sec: 1800,
+            disparity_threshold: 1.0,  // [Fix] 5m: 15m(0.8%) 대비 노이즈 허용치 확대
         },
         factory_reset: {
             hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.002,
             trailing_stop_rate: 0.0015, min_take_profit_rate: 0.005,
             adx_threshold: 28.0, chop_threshold: 55.0,
             volume_surge_multiplier: 1.8, cooldown_duration_sec: 300,
+            disparity_threshold: 1.0,  // [Fix] 5m: 15m(0.8%) 대비 노이즈 허용치 확대
         },
         frenzy: {
             hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.002,
             trailing_stop_rate: 0.0015, min_take_profit_rate: 0.003,
             chop_threshold: 55.0, cooldown_duration_sec: 180,
+            // bypass_disparity: 'true' 상속 → disparity_threshold 무효 (오버라이드 불필요)
         },
         micro_seed: {
             hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.005,
             trailing_stop_rate: 0.003, min_take_profit_rate: 0.006,
             adx_threshold: 30.0, chop_threshold: 50.0,
             volume_surge_multiplier: 2.0, cooldown_duration_sec: 900,
+            disparity_threshold: 1.0,  // [Fix] 5m: 15m(0.8%) 대비 노이즈 허용치 확대
         },
         scalp_context: {
             hard_stop_loss_rate: 0.002, trailing_stop_activation: 0.0015,
             trailing_stop_rate: 0.0015, min_take_profit_rate: 0.003,
             adx_threshold: 22.0, volume_surge_multiplier: 1.4,
             cooldown_duration_sec: 300,
+            // bypass_disparity: 'true' 상속 → disparity_threshold 무효 (오버라이드 불필요)
         },
     },
 };
@@ -1323,6 +1332,13 @@ async function syncConfig(symbol = null) {
         const url = symbol ? `${API_URL}/config?symbol=${encodeURIComponent(symbol)}` : `${API_URL}/config`;
         const response = await fetch(url);
         const configs = await response.json();
+        // [방어막] 튜닝 모달이 열려있는 상태에서 주기적 syncConfig가 실행되면
+        // 사용자가 입력 중인 값을 덮어쓰지 않도록 TUNING_INPUT_MAP 업데이트를 건너뜀
+        // (openTuningModal에서 명시적으로 호출된 syncConfig는 symbol이 있으므로 항상 통과)
+        const _tuningModal = document.getElementById('tuning-modal');
+        const _isTuningOpen = _tuningModal && !_tuningModal.classList.contains('hidden');
+        const _isPeriodicCall = (symbol === null);
+        const _skipTuningInputs = _isTuningOpen && _isPeriodicCall;
         for (const [key, val] of Object.entries(configs)) {
             if (key === 'risk_per_trade') {
                 const tuningInput = document.getElementById('config-risk_per_trade');
@@ -1414,16 +1430,18 @@ async function syncConfig(symbol = null) {
                 if (toggle) toggle.checked = enabled;
                 applyShadowModeVisuals(enabled);
             } else if (key in TUNING_INPUT_MAP) {
+                // [방어막] 모달 열려있고 주기적 호출이면 입력창 업데이트 건너뜀 (사용자 입력 보호)
+                if (_skipTuningInputs) continue;
                 const { id, parse } = TUNING_INPUT_MAP[key];
                 const input = document.getElementById(id);
-                if (input) input.value = parse(val);
-            } else if (key === 'disparity_threshold') {
-                // [Phase 14.2] 이격도 슬라이더 + 표시 스팬 동시 갱신
-                const slider = document.getElementById('config-disparity_threshold');
-                const span = document.getElementById('val-disparity');
-                const v = parseFloat(val);
-                if (slider) slider.value = v;
-                if (span) span.textContent = v.toFixed(1) + '%';
+                if (input) {
+                    input.value = parse(val);
+                    // disparity_threshold 슬라이더: 표시 스팬도 동시 갱신 (dead code 제거 후 통합)
+                    if (key === 'disparity_threshold') {
+                        const span = document.getElementById('val-disparity');
+                        if (span) span.textContent = parseFloat(val).toFixed(1) + '%';
+                    }
+                }
             } else if (['bypass_macro', 'bypass_disparity', 'bypass_indicator', 'exit_only_mode', 'shadow_hunting_enabled', 'auto_preset_enabled'].includes(key)) {
                 // [Phase 14.1] Gate Bypass 체크박스 동기화 + [Phase 23] Shadow Hunting + [Phase 25] Adaptive Shield
                 const el = document.getElementById(`config-${key}`);
@@ -3253,7 +3271,7 @@ async function initializeApp() {
     setInterval(syncChart, 5000);
     setInterval(syncStats, 5000);
     setInterval(updateLogs, 3000);
-    setInterval(syncConfig, 30000);
+    setInterval(() => syncConfig(currentSymbol), 30000);  // [방어막] 심볼별 설정 유지 (GLOBAL 덮어쓰기 방지)
     setInterval(syncSystemHealth, 5000);
     setInterval(fetchAndRenderHeatmap, 60000);
     setInterval(fetchLiveTickers, 5000);

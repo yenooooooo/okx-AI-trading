@@ -291,8 +291,10 @@ TIMEFRAME_PRESETS = {
         'trailing_stop_rate': '0.0015',
         'min_take_profit_rate': '0.005',
         'adx_threshold': '28.0',
+        'adx_max': '45.0',          # [5m] 단기 추세 과열 기준 완화 (5m ADX 스파이크 허용)
         'chop_threshold': '55.0',
         'volume_surge_multiplier': '1.8',
+        'disparity_threshold': '1.0',  # [5m] 이격도 허용 범위 확대 (단기 노이즈 대응)
         'cooldown_duration_sec': '300',
     },
     '15m': {
@@ -301,8 +303,10 @@ TIMEFRAME_PRESETS = {
         'trailing_stop_rate': '0.002',
         'min_take_profit_rate': '0.01',
         'adx_threshold': '25.0',
+        'adx_max': '40.0',          # [15m] 표준 과열 기준
         'chop_threshold': '61.8',
         'volume_surge_multiplier': '1.5',
+        'disparity_threshold': '0.8',  # [15m] 표준 이격도 허용 범위
         'cooldown_duration_sec': '900',
     },
 }
@@ -3481,7 +3485,12 @@ async def _apply_timeframe_presets(target_tf: str) -> bool:
         for key, value in preset.items():
             if hasattr(_active_strategy, key):
                 try:
-                    setattr(_active_strategy, key, float(value))
+                    # [방어막] disparity_threshold: DB는 %(0.8) 단위, strategy는 소수(0.008) 단위
+                    # setattr 즉시 반영 시 /100.0 변환 필수 — 미변환 시 1.0(100%) 오적용 방지
+                    if key == 'disparity_threshold':
+                        setattr(_active_strategy, key, float(value) / 100.0)
+                    else:
+                        setattr(_active_strategy, key, float(value))
                 except (ValueError, TypeError):
                     pass
     logger.info(f"[타임프레임 프리셋] {target_tf} 프리셋 적용 완료: {list(preset.keys())}")
