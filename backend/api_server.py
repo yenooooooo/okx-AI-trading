@@ -521,7 +521,7 @@ async def _margin_guard_bg_loop():
         try:
             if _engine and _engine.exchange and bot_global_state["balance"] > 0:
                 _mgbg_bal = bot_global_state["balance"]
-                _mgbg_safe = _mgbg_bal * 0.90
+                _mgbg_safe = _mgbg_bal * 0.50  # [Fix] micro_account_protection(50%) 기준과 통일 — 90%로 추천하면 50%에서 차단되는 불일치 해소
                 # [Bug Fix] active_target만 증거금 경고 — 비활성 심볼 텔레그램 스팸 방지
                 _mgbg_sym_conf = get_config('symbols')
                 _mgbg_active = _mgbg_sym_conf[0] if isinstance(_mgbg_sym_conf, list) and _mgbg_sym_conf else None
@@ -2313,7 +2313,7 @@ async def async_trading_loop():
                                     _log_trade_attempt(symbol, signal, "BLOCKED", "margin_insufficient")
                                     # [Margin Guard] 추천 레버리지 역산 + 텔레그램 알림 (5분 쿨다운)
                                     import math as _mg_math2
-                                    _mg_safe_bal = curr_bal * 0.90
+                                    _mg_safe_bal = curr_bal * 0.50  # [Fix] micro_account_protection(50%) 기준과 통일
                                     _mg_1x_margin = contract_size * current_price
                                     _mg_rec = min(100, _mg_math2.ceil(_mg_1x_margin / _mg_safe_bal)) if _mg_safe_bal > 0 else 100
                                     if _mg_rec > trade_leverage:
