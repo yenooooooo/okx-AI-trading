@@ -2288,6 +2288,21 @@ async def async_trading_loop():
                                     bot_global_state["logs"].append(_micro_msg)
                                     logger.warning(_micro_msg)
                                     _log_trade_attempt(symbol, signal, "BLOCKED", "micro_account_protection")
+                                    # [Margin Guard] 소액 방어에서도 추천 레버리지 역산 + 텔레그램 알림 (5분 쿨다운)
+                                    import math as _mg_math_micro
+                                    _mg_micro_safe_bal = curr_bal * 0.50
+                                    _mg_micro_1x_margin = contract_size * current_price
+                                    _mg_micro_rec = min(100, _mg_math_micro.ceil(_mg_micro_1x_margin / _mg_micro_safe_bal)) if _mg_micro_safe_bal > 0 else 100
+                                    if _mg_micro_rec > trade_leverage:
+                                        _mg_micro_alert_key = f"_margin_guard_last_alert_{symbol}"
+                                        _mg_micro_last = float(get_config(_mg_micro_alert_key) or 0)
+                                        if _time.time() - _mg_micro_last > 300:  # 5분 쿨다운
+                                            set_config(_mg_micro_alert_key, str(_time.time()))
+                                            try:
+                                                _mg_micro_tg = _tg_margin_guard(symbol, trade_leverage, _mg_micro_rec, curr_bal, _min_1_contract_margin)
+                                                send_telegram_sync(_mg_micro_tg)
+                                            except Exception:
+                                                pass  # 텔레그램 실패 시 매매 흐름 보호
                                     continue  # 이 심볼 진입 건너뛰기
 
                                 # [Phase 31] 증거금 사전 검증 — 거래소 거부(51008) 선제 차단
