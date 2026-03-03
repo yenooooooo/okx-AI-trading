@@ -3249,6 +3249,8 @@ async function initializeApp() {
 
     // [Phase 18.2] 부팅 시퀀스 교정: 백엔드에서 현재 타겟(Symbol)을 가장 먼저 알아옴
     await syncConfig();
+    // [Fix] GLOBAL 호출로 currentSymbol 확정 후, 심볼 전용 설정 재로드 (leverage 등 GLOBAL↔심볼 불일치 해소)
+    if (currentSymbol) await syncConfig(currentSymbol);
 
     // 이제 currentSymbol이 비트코인이 아닌 '실제 타겟'으로 맞춰졌으므로 차트와 소켓 연결
     initPriceWebSocket();
