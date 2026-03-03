@@ -4272,7 +4272,7 @@ async function applyRecommendedLeverage() {
         const cmdWarn = document.getElementById('cmd-margin-warn');
         if (cmdWarn) cmdWarn.classList.add('hidden');
 
-        await syncConfig();
+        await syncConfig(_applyActiveSym);  // [Fix] 심볼 전용 leverage가 GLOBAL로 덮어쓰이는 버그 수정
     } catch (err) {
         showToast('Margin Guard 오류', err.message, 'ERROR');
     }
