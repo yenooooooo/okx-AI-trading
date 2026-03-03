@@ -1332,21 +1332,42 @@ async def async_trading_loop():
                         "macro":     {"value": round((current_price - float(macro_ema_200)) / float(macro_ema_200) * 100, 2) if macro_ema_200 and current_price else 0.0, "gauge": _g_macro},
                     }
 
-                    # ── [확정봉 기반] 진입 관문 체크리스트 + 봇 혼잣말 (새 봉 완성 시만 갱신) ──
+                    # ── [확정봉 기반] 진입 관문 체크리스트 (새 봉: 지표 캐시 갱신 / 매 루프: 설정 반영 즉시 재판정) ──
                     if _new_candle:
                         import datetime as _dt
                         _row       = _confirmed_row
-                        _rsi_v     = float(latest_rsi)  if not pd.isna(latest_rsi)  else 50.0
-                        _adx_v     = float(latest_adx)  if not pd.isna(latest_adx)  else 0.0
-                        _macd_v    = float(latest_macd) if not pd.isna(latest_macd) else 0.0
-                        _msig_v    = float(_row['macd_signal']) if 'macd_signal' in _row.index and not pd.isna(_row['macd_signal']) else 0.0
-                        _chop_v    = float(_row['chop'])     if 'chop'     in _row.index and not pd.isna(_row['chop'])     else 50.0
-                        _vol_v     = float(_row['volume'])   if not pd.isna(_row['volume'])   else 0.0
-                        _vsma_v    = float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0
-                        _ema20_v   = float(_row['ema_20'])   if 'ema_20'   in _row.index and not pd.isna(_row['ema_20'])   else (candle_close or 1)
+                        # 확정봉 지표 캐시 — 봉이 바뀔 때만 갱신 (지표값 불변)
+                        _gate_cache = {
+                            "rsi_v":     float(latest_rsi)  if not pd.isna(latest_rsi)  else 50.0,
+                            "adx_v":     float(latest_adx)  if not pd.isna(latest_adx)  else 0.0,
+                            "macd_v":    float(latest_macd) if not pd.isna(latest_macd) else 0.0,
+                            "msig_v":    float(_row['macd_signal']) if 'macd_signal' in _row.index and not pd.isna(_row['macd_signal']) else 0.0,
+                            "chop_v":    float(_row['chop'])     if 'chop'     in _row.index and not pd.isna(_row['chop'])     else 50.0,
+                            "vol_v":     float(_row['volume'])   if not pd.isna(_row['volume'])   else 0.0,
+                            "vsma_v":    float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0,
+                            "ema20_v":   float(_row['ema_20'])   if 'ema_20'   in _row.index and not pd.isna(_row['ema_20'])   else (candle_close or 1),
+                            "candle_close": candle_close,
+                            "macro_ema_200": float(macro_ema_200) if macro_ema_200 is not None else None,
+                        }
+                        bot_global_state["symbols"][symbol]["_gate_cache"] = _gate_cache
+
+                    # [Fix] 매 루프: 캐시된 지표 + 최신 설정(bypass/threshold)으로 gates 즉시 재판정
+                    # → bypass 변경 시 다음 봉 대기 없이 Entry Readiness 패널 즉시 갱신
+                    _gc = bot_global_state["symbols"][symbol].get("_gate_cache")
+                    if _gc:
+                        _rsi_v    = _gc["rsi_v"]
+                        _adx_v    = _gc["adx_v"]
+                        _macd_v   = _gc["macd_v"]
+                        _msig_v   = _gc["msig_v"]
+                        _chop_v   = _gc["chop_v"]
+                        _vol_v    = _gc["vol_v"]
+                        _vsma_v   = _gc["vsma_v"]
+                        _ema20_v  = _gc["ema20_v"]
+                        _gc_close = _gc["candle_close"]
+                        _gc_macro = _gc["macro_ema_200"]
 
                         _vol_ratio  = float(_vol_v / _vsma_v) if _vsma_v > 0 else 0.0
-                        _disparity  = float(abs((candle_close - _ema20_v) / _ema20_v) * 100) if candle_close and _ema20_v else 0.0
+                        _disparity  = float(abs((_gc_close - _ema20_v) / _ema20_v) * 100) if _gc_close and _ema20_v else 0.0
                         _long_macd  = bool(_macd_v > _msig_v)
                         _short_macd = bool(_macd_v < _msig_v)
                         _long_rsi   = bool(30 <= _rsi_v <= 55)
@@ -1354,26 +1375,27 @@ async def async_trading_loop():
                         _mr_ok      = bool((_long_macd and _long_rsi) or (_short_macd and _short_rsi))
                         _macro_ok   = True
                         _macro_lbl  = "N/A"
-                        if macro_ema_200 is not None and candle_close is not None:
-                            _macro_ok  = bool(candle_close > float(macro_ema_200))
+                        if _gc_macro is not None and _gc_close is not None:
+                            _macro_ok  = bool(_gc_close > _gc_macro)
                             _macro_lbl = "상승추세 ↑" if _macro_ok else "하락추세 ↓"
 
-                        # 동적 임계값 — strategy_instance 에서 직접 바인딩 (하드코딩 제거)
+                        # 동적 임계값 — strategy_instance 에서 직접 바인딩 (최신 설정 반영)
                         _adx_min  = strategy_instance.adx_threshold
                         _adx_max  = strategy_instance.adx_max
                         _chop_max = strategy_instance.chop_threshold
                         _vol_mul  = strategy_instance.volume_surge_multiplier
+                        _disp_th  = strategy_instance.disparity_threshold * 100  # 비율→% 변환
 
                         _bypass_disp = bool(strategy_instance.bypass_disparity)
                         _bypass_ind  = bool(strategy_instance.bypass_indicator)
                         _bypass_mac  = bool(strategy_instance.bypass_macro)
                         _gates = {
-                            "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max),     "value": f"{_adx_v:.1f}",                                                   "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
-                            "chop":      {"pass": bool(_chop_v < _chop_max),                "value": f"{_chop_v:.1f}",                                                  "target": f"< {_chop_max:.1f}"},
-                            "volume":    {"pass": bool(_vol_ratio >= _vol_mul),             "value": f"{_vol_ratio:.2f}x",                                              "target": f"≥ {_vol_mul:.1f}x"},
-                            "disparity": {"pass": bool(_bypass_disp or _disparity < 0.8),  "value": f"{_disparity:.2f}%" + (" [우회]" if _bypass_disp else ""),        "target": "< 0.8%"},
-                            "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),            "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "크로스+구간"},
-                            "macro":     {"pass": bool(_bypass_mac  or _macro_ok),         "value": _macro_lbl             + (" [우회]" if _bypass_mac  else ""),       "target": "EMA200"},
+                            "adx":       {"pass": bool(_adx_min <= _adx_v <= _adx_max),           "value": f"{_adx_v:.1f}",                                                   "target": f"{_adx_min:.0f}~{_adx_max:.0f}"},
+                            "chop":      {"pass": bool(_chop_v < _chop_max),                      "value": f"{_chop_v:.1f}",                                                  "target": f"< {_chop_max:.1f}"},
+                            "volume":    {"pass": bool(_vol_ratio >= _vol_mul),                   "value": f"{_vol_ratio:.2f}x",                                              "target": f"≥ {_vol_mul:.1f}x"},
+                            "disparity": {"pass": bool(_bypass_disp or _disparity < _disp_th),   "value": f"{_disparity:.2f}%" + (" [우회]" if _bypass_disp else ""),        "target": f"< {_disp_th:.1f}%"},
+                            "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),                  "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "크로스+구간"},
+                            "macro":     {"pass": bool(_bypass_mac  or _macro_ok),               "value": _macro_lbl             + (" [우회]" if _bypass_mac  else ""),       "target": "EMA200"},
                         }
                         _passed = int(sum(1 for g in _gates.values() if g["pass"]))
                         ai_brain_state["symbols"][symbol]["gates"]        = _gates
@@ -1406,7 +1428,9 @@ async def async_trading_loop():
                             _sf_st["last_alert_time"] = _sf_now
                         _sf_st["was_fit"] = _sf_is_fit
 
-                        # 봇 혼잣말 — 확정봉 시각 기준 1회 생성
+                    # 봇 혼잣말 — 확정봉 시각 기준 1회 생성 (새 봉에서만)
+                    if _new_candle and _gc:
+                        import datetime as _dt
                         _KST = _dt.timezone(_dt.timedelta(hours=9))
                         _candle_dt = _dt.datetime.fromtimestamp(_confirmed_ts / 1000, tz=_KST)
                         _ts = _candle_dt.strftime("%H:%M") + "봉"
@@ -1424,7 +1448,7 @@ async def async_trading_loop():
                                 _mono = f"[{_ts}] ADX {_adx_v:.1f} — 추세 끝물이야. {_adx_max:.0f} 아래로 식을 때까지 관망 중... ({_passed}/6)"
                         elif _chop_v >= _chop_max:
                             _mono = f"[{_ts}] CHOP {_chop_v:.1f} — 횡보장이야, 톱니바퀴 구간. {_chop_max:.1f} 아래로 떨어질 때까지 쉬는 중... ({_passed}/6)"
-                        elif (not _bypass_disp) and _disparity >= 0.8:
+                        elif (not _bypass_disp) and _disparity >= _disp_th:
                             _mono = f"[{_ts}] 이격도 {_disparity:.2f}% — 이미 너무 달렸어. EMA20에 붙을 때까지 기다리는 중... ({_passed}/6)"
                         elif _vol_ratio < _vol_mul:
                             _mono = f"[{_ts}] 거래량 {_vol_ratio:.2f}x — 아직 안 터졌어. {_vol_mul:.1f}x 이상 폭발 대기 중... ({_passed}/6)"
