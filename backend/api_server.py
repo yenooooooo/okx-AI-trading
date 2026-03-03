@@ -1698,8 +1698,9 @@ async def async_trading_loop():
                                 # [v2.2 DRY] evaluate_risk_management Tuple 언패킹 — 이중 계산 완전 제거
                                 # (action, real_sl, trailing_active, trailing_target)를 단일 소스(strategy.py)에서만 계산
                                 partial_tp_executed = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
+                                _pos_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                 action, _real_sl, _trailing_active, _trailing_target = strategy_instance.evaluate_risk_management(
-                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed
+                                    entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed, _pos_contracts
                                 )
 
                                 bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
@@ -1717,7 +1718,11 @@ async def async_trading_loop():
                                     if _cur_contracts > 1:
                                         bot_global_state["symbols"][symbol]["take_profit_price"] = f"🎯 1차 타겟: ${_first_target:,.2f} (50% 거래소 지정가)"
                                     else:
-                                        bot_global_state["symbols"][symbol]["take_profit_price"] = f"🔹 1차 타겟: ${_first_target:,.2f} (1계약 전량 지정가)"
+                                        # [1계약 트레일링 전용] TP 미등록 → 트레일링 스탑 대기 표시
+                                        if _trailing_active:
+                                            bot_global_state["symbols"][symbol]["take_profit_price"] = f"🔥 트레일링 추적 중: ${_trailing_target:,.2f}"
+                                        else:
+                                            bot_global_state["symbols"][symbol]["take_profit_price"] = f"⏳ 트레일링 대기 | 활성화 목표: ${_first_target:,.2f}"
                                 else:
                                     # 1차 익절 완료 후 트레일링 스탑 상태
                                     _t_target = bot_global_state["symbols"][symbol].get("trailing_target", 0.0)
@@ -2418,38 +2423,39 @@ async def async_trading_loop():
                                             _sl_rate = strategy_instance.hard_stop_loss_rate
                                             _init_sl = round(_entry_p * (1 - _sl_rate), 4) if signal == "LONG" else round(_entry_p * (1 + _sl_rate), 4)
 
-                                            # [TP Split] 멀티계약: TP 50% / 1계약: TP 100%
+                                            # [TP Split] 멀티계약: TP 50% / 1계약: TP 미등록(트레일링 전용)
                                             _full_int = int(_amt)
-                                            if _full_int > 1:
-                                                _tp_amt = max(1, _full_int // 2)
-                                            else:
-                                                _tp_amt = _full_int  # 1계약 전량
 
                                             # CCXT 규격에 맞춘 Reduce-Only 파라미터
-                                            _params_tp = {"reduceOnly": True}
                                             _params_sl = {"reduceOnly": True, "stopLossPrice": _init_sl}
 
-                                            # Limit TP (지정가 익절) 전송 — [TP Split] _tp_amt 사용
-                                            tp_order = await asyncio.to_thread(
-                                                engine_api.exchange.create_order,
-                                                symbol, 'limit', _close_side, _tp_amt, _init_tp, _params_tp
-                                            )
-
-                                            # Stop-Market SL (조건부 시장가 손절) 전송 — 전체 수량 유지
+                                            # Stop-Market SL (조건부 시장가 손절) 전송 — 전체 수량 (1계약/다계약 공통)
                                             sl_order = await asyncio.to_thread(
                                                 engine_api.exchange.create_order,
                                                 symbol, 'market', _close_side, _amt, None, _params_sl
                                             )
-
-                                            # 뇌 구조(기억 장치)에 영수증 번호와 가격 각인
-                                            bot_global_state["symbols"][symbol]["active_tp_order_id"] = tp_order['id']
                                             bot_global_state["symbols"][symbol]["active_sl_order_id"] = sl_order['id']
-                                            bot_global_state["symbols"][symbol]["last_placed_tp_price"] = _init_tp
                                             bot_global_state["symbols"][symbol]["last_placed_sl_price"] = _init_sl
-                                            bot_global_state["symbols"][symbol]["tp_order_amount"] = _tp_amt
 
-                                            _tp_pct_label = "50%" if _full_int > 1 else "100%"
-                                            logger.info(f"[{symbol}] 🕸️ 거래소 초기 방어막 전송 완료 | TP: {_init_tp:.4f} ({_tp_pct_label}, {_tp_amt}계약) / SL: {_init_sl:.4f}")
+                                            if _full_int > 1:
+                                                # [멀티계약] TP 50% 지정가 등록 — 기존 방식 유지
+                                                _tp_amt = max(1, _full_int // 2)
+                                                _params_tp = {"reduceOnly": True}
+                                                tp_order = await asyncio.to_thread(
+                                                    engine_api.exchange.create_order,
+                                                    symbol, 'limit', _close_side, _tp_amt, _init_tp, _params_tp
+                                                )
+                                                bot_global_state["symbols"][symbol]["active_tp_order_id"] = tp_order['id']
+                                                bot_global_state["symbols"][symbol]["last_placed_tp_price"] = _init_tp
+                                                bot_global_state["symbols"][symbol]["tp_order_amount"] = _tp_amt
+                                                logger.info(f"[{symbol}] 🕸️ 거래소 초기 방어막 전송 완료 | TP: {_init_tp:.4f} (50%, {_tp_amt}계약) / SL: {_init_sl:.4f}")
+                                            else:
+                                                # [1계약 전용] TP 지정가 미등록 → 트레일링 스탑으로만 익절
+                                                # R:R 0.7:1 문제 해결: SL만 거래소에 걸고, 수익은 트레일링이 극대화
+                                                bot_global_state["symbols"][symbol]["active_tp_order_id"] = None
+                                                bot_global_state["symbols"][symbol]["last_placed_tp_price"] = 0.0
+                                                bot_global_state["symbols"][symbol]["tp_order_amount"] = 0
+                                                logger.info(f"[{symbol}] 🕸️ 1계약 트레일링 전용 모드 | TP 미등록 (트레일링 스탑으로 익절) / SL: {_init_sl:.4f}")
                                         except Exception as limit_err:
                                             logger.error(f"[{symbol}] 🚨 초기 방어막(Limit/Stop) 전송 실패. 거래소 수동 확인 요망: {limit_err}")
 

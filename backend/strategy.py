@@ -250,22 +250,23 @@ class TradingStrategy:
 
         return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} / ADX {adx_val:.1f} - 타점 탐색 중", None
 
-    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False):
+    def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False, contracts=1):
         """
         파산 방지 핵심 모듈 — 하드코딩 제거 및 UI 튜닝 파라미터(%) 직결 완료
         반환값: (action, effective_sl, trailing_active, trailing_target)
         [Phase 26] effective_sl = max(hard_sl, trailing_target) 병합으로 거래소 SL이 트레일링을 자동 추적
+        [Phase TF] 1계약 조기 트레일링: 본전 방어 후 즉시 SL이 수익을 추적 (빈틈 제거)
         """
+        _is_single_contract = int(contracts) <= 1
+
         # ── 손절가 및 수익/낙폭 계산 ──
         if position_side == "LONG":
             profit_usdt = current_price - entry_price
             drawdown_usdt = highest_price - current_price
-            # [수정] ATR 하드코딩 제거 -> UI 설정된 hard_stop_loss_rate(%) 반영
             hard_sl_price = (entry_price + (entry_price * 0.001)) if partial_tp_executed else (entry_price - (entry_price * self.hard_stop_loss_rate))
         elif position_side == "SHORT":
             profit_usdt = entry_price - current_price
             drawdown_usdt = current_price - highest_price
-            # [수정] ATR 하드코딩 제거 -> UI 설정된 hard_stop_loss_rate(%) 반영
             hard_sl_price = (entry_price - (entry_price * 0.001)) if partial_tp_executed else (entry_price + (entry_price * self.hard_stop_loss_rate))
         else:
             return "KEEP", 0.0, False, 0.0
@@ -277,13 +278,11 @@ class TradingStrategy:
             return "STOP_LOSS", hard_sl_price, False, 0.0
 
         # ── 2. 트레일링 스탑 (UI 변수 100% 직결) ──
-        # 발동 조건: 사용자가 설정한 trailing_stop_activation (%) 이상의 수익 발생 시
         activation_threshold_usdt = entry_price * self.trailing_stop_activation
         trailing_active = profit_usdt >= activation_threshold_usdt
         trailing_target = 0.0
 
         if trailing_active:
-            # 추적 낙폭 거리: 고점/저점 대비 trailing_stop_rate (%)
             trailing_distance_usdt = highest_price * self.trailing_stop_rate
 
             if position_side == "LONG":
@@ -291,21 +290,22 @@ class TradingStrategy:
             else:
                 trailing_target = highest_price + trailing_distance_usdt
 
-            # [Phase 24] 최소 익절 목표 가드 — min_take_profit_rate 미달 시 트레일링 EXIT 차단
-            # 트레일링 추적은 하되, 수익률이 최소 목표에 도달하지 못했으면 청산하지 않음 (R:R 강제)
             profit_rate = profit_usdt / entry_price if entry_price > 0 else 0.0
             if drawdown_usdt >= trailing_distance_usdt:
-                if profit_rate >= self.min_take_profit_rate:
+                # [Phase TF] 1계약 조기 트레일링: 본전 방어 발동 후에는 min TP 가드 없이 즉시 EXIT 허용
+                # 다계약은 기존 로직 유지 (min_take_profit_rate 충족 필요)
+                if _is_single_contract and partial_tp_executed:
                     return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
-                # min TP 미달: 트레일링 추적은 유지하되 EXIT는 보류 (수익이 더 성장할 기회 제공)
+                elif profit_rate >= self.min_take_profit_rate:
+                    return "TRAILING_STOP_EXIT", hard_sl_price, True, trailing_target
 
         # ── 3. [Phase 26] effective_sl 병합: 트레일링 타겟을 거래소 SL에 반영 ──
-        # 트레일링 활성 + 최소 익절 조건 충족 시, SL을 트레일링 타겟으로 상향
-        # → 기존 SL 스마트 갱신 메커니즘이 자동으로 거래소 주문을 트레일링 위치로 이동
         effective_sl = hard_sl_price
         if trailing_active and trailing_target > 0:
             profit_rate = profit_usdt / entry_price if entry_price > 0 else 0.0
-            if profit_rate >= self.min_take_profit_rate:
+            # [Phase TF] 1계약 조기 트레일링: 본전 방어 후 즉시 SL이 트레일링 위치를 추적
+            _sl_upgrade_allowed = (_is_single_contract and partial_tp_executed) or (profit_rate >= self.min_take_profit_rate)
+            if _sl_upgrade_allowed:
                 if position_side == "LONG":
                     effective_sl = max(hard_sl_price, trailing_target)
                 else:
