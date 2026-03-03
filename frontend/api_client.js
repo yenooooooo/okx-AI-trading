@@ -434,8 +434,12 @@ async function syncBotStatus() {
             // pos-tp-expect는 trailing 상태에 맞게 유지
             const trailingActive = symbolData.trailing_active === true;
             const trailingTarget = parseFloat(symbolData.trailing_target || 0);
+            const posContracts = parseInt(symbolData.contracts || 1);
             if (trailingActive && trailingTarget > 0) {
                 updateText('pos-tp-expect', 'Trailing Active 🎯');
+            } else if (posContracts <= 1) {
+                // [Phase TF] 1계약: TP 미등록 → 트레일링 전용 모드 표시
+                updateText('pos-tp-expect', '트레일링 전용 모드 ⏳');
             } else {
                 updateText('pos-tp-expect', '1차 익절 대기 중 ⏳');
             }
