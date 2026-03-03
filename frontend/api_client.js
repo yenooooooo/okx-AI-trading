@@ -34,6 +34,77 @@ function parseTimeframeMs(tf) {
     return 900000; // fallback 15m
 }
 
+// ════════════ [Phase TF] 원클릭 타임프레임 전환 ════════════
+
+/**
+ * toggleTimeframe() — 5m ↔ 15m 원클릭 타임프레임 전환
+ * 포지션 보유 시 백엔드에서 차단, 확인 다이얼로그, 토스트 피드백
+ */
+async function toggleTimeframe() {
+    const current = window._currentTimeframe || '15m';
+    const target = current === '15m' ? '5m' : '15m';
+
+    const confirmed = confirm(
+        `타임프레임을 ${current} → ${target}으로 전환합니다.\n\n` +
+        `• 매매 파라미터가 ${target} 최적값으로 자동 조정됩니다.\n` +
+        `• 차트 및 게이트 필터가 즉시 새 타임프레임으로 전환됩니다.\n\n` +
+        `계속하시겠습니까?`
+    );
+    if (!confirmed) return;
+
+    const container = document.getElementById('tf-toggle-container');
+    if (container) container.classList.add('tf-switching');
+
+    try {
+        const res = await fetch(`${API_URL}/timeframe/switch?target_tf=${encodeURIComponent(target)}`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+
+        if (!data.success) {
+            showToast('타임프레임 전환 차단', data.message, 'ERROR');
+            return;
+        }
+
+        if (!data.changed) {
+            showToast('타임프레임', data.message, 'INFO');
+            return;
+        }
+
+        // 글로벌 캐시 즉시 갱신
+        window._currentTimeframe = target;
+        _applyTimeframeToggleUI(target);
+
+        // Deep sync: 차트 + 뇌 + 설정 동시 리프레시
+        await Promise.all([syncChart(), syncBrain(), syncConfig(currentSymbol)]);
+
+        showToast(
+            '타임프레임 전환 완료',
+            `${data.previous} → ${data.current} | 프리셋 자동 적용`,
+            'SUCCESS'
+        );
+    } catch (err) {
+        console.error('[ANTIGRAVITY] toggleTimeframe 실패:', err);
+        showToast('타임프레임 전환 실패', err.message || '서버 통신 오류', 'ERROR');
+    } finally {
+        if (container) container.classList.remove('tf-switching');
+    }
+}
+
+/**
+ * _applyTimeframeToggleUI(tf) — 토글 버튼 시각 상태 즉시 갱신
+ */
+function _applyTimeframeToggleUI(tf) {
+    const btn5m = document.getElementById('tf-btn-5m');
+    const btn15m = document.getElementById('tf-btn-15m');
+    if (btn5m) {
+        btn5m.classList.toggle('tf-active', tf === '5m');
+    }
+    if (btn15m) {
+        btn15m.classList.toggle('tf-active', tf === '15m');
+    }
+}
+
 // --- OKX 수동 매매 싱크 ---
 /** OKX 수동 매매 기록을 대시보드로 동기화 */
 async function syncOkxTrades() {
@@ -487,6 +558,18 @@ async function syncBotStatus() {
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-green hover:bg-neon-green hover:text-navy-900 text-neon-green text-sm font-bold rounded transition-all font-mono tracking-widest';
         }
 
+        // 3.5 [Phase TF] 타임프레임 토글 포지션 기반 활성/비활성
+        const tfContainer = document.getElementById('tf-toggle-container');
+        if (tfContainer) {
+            const anyPositionOpen = Object.values(data.symbols || {}).some(
+                s => s.position && s.position !== 'NONE'
+            );
+            tfContainer.classList.toggle('tf-disabled', anyPositionOpen);
+            tfContainer.title = anyPositionOpen
+                ? '포지션 보유 중 — 타임프레임 변경 불가'
+                : '클릭하여 타임프레임 전환 (5m ↔ 15m)';
+        }
+
         // 4. Engine Live Status Badge
         if (data.engine_status) {
             const badgeEl = document.getElementById('engine-live-badge');
@@ -614,6 +697,7 @@ async function syncBrain() {
         if (brainState.confirmed_candle_ts) {
             window._confirmedCandleTs = brainState.confirmed_candle_ts;
             window._currentTimeframe = brainState.timeframe || '15m';
+            _applyTimeframeToggleUI(window._currentTimeframe);
             // 확정봉 시각 라벨 표시 — 캔들 종료 시각 = 시작 + 타임프레임
             // 예: 02:15 시작 + 15분 = "02:30 봉 기준" (02:30에 확정된 데이터 기준)
             const tfMs = parseTimeframeMs(window._currentTimeframe);
@@ -932,12 +1016,14 @@ function updateActiveTuningBadge() {
     let matchedLabel = null;
     let matchedClass = null;
 
-    for (const [presetName, presetVals] of Object.entries(PRESET_CONFIGS)) {
+    for (const [presetName] of Object.entries(PRESET_CONFIGS)) {
+        const effectivePreset = _getEffectivePreset(presetName);
+        if (!effectivePreset) continue;
         const keys = Object.keys(TUNING_INPUT_MAP);
         const isMatch = keys.every(key => {
             const { parse } = TUNING_INPUT_MAP[key];
             const cur = currentVals[key];
-            const pre = presetVals[key];
+            const pre = effectivePreset[key];
             if (pre === undefined) return true; // 프리셋에 없는 키는 무시
             // 정수형(parseInt) 비교: 정수 비교, 부동소수점(parseFloat): 소수 오차 허용
             if (parse === parseInt) return Math.round(cur) === Math.round(pre);
@@ -961,14 +1047,16 @@ function updateActiveTuningBadge() {
     const cmdPresetBadge = document.getElementById('cmd-preset-badge');
     if (cmdPresetBadge) cmdPresetBadge.textContent = matchedLabel || '커스텀';
 
-    // [UI Overhaul] Preset Card 활성 하이라이트
+    // [UI Overhaul] Preset Card 활성 하이라이트 (타임프레임 인식)
     let matchedPresetName = null;
     for (const [presetName] of Object.entries(PRESET_CONFIGS)) {
+        const effectivePreset2 = _getEffectivePreset(presetName);
+        if (!effectivePreset2) continue;
         const keys = Object.keys(TUNING_INPUT_MAP);
         const isMatch = keys.every(key => {
             const { parse } = TUNING_INPUT_MAP[key];
             const cur = currentVals[key];
-            const pre = PRESET_CONFIGS[presetName][key];
+            const pre = effectivePreset2[key];
             if (pre === undefined) return true;
             if (parse === parseInt) return Math.round(cur) === Math.round(pre);
             return Math.abs(cur - pre) < 0.00001;
@@ -1077,6 +1165,75 @@ const PRESET_CONFIGS = {
         bypass_indicator: 'true',        // RSI 해제 (빠른 진입)
     },
 };
+
+// ════════════ [Phase TF] 타임프레임별 프리셋 오버레이 ════════════
+// 5분봉 전환 시 각 프리셋의 SL/TP/필터 값을 5분봉에 최적화된 값으로 오버라이드
+// 15분봉은 PRESET_CONFIGS 원본값 그대로 사용 (기본값)
+const PRESET_TF_OVERLAY = {
+    '5m': {
+        sniper: {
+            hard_stop_loss_rate: 0.004, trailing_stop_activation: 0.003,
+            trailing_stop_rate: 0.002, min_take_profit_rate: 0.005,
+            adx_threshold: 33.0, chop_threshold: 50.0,
+            volume_surge_multiplier: 2.2, cooldown_duration_sec: 600,
+        },
+        trend_rider: {
+            hard_stop_loss_rate: 0.005, trailing_stop_activation: 0.003,
+            trailing_stop_rate: 0.0025, min_take_profit_rate: 0.005,
+            adx_threshold: 28.0, chop_threshold: 53.0,
+            volume_surge_multiplier: 1.5, cooldown_duration_sec: 300,
+        },
+        scalper: {
+            hard_stop_loss_rate: 0.002, trailing_stop_activation: 0.0015,
+            trailing_stop_rate: 0.0015, min_take_profit_rate: 0.003,
+            adx_threshold: 22.0, chop_threshold: 60.0,
+            volume_surge_multiplier: 1.4, cooldown_duration_sec: 180,
+        },
+        iron_dome: {
+            hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.003,
+            trailing_stop_rate: 0.0015, min_take_profit_rate: 0.004,
+            adx_threshold: 30.0, chop_threshold: 48.0,
+            volume_surge_multiplier: 2.8, cooldown_duration_sec: 1800,
+        },
+        factory_reset: {
+            hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.002,
+            trailing_stop_rate: 0.0015, min_take_profit_rate: 0.005,
+            adx_threshold: 28.0, chop_threshold: 55.0,
+            volume_surge_multiplier: 1.8, cooldown_duration_sec: 300,
+        },
+        frenzy: {
+            hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.002,
+            trailing_stop_rate: 0.0015, min_take_profit_rate: 0.003,
+            chop_threshold: 55.0, cooldown_duration_sec: 180,
+        },
+        micro_seed: {
+            hard_stop_loss_rate: 0.003, trailing_stop_activation: 0.005,
+            trailing_stop_rate: 0.003, min_take_profit_rate: 0.006,
+            adx_threshold: 30.0, chop_threshold: 50.0,
+            volume_surge_multiplier: 2.0, cooldown_duration_sec: 900,
+        },
+        scalp_context: {
+            hard_stop_loss_rate: 0.002, trailing_stop_activation: 0.0015,
+            trailing_stop_rate: 0.0015, min_take_profit_rate: 0.003,
+            adx_threshold: 22.0, volume_surge_multiplier: 1.4,
+            cooldown_duration_sec: 300,
+        },
+    },
+};
+
+/**
+ * _getEffectivePreset(presetName) — 현재 타임프레임에 맞는 프리셋 값 반환
+ * 15m: PRESET_CONFIGS 원본 그대로
+ * 5m: PRESET_CONFIGS + PRESET_TF_OVERLAY['5m'] 머지 (오버레이 우선)
+ */
+function _getEffectivePreset(presetName) {
+    const base = PRESET_CONFIGS[presetName];
+    if (!base) return null;
+    const tf = window._currentTimeframe || '15m';
+    const overlay = (PRESET_TF_OVERLAY[tf] || {})[presetName];
+    if (!overlay) return { ...base };
+    return { ...base, ...overlay };
+}
 
 // 리스크 온도계 — risk_per_trade 입력값에 따른 실시간 위험도 안내
 function updateRiskThermometer(value) {
@@ -1234,9 +1391,9 @@ async function syncConfig(symbol = null) {
                 const el = document.getElementById(`config-${key}`);
                 if (el) el.checked = (val === true || val === 'true');
             } else if (key === 'timeframe') {
-                // 차트 헤더 타임프레임 배지 갱신
-                const tfBadge = document.getElementById('chart-timeframe-badge');
-                if (tfBadge) tfBadge.textContent = String(val);
+                // [Phase TF] 타임프레임 토글 UI 동기화
+                window._currentTimeframe = String(val);
+                _applyTimeframeToggleUI(String(val));
             }
         }
         updateActiveTuningBadge();
@@ -1247,7 +1404,7 @@ async function syncConfig(symbol = null) {
 
 // --- Engine Tuning Modal ---
 async function applyPreset(presetName) {
-    const config = PRESET_CONFIGS[presetName];
+    const config = _getEffectivePreset(presetName);
     if (!config) return;
 
     // [BUGFIX] 프리셋 저장 전 보호 키(leverage, risk_per_trade)를 백엔드에서 강제 동기화

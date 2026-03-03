@@ -342,6 +342,27 @@
 
         /* Stress Bypass Active */
         .bypass-active { background-color: rgba(234,179,8,0.2) !important; border-color: rgba(234,179,8,0.6) !important; color: #facc15 !important; }
+
+        /* ══════════ Timeframe Toggle ══════════ */
+        .tf-toggle-btn { transition: all 0.2s ease; }
+        .tf-toggle-btn.tf-active {
+            color: #00ff88 !important;
+            background: rgba(0, 255, 136, 0.15);
+            text-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
+        }
+        .tf-toggle-btn:not(.tf-active) { color: #6b7280 !important; background: transparent; }
+        #tf-toggle-container.tf-disabled {
+            opacity: 0.35;
+            cursor: not-allowed !important;
+            pointer-events: none;
+        }
+        #tf-toggle-container.tf-switching {
+            animation: tf-pulse 0.6s ease-in-out;
+        }
+        @keyframes tf-pulse {
+            0%, 100% { border-color: rgba(0, 255, 136, 0.3); }
+            50% { border-color: rgba(0, 255, 136, 0.8); box-shadow: 0 0 12px rgba(0, 255, 136, 0.3); }
+        }
     </style>
 </head>
 
@@ -694,11 +715,15 @@
                     <div class="text-3xl font-mono font-bold text-white flash-target" id="hero-price">0.00</div>
                     <div class="text-xs text-gray-500 font-mono">Current Mark Price</div>
                 </div>
-                <!-- 차트 우상단 오버레이 (타임프레임·포지션 배지·카운트다운) -->
+                <!-- 차트 우상단 오버레이 (타임프레임 토글·포지션 배지·카운트다운) -->
                 <div id="chart-header" class="absolute top-2 right-14 z-30 flex items-center gap-1.5 pointer-events-none whitespace-nowrap">
-                    <span id="chart-timeframe-badge" class="text-[10px] font-mono text-cyan-400 border border-cyan-400/30 bg-navy-900/80 px-1.5 py-0.5 rounded backdrop-blur-sm"></span>
-                    <span id="chart-position-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded hidden"></span>
-                    <span id="chart-candle-countdown" class="text-[10px] font-mono text-gray-400 bg-navy-900/80 px-1.5 py-0.5 rounded backdrop-blur-sm"></span>
+                    <!-- [Phase TF] 원클릭 타임프레임 토글 -->
+                    <div id="tf-toggle-container" class="flex items-center bg-navy-900/90 border border-cyan-400/30 rounded-full backdrop-blur-sm overflow-hidden pointer-events-auto cursor-pointer" title="클릭하여 타임프레임 전환 (5m ↔ 15m)" onclick="toggleTimeframe()">
+                        <button id="tf-btn-5m" class="tf-toggle-btn text-[10px] font-mono font-bold px-2.5 py-0.5" type="button">5m</button>
+                        <button id="tf-btn-15m" class="tf-toggle-btn tf-active text-[10px] font-mono font-bold px-2.5 py-0.5" type="button">15m</button>
+                    </div>
+                    <span id="chart-position-badge" class="text-[10px] font-mono px-1.5 py-0.5 rounded hidden pointer-events-none"></span>
+                    <span id="chart-candle-countdown" class="text-[10px] font-mono text-gray-400 bg-navy-900/80 px-1.5 py-0.5 rounded backdrop-blur-sm pointer-events-none"></span>
                 </div>
 
                 <!-- 메인 캔들 차트 -->

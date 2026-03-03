@@ -277,6 +277,34 @@ BALANCE_TIERS = {
     },
 }
 
+# ════════════ [Phase TF] 타임프레임별 매매 파라미터 프리셋 ════════════
+# 5m = 짧은 캔들 → 타이트한 SL/TP, 노이즈 필터 강화
+# 15m = 부드러운 데이터 → 표준 SL/TP, 기본 필터
+# 보호 파라미터(leverage, risk_per_trade, daily_max_loss_rate)는 변경하지 않음 — 시드 보호는 사용자 직접 관리
+TIMEFRAME_PRESETS = {
+    '5m': {
+        'hard_stop_loss_rate': '0.003',
+        'trailing_stop_activation': '0.002',
+        'trailing_stop_rate': '0.0015',
+        'min_take_profit_rate': '0.005',
+        'adx_threshold': '28.0',
+        'chop_threshold': '55.0',
+        'volume_surge_multiplier': '1.8',
+        'cooldown_duration_sec': '300',
+    },
+    '15m': {
+        'hard_stop_loss_rate': '0.005',
+        'trailing_stop_activation': '0.003',
+        'trailing_stop_rate': '0.002',
+        'min_take_profit_rate': '0.01',
+        'adx_threshold': '25.0',
+        'chop_threshold': '61.8',
+        'volume_surge_multiplier': '1.5',
+        'cooldown_duration_sec': '900',
+    },
+}
+ALLOWED_TIMEFRAMES = {'5m', '15m'}
+
 # 전역 상태 (다중 심볼 지원)
 bot_global_state = {
     "is_running": False,
@@ -3400,6 +3428,98 @@ async def update_config(key: str, value: str, symbol: str = "GLOBAL"):
         log_msg = f"[UI 연동 실패 \U0001f534] '{key}' 설정 적용 중 코드 연결 오류가 발생했습니다."
         bot_global_state["logs"].append(log_msg)
         logger.error(log_msg)
+        return {"success": False, "message": str(e)}
+
+# ════════════ [Phase TF] 원클릭 타임프레임 전환 ════════════
+
+async def _apply_timeframe_presets(target_tf: str) -> bool:
+    """타임프레임 전환 시 최적화된 매매 파라미터 프리셋 자동 적용"""
+    preset = TIMEFRAME_PRESETS.get(target_tf)
+    if not preset:
+        return False
+    for key, value in preset.items():
+        set_config(key, str(value))
+    # Strategy 인스턴스 즉시 동기화 (다음 루프까지 기다리지 않음)
+    if _active_strategy:
+        for key, value in preset.items():
+            if hasattr(_active_strategy, key):
+                try:
+                    setattr(_active_strategy, key, float(value))
+                except (ValueError, TypeError):
+                    pass
+    logger.info(f"[타임프레임 프리셋] {target_tf} 프리셋 적용 완료: {list(preset.keys())}")
+    return True
+
+@app_server.post("/api/v1/timeframe/switch")
+async def switch_timeframe(target_tf: str):
+    """원클릭 타임프레임 전환 (5m ↔ 15m) — 포지션 보유 시 차단, 프리셋 자동 적용"""
+    try:
+        # 1. 허용 타임프레임 검증
+        if target_tf not in ALLOWED_TIMEFRAMES:
+            return {"success": False, "message": f"허용된 타임프레임: {', '.join(sorted(ALLOWED_TIMEFRAMES))}"}
+
+        # 2. 중복 방지
+        current_tf = str(get_config('timeframe') or '15m')
+        if current_tf == target_tf:
+            return {"success": True, "message": f"이미 {target_tf} 타임프레임입니다.", "changed": False}
+
+        # 3. 포지션 보유 시 차단 (핵심 안전장치)
+        blocked_symbols = []
+        for sym, sym_state in bot_global_state["symbols"].items():
+            pos = sym_state.get("position", "NONE")
+            if pos != "NONE":
+                blocked_symbols.append(f"{sym} ({pos})")
+        if blocked_symbols:
+            return {
+                "success": False,
+                "message": f"포지션 보유 중 타임프레임 변경 불가: {', '.join(blocked_symbols)}",
+                "blocked_by": blocked_symbols,
+            }
+
+        # 4. DB 갱신
+        set_config('timeframe', target_tf)
+
+        # 5. 프리셋 적용
+        presets_applied = await _apply_timeframe_presets(target_tf)
+
+        # 6. 시그널 캐시 무효화 — 전 심볼 강제 재평가
+        for sym, sym_state in bot_global_state["symbols"].items():
+            sym_state["_last_confirmed_candle_ts"] = 0
+            sym_state["_cached_signal"] = "HOLD"
+            sym_state["_cached_analysis"] = ""
+            sym_state["_cached_payload"] = {}
+
+        # 7. 로그 + 텔레그램 알림
+        switch_msg = f"[타임프레임 전환] {current_tf} → {target_tf} (원클릭 전환 완료)"
+        bot_global_state["logs"].append(switch_msg)
+        logger.info(switch_msg)
+        save_log("INFO", switch_msg)
+
+        _tg_msg = (
+            f"🔄 <b>ANTIGRAVITY</b>  |  타임프레임 전환\n"
+            f"{_TG_LINE}\n"
+            f"변경: <b>{current_tf} → {target_tf}</b>\n"
+            f"{_TG_LINE}\n"
+            f"프리셋 자동 적용 완료"
+        )
+        try:
+            send_telegram_sync(_tg_msg)
+        except Exception as tg_err:
+            logger.warning(f"[타임프레임 전환] 텔레그램 알림 전송 실패: {tg_err}")
+
+        # 8. 응답
+        return {
+            "success": True,
+            "changed": True,
+            "previous": current_tf,
+            "current": target_tf,
+            "message": f"타임프레임 {current_tf} → {target_tf} 전환 완료",
+            "presets_applied": presets_applied,
+        }
+    except Exception as e:
+        err_msg = f"[타임프레임 전환 실패] {e}"
+        bot_global_state["logs"].append(err_msg)
+        logger.error(err_msg)
         return {"success": False, "message": str(e)}
 
 @app_server.post("/api/v1/tuning/reset")
