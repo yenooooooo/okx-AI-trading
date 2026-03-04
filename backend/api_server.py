@@ -1375,25 +1375,37 @@ async def async_trading_loop():
                             await asyncio.sleep(0.5)  # [Phase 4] API Rate Limit 보호용 미세 비동기 지연
                             top_symbols = await engine_api.scan_top_volume_coins(limit=3)
                             if top_symbols:
-                                # [Phase 30] 스캐너 심볼 로테이션 시 고아 설정 청소
+                                _cs_short_syms = [s.split('/')[0] for s in top_symbols]
                                 _old_syms_scan = get_config('symbols') or []
                                 if isinstance(_old_syms_scan, list):
-                                    _removed_scan = set(_old_syms_scan) - set(top_symbols)
-                                    for _rs_scan in _removed_scan:
-                                        _del_scan = delete_symbol_configs(_rs_scan)
-                                        if _del_scan > 0:
-                                            logger.info(f"[Phase 30] 스캐너 로테이션: {_rs_scan} 고아 설정 {_del_scan}건 청소")
-                                # 설정에 바로 업데이트하여 영속화 및 프론트 반영
-                                set_config('symbols', top_symbols)
-                                scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 자동 갱신 완료: {top_symbols}"
-                                bot_global_state["logs"].append(scan_msg)
-                                logger.info(scan_msg)
-                                send_telegram_sync(_tg_scanner(top_symbols))
-                                last_scan_time = current_time
-                                # [Consciousness] 스캐너 결과 방출
-                                _cs_short_syms = [s.split('/')[0] for s in top_symbols]
-                                for _cs_s in top_symbols:
-                                    _emit_thought(_cs_s, f"🔍 스캐너 결과: {_cs_short_syms} → 타겟 자동 갱신 완료!")
+                                    _is_same = set(_old_syms_scan) == set(top_symbols)
+                                else:
+                                    _is_same = False
+
+                                if _is_same:
+                                    # 동일 심볼 → 변경 불필요, 결과만 피드백
+                                    last_scan_time = current_time
+                                    for _cs_s in top_symbols:
+                                        _emit_thought(_cs_s, f"🔍 스캐너 완료: {_cs_short_syms} (현재와 동일 → 유지)")
+                                else:
+                                    # 심볼 변경 발생 → 로테이션 + 고아 청소
+                                    if isinstance(_old_syms_scan, list):
+                                        _removed_scan = set(_old_syms_scan) - set(top_symbols)
+                                        for _rs_scan in _removed_scan:
+                                            _del_scan = delete_symbol_configs(_rs_scan)
+                                            if _del_scan > 0:
+                                                logger.info(f"[Phase 30] 스캐너 로테이션: {_rs_scan} 고아 설정 {_del_scan}건 청소")
+                                    # 설정에 바로 업데이트하여 영속화 및 프론트 반영
+                                    set_config('symbols', top_symbols)
+                                    _old_short = [s.split('/')[0] for s in (_old_syms_scan if isinstance(_old_syms_scan, list) else [])]
+                                    scan_msg = f"✅ [스캐너 가동] 거래량 Top 3 타겟 변경: {_old_short} → {_cs_short_syms}"
+                                    bot_global_state["logs"].append(scan_msg)
+                                    logger.info(scan_msg)
+                                    send_telegram_sync(_tg_scanner(top_symbols))
+                                    last_scan_time = current_time
+                                    # [Consciousness] 스캐너 결과 방출
+                                    for _cs_s in top_symbols:
+                                        _emit_thought(_cs_s, f"🔍 스캐너 결과: {_cs_short_syms} → 타겟 변경 완료!")
 
                                 # [Margin Guard] 스캐너 전환 직후 즉시 레버리지/증거금 검증
                                 # _margin_guard_bg_loop과 동일한 쿨다운 키 공유 → 중복 알림 방지
@@ -1436,6 +1448,12 @@ async def async_trading_loop():
                                                 pass
                                     except Exception as _scan_mg_err:
                                         logger.debug(f"[Scanner Margin Guard] {_scan_sym} 검증 스킵: {_scan_mg_err}")
+                            else:
+                                # top_symbols 빈 배열 → API 응답 이상
+                                last_scan_time = current_time
+                                for _cs_s in (get_config('symbols') or ['BTC/USDT:USDT']):
+                                    _emit_thought(_cs_s, "🔍 스캐너 완료: OKX API 응답 없음 → 현재 타겟 유지")
+                                logger.warning("[Scanner] scan_top_volume_coins 빈 결과 반환")
                         except Exception as scan_err:
                             err_msg = f"[오류] 스캐너 로직 실패: {scan_err}"
                             bot_global_state["logs"].append(err_msg)
