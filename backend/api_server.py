@@ -1143,6 +1143,13 @@ async def _auto_tune_by_balance(curr_bal):
         return
     _last_valid_balance = curr_bal
 
+    # 0-1. [부팅 복구] 서버 재시작 시 DB에 남아있는 이전 티어를 메모리에 로드
+    #       메모리 티어가 비어있으면 DB에서 복원하여 정상 재평가 유도
+    if not bot_global_state.get("adaptive_tier"):
+        _db_tier = str(get_config('_current_adaptive_tier') or '')
+        if _db_tier:
+            bot_global_state["adaptive_tier"] = _db_tier
+
     # 1. 기능 활성화 여부 체크
     if str(get_config('auto_preset_enabled') or 'false').lower() != 'true':
         # OFF 전환 시 티어 상태 클리어 (배지 잔류 방지)
