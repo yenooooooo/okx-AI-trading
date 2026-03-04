@@ -456,8 +456,46 @@ def _reset_position_state(sym_state: dict):
 ai_brain_state = {
     "symbols": {}  # symbol별 뇌 상태
 }
-_scalp_fitness_alert_state = {}  # 스캘핑 적합도 TG 알림 쿨다운 상태
+_scalp_fitness_alert_state = {}  # 프리셋 추천 TG 알림 쿨다운 상태
 _thought_throttle = {}  # [Consciousness Stream] 반복 사고 쓰로틀 딕셔너리
+
+# ── [프리셋 추천] 각 프리셋의 게이트 기준값 (적합도 채점용) ──
+PRESET_GATE_CONFIGS = {
+    'sniper':        {'adx_min': 30, 'adx_max': 45,  'chop_max': 55,   'vol_min': 2.0, 'bypass_macro': False, 'bypass_indicator': False},
+    'trend_rider':   {'adx_min': 25, 'adx_max': 60,  'chop_max': 58,   'vol_min': 1.3, 'bypass_macro': False, 'bypass_indicator': False},
+    'scalper':       {'adx_min': 20, 'adx_max': 50,  'chop_max': 65,   'vol_min': 1.2, 'bypass_macro': False, 'bypass_indicator': False},
+    'iron_dome':     {'adx_min': 28, 'adx_max': 42,  'chop_max': 50,   'vol_min': 2.5, 'bypass_macro': False, 'bypass_indicator': False},
+    'frenzy':        {'adx_min': 15, 'adx_max': 999, 'chop_max': 60,   'vol_min': 1.2, 'bypass_macro': True,  'bypass_indicator': True},
+    'micro_seed':    {'adx_min': 28, 'adx_max': 50,  'chop_max': 55,   'vol_min': 1.8, 'bypass_macro': False, 'bypass_indicator': False},
+    'scalp_context': {'adx_min': 20, 'adx_max': 50,  'chop_max': 61.8, 'vol_min': 1.2, 'bypass_macro': False, 'bypass_indicator': True},
+    'factory_reset': {'adx_min': 25, 'adx_max': 40,  'chop_max': 61.8, 'vol_min': 1.5, 'bypass_macro': False, 'bypass_indicator': False},
+}
+
+PRESET_DISPLAY = {
+    'sniper': ('🎯', '스나이퍼'), 'trend_rider': ('🌊', '트렌드라이더'),
+    'scalper': ('⚡', '스캘퍼'), 'iron_dome': ('🛡️', '아이언돔'),
+    'frenzy': ('🔥', 'FRENZY'), 'micro_seed': ('💎', '마이크로시드'),
+    'scalp_context': ('📡', '스캘프CTX'), 'factory_reset': ('🔄', '팩토리리셋'),
+}
+
+# 추천 우선순위 (동점 시: 보수적 프리셋 우선)
+_PRESET_PRIORITY = ['sniper', 'iron_dome', 'micro_seed', 'trend_rider', 'scalp_context', 'scalper', 'factory_reset', 'frenzy']
+
+
+def _calc_preset_fitness(adx: float, chop: float, vol_ratio: float, macro_ok: bool, rsi: float, cfg: dict) -> int:
+    """프리셋 1개에 대한 적합도 점수 계산 (max 8)"""
+    score = 0
+    if cfg['adx_min'] <= adx <= cfg['adx_max']:
+        score += 2
+    if chop < cfg['chop_max']:
+        score += 2
+    if vol_ratio >= cfg['vol_min']:
+        score += 2
+    if macro_ok or cfg.get('bypass_macro', False):
+        score += 1
+    if (30 <= rsi <= 70) or cfg.get('bypass_indicator', False):
+        score += 1
+    return score
 
 
 def _emit_thought(symbol: str, msg: str, throttle_key: str = None, throttle_sec: float = 10.0):
@@ -1778,33 +1816,53 @@ async def async_trading_loop():
                         ai_brain_state["symbols"][symbol]["gates"]        = _gates
                         ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
 
-                        # ── [Scalp Fitness] 스캘핑 적합도 점수 ──
-                        _sf_score = 0
-                        if _adx_v >= 30: _sf_score += 2
-                        if _chop_v < 50: _sf_score += 2
-                        if _vol_ratio >= 2.0: _sf_score += 2
-                        if _macro_ok: _sf_score += 1
-                        if 30 <= _rsi_v <= 70: _sf_score += 1
-                        ai_brain_state["symbols"][symbol]["scalp_fitness"] = _sf_score
-                        ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _sf_score >= 6 else "대기"
+                        # ── [Preset Fitness] 전체 프리셋 적합도 채점 및 최적 추천 ──
+                        _pf_scores = {}
+                        for _pf_name, _pf_cfg in PRESET_GATE_CONFIGS.items():
+                            _pf_scores[_pf_name] = _calc_preset_fitness(_adx_v, _chop_v, _vol_ratio, _macro_ok, _rsi_v, _pf_cfg)
 
-                        # TG 알림 (6+ 시, 5분 쿨다운, was_fit 플래그)
+                        # 최적 프리셋: 점수 내림차순 → 동점 시 우선순위(보수적) 순서
+                        _pf_best_name = max(_pf_scores, key=lambda k: (_pf_scores[k], -_PRESET_PRIORITY.index(k)))
+                        _pf_best_score = _pf_scores[_pf_best_name]
+                        _pf_icon, _pf_label = PRESET_DISPLAY.get(_pf_best_name, ('❓', _pf_best_name))
+
+                        # ai_brain_state에 저장 (프론트엔드 전달용)
+                        ai_brain_state["symbols"][symbol]["preset_fitness"] = _pf_scores
+                        ai_brain_state["symbols"][symbol]["recommended_preset"] = _pf_best_name
+                        ai_brain_state["symbols"][symbol]["recommended_preset_score"] = _pf_best_score
+                        ai_brain_state["symbols"][symbol]["recommended_preset_icon"] = _pf_icon
+                        ai_brain_state["symbols"][symbol]["recommended_preset_label"] = _pf_label
+
+                        # 하위호환: 기존 scalp_fitness 키 유지
+                        ai_brain_state["symbols"][symbol]["scalp_fitness"] = _pf_scores.get('scalp_context', 0)
+                        ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _pf_scores.get('scalp_context', 0) >= 6 else "대기"
+
+                        # ── TG 알림: 최적 프리셋 변경 시 (5분 쿨다운) ──
                         _sf_now = _time.time()
                         if symbol not in _scalp_fitness_alert_state:
-                            _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "was_fit": False}
+                            _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "last_preset": None}
                         _sf_st = _scalp_fitness_alert_state[symbol]
-                        _sf_is_fit = (_sf_score >= 6)
-                        if _sf_is_fit and ((not _sf_st["was_fit"]) or (_sf_now - _sf_st["last_alert_time"] >= 300)):
+
+                        if _pf_best_score >= 6 and (
+                            _sf_st.get("last_preset") != _pf_best_name
+                            or (_sf_now - _sf_st["last_alert_time"] >= 300)
+                        ):
+                            _pf_sorted = sorted(_pf_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+                            _pf_detail = "\n".join(
+                                f"  {PRESET_DISPLAY.get(n, ('', n))[0]} {PRESET_DISPLAY.get(n, ('', n))[1]} │ <b>{s}/8</b>"
+                                for n, s in _pf_sorted
+                            )
                             send_telegram_sync(
-                                f"📡 <b>스캘프CTX 구간 감지!</b>\n{_TG_LINE}\n"
+                                f"📊 <b>프리셋 추천</b>\n{_TG_LINE}\n"
                                 f"코인 │ <code>{_sym_short(symbol)}</code>\n"
-                                f"점수 │ <b>{_sf_score}/8</b>\n{_TG_LINE}\n"
+                                f"최적 │ {_pf_icon} <b>{_pf_label}</b> ({_pf_best_score}/8)\n{_TG_LINE}\n"
+                                f"{_pf_detail}\n{_TG_LINE}\n"
                                 f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
                                 f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}\n"
-                                f"📌 튜닝 패널 → 📡 스캘프CTX 프리셋 적용 권장"
+                                f"📌 튜닝 패널에서 {_pf_icon} {_pf_label} 프리셋 적용 권장"
                             )
                             _sf_st["last_alert_time"] = _sf_now
-                        _sf_st["was_fit"] = _sf_is_fit
+                        _sf_st["last_preset"] = _pf_best_name if _pf_best_score >= 6 else None
 
                     # 봇 혼잣말 — 확정봉 시각 기준 1회 생성 (새 봉에서만)
                     if _new_candle and _gc:

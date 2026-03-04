@@ -872,8 +872,40 @@ async function syncBrain() {
             }
         }
 
-        // ── Scalp Fitness 적합도 배지 ──
-        if (brainState.scalp_fitness !== undefined) {
+        // ── 프리셋 추천 배지 ──
+        if (brainState.recommended_preset !== undefined) {
+            const recPreset = brainState.recommended_preset;
+            const recScore = parseInt(brainState.recommended_preset_score) || 0;
+            const recIcon = brainState.recommended_preset_icon || '';
+            const recLabel = brainState.recommended_preset_label || '';
+            const sfBadge = document.getElementById('scalp-fitness-badge');
+            const sfScoreEl = document.getElementById('scalp-fitness-score');
+            const sfBar = document.getElementById('scalp-fitness-bar');
+
+            if (sfScoreEl) sfScoreEl.textContent = recScore;
+            if (sfBar) sfBar.style.width = `${Math.round((recScore / 8) * 100)}%`;
+            if (sfBadge) {
+                const presetStyle = PRESET_LABELS[recPreset];
+                if (recScore >= 6 && presetStyle) {
+                    sfBadge.textContent = `${recIcon} ${recLabel} (${recScore}/8)`;
+                    const colorClass = presetStyle[1];
+                    sfBadge.className = `px-2 py-1 rounded font-mono text-[10px] font-bold ${colorClass} shadow-[0_0_8px_rgba(255,255,255,0.15)] transition-all`;
+                } else {
+                    sfBadge.textContent = `대기 (${recScore}/8)`;
+                    sfBadge.className = 'px-2 py-1 rounded font-mono text-[10px] font-bold text-gray-500 border border-gray-600/50 bg-gray-600/10 transition-all';
+                }
+            }
+
+            // 프리셋 버튼 그리드에 추천 하이라이트
+            document.querySelectorAll('.preset-card').forEach(card => {
+                card.classList.remove('ring-2', 'ring-neon-green/50');
+            });
+            if (recScore >= 6) {
+                const recCard = document.querySelector(`.preset-card[data-preset="${recPreset}"]`);
+                if (recCard) recCard.classList.add('ring-2', 'ring-neon-green/50');
+            }
+        } else if (brainState.scalp_fitness !== undefined) {
+            // 하위호환: 백엔드 미업데이트 시 기존 scalp_fitness 표시
             const sfScore = parseInt(brainState.scalp_fitness) || 0;
             const sfLabel = brainState.scalp_fitness_label || '대기';
             const sfBadge = document.getElementById('scalp-fitness-badge');
