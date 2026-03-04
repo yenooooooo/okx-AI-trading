@@ -135,7 +135,8 @@ def init_db():
         'stress_bypass_reentry_cd': '0',
         'stress_bypass_stale_price': '0',
         'spike_auto_switch': 'false',   # [Volume Spike] 거래량 폭발 시 자동 타겟 전환
-        'spike_threshold': '3.0',       # [Volume Spike] 스파이크 판정 기준 (가격 변동률 %)
+        'spike_threshold': '2.0',       # [Volume Spike] 스파이크 판정 기준 (가격 변동률 %)
+        'spike_min_volume': '15000000', # [Volume Spike] 최소 거래대금 필터 (USD, 기본 1500만)
     }
     for key, value in default_config.items():
         cursor.execute('INSERT OR IGNORE INTO bot_config (key, value) VALUES (?, ?)', (key, value))

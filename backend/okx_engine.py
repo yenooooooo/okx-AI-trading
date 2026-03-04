@@ -266,8 +266,8 @@ class OKXEngine:
         top_symbols = [item[0] for item in usdt_swap_tickers[:limit]]
         return top_symbols
 
-    async def detect_volume_spikes(self, min_quote_volume: float = 50_000_000,
-                                    spike_multiplier: float = 3.0, top_n: int = 5) -> list:
+    async def detect_volume_spikes(self, min_quote_volume: float = 15_000_000,
+                                    spike_multiplier: float = 2.0, top_n: int = 5) -> list:
         """
         거래량 폭발 감지: 가격 변동률이 N% 이상인 고거래대금 코인 탐지
         fetch_tickers 1회 호출로 전체 시장 스캔 (API Rate Limit 보호)
@@ -277,19 +277,31 @@ class OKXEngine:
         if not self.exchange:
             raise Exception("OKX 거래소가 연결되지 않았습니다.")
 
+        # [방어] 파라미터 범위 강제 교정
+        min_quote_volume = max(1_000_000, min(float(min_quote_volume), 500_000_000))
+        spike_multiplier = max(0.5, min(float(spike_multiplier), 20.0))
+        top_n = max(1, min(int(top_n), 20))
+
         import asyncio
         tickers = await asyncio.to_thread(self.exchange.fetch_tickers)
 
+        if not tickers:
+            return []
+
         spikes = []
+        _scanned = 0
+        _passed_vol = 0
         for symbol, data in tickers.items():
             # USDT 무기한 선물만
             if "USDT" not in symbol or ":" not in symbol:
                 continue
+            _scanned += 1
 
             quote_vol = float(data.get('quoteVolume', 0) or 0)
             # 최소 거래대금 필터 (소형 코인 제외)
             if quote_vol < min_quote_volume:
                 continue
+            _passed_vol += 1
 
             # BTC, ETH 제외 (항상 거래량 높아서 노이즈)
             base = symbol.split('/')[0]
@@ -313,6 +325,9 @@ class OKXEngine:
                 "volume_24h_usd": round(quote_vol, 0),
                 "base": base,
             })
+
+        # [진단 로깅] 스캔 결과 요약 (감지 실패 디버깅용)
+        print(f"[Spike] 스캔 {_scanned}개 | 거래대금 통과 {_passed_vol}개 (기준: ${min_quote_volume/1e6:.0f}M) | 변동률 기준 {spike_multiplier}% | 감지 {len(spikes)}개")
 
         # 스파이크 스코어 기준 정렬
         spikes.sort(key=lambda x: x['spike_score'], reverse=True)

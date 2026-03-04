@@ -1447,8 +1447,12 @@ async def async_trading_loop():
             if current_time - last_spike_scan_time >= 180:
                 last_spike_scan_time = current_time
                 try:
-                    _spike_threshold = float(get_config('spike_threshold') or 3.0)
-                    spikes = await engine_api.detect_volume_spikes(spike_multiplier=_spike_threshold)
+                    _spike_threshold = float(get_config('spike_threshold') or 2.0)
+                    _spike_min_vol = float(get_config('spike_min_volume') or 15_000_000)
+                    spikes = await engine_api.detect_volume_spikes(
+                        min_quote_volume=_spike_min_vol,
+                        spike_multiplier=_spike_threshold
+                    )
                     if spikes:
                         # [A] 항상: 텔레그램 알림 + 의식의 흐름
                         _spike_names = [s['base'] for s in spikes[:3]]
@@ -1491,7 +1495,8 @@ async def async_trading_loop():
                         for _cs_s in (get_config('symbols') or ['BTC/USDT:USDT']):
                             _emit_thought(_cs_s, "🔥 스파이크 스캔 완료 — 현재 급등 코인 없음", throttle_key=f"spike_none_{_cs_s}", throttle_sec=180.0)
                 except Exception as _spike_err:
-                    logger.debug(f"[Spike Detector] 감지 실패: {_spike_err}")
+                    logger.warning(f"[Spike Detector] 감지 실패: {_spike_err}")
+                    bot_global_state["logs"].append(f"⚠️ [스파이크] 감지 오류: {str(_spike_err)[:80]}")
 
             # 잔고 실시간 연동
             curr_bal = await asyncio.to_thread(engine_api.get_usdt_balance)
