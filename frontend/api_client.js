@@ -1639,6 +1639,14 @@ async function syncConfig(symbol = null) {
                 if (toggle) toggle.checked = enabled;
                 if (track) track.className = `block w-8 h-4 rounded-full border transition-colors ${enabled ? 'bg-neon-green/30 border-neon-green' : 'bg-navy-900 border-navy-border'}`;
                 if (thumb) thumb.className = `absolute top-0.5 w-3 h-3 rounded-full transition-all ${enabled ? 'bg-neon-green left-4' : 'bg-gray-500 left-0.5'}`;
+            } else if (key === 'spike_auto_switch') {
+                const toggle = document.getElementById('spike-auto-switch-toggle');
+                const track = document.getElementById('spike-switch-track');
+                const thumb = document.getElementById('spike-switch-thumb');
+                const enabled = val === true || val === 'true';
+                if (toggle) toggle.checked = enabled;
+                if (track) track.className = `block w-8 h-4 rounded-full border transition-colors ${enabled ? 'bg-orange-500/30 border-orange-500' : 'bg-navy-900 border-navy-border'}`;
+                if (thumb) thumb.className = `absolute top-0.5 w-3 h-3 rounded-full transition-all ${enabled ? 'bg-orange-500 left-4' : 'bg-gray-500 left-0.5'}`;
             } else if (key === 'SHADOW_MODE_ENABLED') {
                 const toggle = document.getElementById('shadow-mode-toggle');
                 const enabled = val === true || val === 'true';
@@ -2354,6 +2362,20 @@ async function toggleAutoScan(checked) {
         showToast('AI 스캐너', checked ? '볼륨 스캐너 활성화 — 15분마다 최적 코인 탐색' : '볼륨 스캐너 비활성화 — 수동 타겟 모드', checked ? 'INFO' : 'WARNING');
     } catch (e) {
         console.error('[ANTIGRAVITY 디버그] toggleAutoScan 실패:', e);
+    }
+}
+
+// --- 거래량 스파이크 자동 전환 토글 ---
+async function toggleSpikeAutoSwitch(checked) {
+    const track = document.getElementById('spike-switch-track');
+    const thumb = document.getElementById('spike-switch-thumb');
+    if (track) track.className = `block w-8 h-4 rounded-full border transition-colors ${checked ? 'bg-orange-500/30 border-orange-500' : 'bg-navy-900 border-navy-border'}`;
+    if (thumb) thumb.className = `absolute top-0.5 w-3 h-3 rounded-full transition-all ${checked ? 'bg-orange-500 left-4' : 'bg-gray-500 left-0.5'}`;
+    try {
+        await fetch(`${API_URL}/config?key=spike_auto_switch&value=${checked}`, { method: 'POST' });
+        showToast('스파이크 감지', checked ? '거래량 폭발 시 자동 타겟 전환 활성화' : '자동 전환 비활성화 (알림만 유지)', checked ? 'INFO' : 'WARNING');
+    } catch (e) {
+        console.error('[Spike] toggleSpikeAutoSwitch 실패:', e);
     }
 }
 

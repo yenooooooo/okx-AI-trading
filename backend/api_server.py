@@ -131,6 +131,21 @@ def _tg_scanner(symbols: list) -> str:
         f"{_TG_LINE}"
     )
 
+def _tg_volume_spike(spikes: list) -> str:
+    lines = []
+    for s in spikes[:3]:
+        direction = "📈" if s['price_change_pct'] > 0 else "📉"
+        vol_m = s['volume_24h_usd'] / 1_000_000
+        lines.append(f"{direction} <b>{s['base']}</b>  │  {s['price_change_pct']:+.1f}%  │  거래대금 ${vol_m:,.0f}M")
+    body = "\n".join(lines)
+    return (
+        f"🔥 <b>ANTIGRAVITY</b>  |  거래량 폭발 감지\n"
+        f"{_TG_LINE}\n"
+        f"{body}\n"
+        f"{_TG_LINE}\n"
+        f"💡 대시보드에서 타겟 변경을 검토하세요."
+    )
+
 def _tg_margin_guard(symbol: str, current_lev: int, rec_lev: int, balance: float, margin_needed: float) -> str:
     return (
         f"⚡ <b>ANTIGRAVITY</b>  |  증거금 경고\n"
@@ -1311,6 +1326,50 @@ async def async_trading_loop():
                             logger.error(err_msg)
                 else:
                     last_scan_time = current_time  # 비활성 상태: 타이머만 갱신, 스캔 스킵
+
+                # ── [Volume Spike Detector] 거래량 폭발 감지 (15분 주기, 스캐너와 동기화) ──
+                try:
+                    _spike_threshold = float(get_config('spike_threshold') or 3.0)
+                    spikes = await engine_api.detect_volume_spikes(spike_multiplier=_spike_threshold)
+                    if spikes:
+                        # [A] 항상: 텔레그램 알림 + 의식의 흐름
+                        _spike_names = [s['base'] for s in spikes[:3]]
+                        for _cs_s in (get_config('symbols') or ['BTC/USDT:USDT']):
+                            _emit_thought(_cs_s, f"🔥 거래량 폭발 감지! {_spike_names} — 평소 대비 급등")
+                        send_telegram_sync(_tg_volume_spike(spikes))
+                        bot_global_state["logs"].append(f"🔥 [스파이크 감지] 거래량 폭발: {_spike_names}")
+
+                        # [B] 자동 전환 ON 시: 1위 스파이크 코인으로 타겟 전환
+                        if str(get_config('spike_auto_switch')).lower() == 'true':
+                            # 포지션 보유 중이면 전환 금지 (기존 스캐너와 동일 방어)
+                            _spike_any_pos = any(
+                                s.get("position", "NONE") != "NONE"
+                                for s in bot_global_state["symbols"].values()
+                            )
+                            if not _spike_any_pos:
+                                best_spike = spikes[0]
+                                current_symbols = get_config('symbols') or []
+                                if not isinstance(current_symbols, list):
+                                    current_symbols = ['BTC/USDT:USDT']
+                                if best_spike['symbol'] not in current_symbols:
+                                    new_symbols = list(current_symbols)
+                                    if len(new_symbols) >= 3:
+                                        new_symbols[2] = best_spike['symbol']  # 3번째 슬롯 교체
+                                    else:
+                                        new_symbols.append(best_spike['symbol'])
+                                    set_config('symbols', new_symbols)
+                                    _spike_msg = f"🔥 [스파이크 자동 전환] {best_spike['base']} ({best_spike['price_change_pct']:+.1f}%) → 타겟 슬롯 교체"
+                                    bot_global_state["logs"].append(_spike_msg)
+                                    send_telegram_sync(
+                                        f"🔥 <b>ANTIGRAVITY</b>  |  스파이크 자동 전환\n"
+                                        f"{_TG_LINE}\n"
+                                        f"<b>{best_spike['base']}</b> → 타겟 자동 교체 ({best_spike['price_change_pct']:+.1f}%)\n"
+                                        f"{_TG_LINE}"
+                                    )
+                                    for _cs_s in new_symbols:
+                                        _emit_thought(_cs_s, f"🔥 스파이크 자동 전환! {best_spike['base']} ({best_spike['price_change_pct']:+.1f}%) → 3번 슬롯 교체")
+                except Exception as _spike_err:
+                    logger.debug(f"[Spike Detector] 감지 실패: {_spike_err}")
 
             # 잔고 실시간 연동
             curr_bal = await asyncio.to_thread(engine_api.get_usdt_balance)

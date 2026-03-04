@@ -244,3 +244,55 @@ class OKXEngine:
         # 상위 N개 심볼 추출
         top_symbols = [item[0] for item in usdt_swap_tickers[:limit]]
         return top_symbols
+
+    async def detect_volume_spikes(self, min_quote_volume: float = 50_000_000,
+                                    spike_multiplier: float = 3.0, top_n: int = 5) -> list:
+        """
+        거래량 폭발 감지: 가격 변동률이 N% 이상인 고거래대금 코인 탐지
+        fetch_tickers 1회 호출로 전체 시장 스캔 (API Rate Limit 보호)
+
+        Returns: [{"symbol": ..., "spike_score": 4.7, "price_change_pct": ..., "volume_24h_usd": ..., "base": ...}, ...]
+        """
+        if not self.exchange:
+            raise Exception("OKX 거래소가 연결되지 않았습니다.")
+
+        import asyncio
+        tickers = await asyncio.to_thread(self.exchange.fetch_tickers)
+
+        spikes = []
+        for symbol, data in tickers.items():
+            # USDT 무기한 선물만
+            if "USDT" not in symbol or ":" not in symbol:
+                continue
+
+            quote_vol = float(data.get('quoteVolume', 0) or 0)
+            # 최소 거래대금 필터 (소형 코인 제외)
+            if quote_vol < min_quote_volume:
+                continue
+
+            # BTC, ETH 제외 (항상 거래량 높아서 노이즈)
+            base = symbol.split('/')[0]
+            if base in ('BTC', 'ETH'):
+                continue
+
+            # 가격 변동률
+            pct_change = float(data.get('percentage', 0) or 0)
+
+            # 스파이크 판정: |가격변동률| >= N%
+            if abs(pct_change) < spike_multiplier:
+                continue
+
+            # 스파이크 스코어 = |가격변동률| × (거래대금 / 1억) 정규화
+            spike_score = abs(pct_change) * (quote_vol / 100_000_000)
+
+            spikes.append({
+                "symbol": symbol,
+                "spike_score": round(spike_score, 2),
+                "price_change_pct": round(pct_change, 2),
+                "volume_24h_usd": round(quote_vol, 0),
+                "base": base,
+            })
+
+        # 스파이크 스코어 기준 정렬
+        spikes.sort(key=lambda x: x['spike_score'], reverse=True)
+        return spikes[:top_n]
