@@ -1569,6 +1569,12 @@ async def async_trading_loop():
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     current_price = await asyncio.to_thread(engine_api.get_current_price, symbol)
 
+                    # [방어] current_price None/0 가드 — None이면 이번 사이클 스킵 (연쇄 TypeError 방지)
+                    if not current_price or current_price <= 0:
+                        _emit_thought(symbol, f"⚠️ 현재가 조회 실패 (None/0) — 이번 사이클 스킵", throttle_key=f"price_null_{symbol}", throttle_sec=30.0)
+                        logger.warning(f"[{symbol}] get_current_price 반환값 None/0 — 사이클 스킵")
+                        continue
+
                     bot_global_state["symbols"][symbol]["current_price"] = current_price
                     # [Consciousness] 데이터 수집 완료
                     _emit_thought(symbol, f"📊 {symbol.split('/')[0]} {_tf} 캔들 {len(df)}개 수집 | 현재가 ${current_price:,.2f}", throttle_key=f"ohlcv_{symbol}", throttle_sec=15.0)
@@ -2660,6 +2666,14 @@ async def async_trading_loop():
                                             import datetime as _cs_cd_dt
                                             _cs_cd_end = _cs_cd_dt.datetime.fromtimestamp(strategy_instance.loss_cooldown_until, tz=_cs_cd_dt.timezone(_cs_cd_dt.timedelta(hours=9))).strftime("%H:%M:%S")
                                             _emit_thought(symbol, f"❄️ {strategy_instance.consecutive_loss_count}연패 쿨다운 진입 — {_cs_cd_end} KST까지 진입 차단")
+                                            _cd_dur = int(get_config('cooldown_duration_sec') or 900)
+                                            send_telegram_sync(
+                                                f"❄️ <b>ANTIGRAVITY</b>  |  연패 쿨다운\n"
+                                                f"{_TG_LINE}\n"
+                                                f"<b>{strategy_instance.consecutive_loss_count}연패</b> 감지 → {_cd_dur // 60}분 진입 차단\n"
+                                                f"해제 예정: <code>{_cs_cd_end} KST</code>\n"
+                                                f"{_TG_LINE}"
+                                            )
                                         # [Phase 21.2] 스트레스 바이패스: 연패 쿨다운 즉시 해제
                                         if _is_bypass_active('stress_bypass_cooldown_loss'):
                                             strategy_instance.loss_cooldown_until = 0
@@ -3136,6 +3150,14 @@ async def async_trading_loop():
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
                                 bot_global_state["logs"].append(error_msg)
                                 logger.error(error_msg)
+                                _emit_thought(symbol, f"🚨 진입 실패! {signal} — {str(e)[:60]}")
+                                send_telegram_sync(
+                                    f"🚨 <b>ANTIGRAVITY</b>  |  진입 실패\n"
+                                    f"{_TG_LINE}\n"
+                                    f"심볼: <code>{_sym_short(symbol)}</code>  |  방향: {signal}\n"
+                                    f"원인: {str(e)[:100]}\n"
+                                    f"{_TG_LINE}"
+                                )
 
                 except Exception as e:
                     logger.warning(f"[{symbol}] 루프 처리 중 오류 (다음 루프 계속): {e}")
@@ -3289,6 +3311,24 @@ async def set_stress_bypass(feature: str, enabled: bool):
         set_config(db_key, "0")
     # 바이패스로 인해 변경된 방어 상태를 즉시 DB에 반영
     _save_strategy_state(_active_strategy)
+    # [방어 알림] 안전장치 무력화/복구 시 텔레그램 알림
+    _bypass_label = {"kill_switch": "킬스위치", "cooldown_loss": "연패 쿨다운", "daily_loss": "일일 손실 한도", "reentry_cd": "재진입 쿨다운", "stale_price": "가격 지연 감지"}
+    _bp_name = _bypass_label.get(feature, feature)
+    if enabled:
+        send_telegram_sync(
+            f"⚠️ <b>ANTIGRAVITY</b>  |  안전장치 바이패스\n"
+            f"{_TG_LINE}\n"
+            f"🔓 <b>{_bp_name}</b> 방어막 24시간 해제됨\n"
+            f"⚠️ 해제 잊지 마세요! 자동 복구: 24시간 후\n"
+            f"{_TG_LINE}"
+        )
+    else:
+        send_telegram_sync(
+            f"✅ <b>ANTIGRAVITY</b>  |  안전장치 복구\n"
+            f"{_TG_LINE}\n"
+            f"🔒 <b>{_bp_name}</b> 방어막 정상 복구\n"
+            f"{_TG_LINE}"
+        )
     return {
         "feature": feature,
         "active": enabled,
