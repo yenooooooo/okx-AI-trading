@@ -554,11 +554,13 @@ async def private_ws_loop():
     """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
     import websockets
     WS_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 실전 환경
+    _ws_backoff = 5  # 지수 백오프 초기값
     while True:
         try:
             if not _engine or not _engine.exchange:
                 await asyncio.sleep(5)
                 continue
+            _ws_backoff = 5  # 연결 성공 시 백오프 리셋
             async with websockets.connect(WS_URL, ping_interval=20) as ws:
                 # 인증
                 timestamp = str(int(_time.time()))
@@ -588,12 +590,13 @@ async def private_ws_loop():
                     except Exception as parse_err:
                         logger.warning(f"Private WS 메시지 처리 오류: {parse_err}")
         except Exception as e:
-            logger.error(f"[Private WS] 연결 실패/끊김 — RAW 원인: {e}")
+            logger.error(f"[Private WS] 연결 실패/끊김 (재연결 {_ws_backoff}초 후) — RAW 원인: {e}")
             if "auth" in str(e).lower() or "invalid" in str(e).lower():
                 logger.error("[Private WS] → API 키 인증 오류 의심 — .env 키 재확인 필요")
             elif "403" in str(e) or "ip" in str(e).lower():
                 logger.error("[Private WS] → IP 화이트리스트 차단 의심 — OKX API 설정 확인 필요")
-            await asyncio.sleep(5)
+            await asyncio.sleep(_ws_backoff)
+            _ws_backoff = min(_ws_backoff * 2, 60)  # 지수 백오프: 5→10→20→40→60(max)
 
 async def _margin_guard_bg_loop():
     """독립 백그라운드: 증거금 부족 텔레그램 사전 경고 (60초 주기, 5분 쿨다운)
@@ -1550,7 +1553,19 @@ async def async_trading_loop():
 
                     # [Phase 24] OHLCV 데이터 수집 — 타임프레임 DB 설정 가능화 (기본 15m)
                     _tf = str(get_config('timeframe', symbol) or '15m')
-                    ohlcv = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, _tf, limit=200)
+                    ohlcv = None
+                    for _ohlcv_retry in range(3):
+                        try:
+                            ohlcv = await asyncio.to_thread(engine_api.exchange.fetch_ohlcv, symbol, _tf, limit=200)
+                            break
+                        except Exception as _ohlcv_err:
+                            logger.warning(f"[{symbol}] OHLCV 수집 실패 ({_ohlcv_retry+1}/3): {_ohlcv_err}")
+                            if _ohlcv_retry < 2:
+                                await asyncio.sleep(2)
+                    if not ohlcv:
+                        _emit_thought(symbol, f"🚨 OHLCV 데이터 수집 3회 실패! 이번 사이클 스킵")
+                        send_telegram_sync(f"⚠️ <b>{_sym_short(symbol)}</b> OHLCV 수집 3회 실패 — 사이클 스킵")
+                        continue
                     df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                     current_price = await asyncio.to_thread(engine_api.get_current_price, symbol)
 
@@ -2560,7 +2575,29 @@ async def async_trading_loop():
                                                 except Exception as receipt_err:
                                                     logger.warning(f"[{symbol}] 청산 체결 영수증 파싱 오류 시도 {_attempt+1}: {receipt_err}")
                                             if not receipt_found:
-                                                raise Exception("청산 주문은 들어갔으나 영수증(실현PnL) 파싱에 실패했습니다.")
+                                                # [방어] 청산은 이미 체결됨 — raise 대신 추정값으로 계속 진행 (상태 불일치 방지)
+                                                logger.warning(f"[{symbol}] 영수증 파싱 5회 실패 — 추정값으로 대체 처리")
+                                                _emit_thought(symbol, f"⚠️ 영수증 파싱 실패! 청산은 완료됐으나 정확한 PnL 미확인 — 추정값 대체")
+                                                send_telegram_sync(
+                                                    f"⚠️ <b>ANTIGRAVITY</b>  |  영수증 파싱 실패\n"
+                                                    f"{_TG_LINE}\n"
+                                                    f"심볼: <code>{symbol}</code>\n"
+                                                    f"청산 주문은 체결됐으나 PnL 영수증 조회 5회 실패\n"
+                                                    f"추정값으로 DB 저장됩니다. OKX에서 실제 PnL 확인 필요\n"
+                                                    f"{_TG_LINE}"
+                                                )
+                                                # 추정 PnL 계산 (영수증 없이)
+                                                try:
+                                                    contract_size_est = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                                                except Exception:
+                                                    contract_size_est = 0.01
+                                                if position_side == "LONG":
+                                                    total_gross_pnl = (current_price - entry) * amount * contract_size_est
+                                                else:
+                                                    total_gross_pnl = (entry - current_price) * amount * contract_size_est
+                                                total_fee = -(entry * amount * contract_size_est * 0.0005 * 2)
+                                                net_pnl = total_gross_pnl + total_fee
+                                                avg_fill_price = current_price
                                             pnl_amount = net_pnl
                                             try:
                                                 contract_size = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
@@ -2882,11 +2919,21 @@ async def async_trading_loop():
                                     ai_brain_state["symbols"][symbol]["latest_decision_trail"] = _decision_trail_log[-1] if _decision_trail_log else None
                                     continue  # 이 심볼 진입 건너뛰기
                                 _pipeline.append({"step": "margin_check", "status": "PASS", "detail": f"증거금 ${_margin_needed:.2f} OK"})
-                                # 레버리지 거래소 적용
+                                # 레버리지 거래소 적용 (실패 시 진입 차단 — 잘못된 레버리지로 주문 방지)
                                 try:
                                     await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
                                 except Exception as lev_err:
-                                    logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
+                                    logger.error(f"[{symbol}] 레버리지 설정 실패 → 진입 차단: {lev_err}")
+                                    _emit_thought(symbol, f"🚨 레버리지 {trade_leverage}x 설정 실패! 진입 차단됨 — {lev_err}")
+                                    send_telegram_sync(
+                                        f"🚨 <b>ANTIGRAVITY</b>  |  레버리지 설정 실패\n"
+                                        f"{_TG_LINE}\n"
+                                        f"심볼: <code>{_sym_short(symbol)}</code>  |  레버리지: {trade_leverage}x\n"
+                                        f"원인: {str(lev_err)[:80]}\n"
+                                        f"⛔ 진입이 차단되었습니다.\n"
+                                        f"{_TG_LINE}"
+                                    )
+                                    continue  # 이 심볼 진입 건너뛰기
                                 # 진입 방식 (Market vs Smart Limit)
                                 order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')
                                 ema_20_val = float(df['ema_20'].iloc[-1]) if 'ema_20' in df.columns and not pd.isna(df['ema_20'].iloc[-1]) else current_price
@@ -3304,11 +3351,13 @@ async def execute_test_order(direction: str = "LONG"):
             trade_amount = strategy_tmp.calculate_position_size_dynamic(
                 curr_bal_now, current_price_now, trade_leverage, contract_size, _risk_rate
             )
-        # 레버리지 거래소 적용
+        # 레버리지 거래소 적용 (실패 시 진입 차단)
         try:
             await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
         except Exception as lev_err:
-            logger.warning(f"[{symbol}] 레버리지 설정 실패: {lev_err}")
+            logger.error(f"[{symbol}] 수동 진입 레버리지 설정 실패: {lev_err}")
+            send_telegram_sync(f"🚨 레버리지 {trade_leverage}x 설정 실패 → 수동 진입 차단: {str(lev_err)[:80]}")
+            return {"status": "error", "message": f"레버리지 설정 실패: {lev_err}"}
 
         # 진입 방식 (Market vs Smart Limit) — 설정 존중
         order_type = str(get_config('ENTRY_ORDER_TYPE') or 'Market')

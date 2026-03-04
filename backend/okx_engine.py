@@ -173,12 +173,22 @@ class OKXEngine:
         except Exception:
             pass
 
-        if side.upper() == "LONG":
-            order = self.exchange.create_market_sell_order(symbol, amount)
-        else:
-            order = self.exchange.create_market_buy_order(symbol, amount)
-
-        return order.get('id')
+        import time as _cp_time
+        last_err = None
+        for _retry in range(3):
+            try:
+                if side.upper() == "LONG":
+                    order = self.exchange.create_market_sell_order(symbol, amount)
+                else:
+                    order = self.exchange.create_market_buy_order(symbol, amount)
+                return order.get('id')
+            except Exception as e:
+                last_err = e
+                print(f"[청산 재시도] {symbol} {side} 시도 {_retry+1}/3 실패: {e}")
+                if _retry < 2:
+                    _cp_time.sleep(2)
+        # 3회 모두 실패
+        raise Exception(f"[치명] {symbol} 청산 3회 실패: {last_err}")
 
     def cancel_order(self, order_id: str, symbol: str):
         """

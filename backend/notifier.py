@@ -200,27 +200,34 @@ async def init_telegram_bot():
         logger.warning("Telegram 토큰 또는 CHAT_ID가 없어 봇 모듈을 비활성화합니다.")
         return
 
-    _telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    
-    _telegram_app.add_handler(CommandHandler("status", cmd_status))
-    _telegram_app.add_handler(CommandHandler("pause", cmd_pause))
-    _telegram_app.add_handler(CommandHandler("resume", cmd_resume))
-    _telegram_app.add_handler(CommandHandler("panic", cmd_panic))
-    _telegram_app.add_handler(CallbackQueryHandler(handle_callback))
-    
-    logger.info("텔레그램 양방향 컨트롤 타워 - 백그라운드 폴링 초기화 중...")
-    await _telegram_app.initialize()
-    await _telegram_app.start()
-    await _telegram_app.updater.start_polling(drop_pending_updates=True)
+    try:
+        _telegram_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+        _telegram_app.add_handler(CommandHandler("status", cmd_status))
+        _telegram_app.add_handler(CommandHandler("pause", cmd_pause))
+        _telegram_app.add_handler(CommandHandler("resume", cmd_resume))
+        _telegram_app.add_handler(CommandHandler("panic", cmd_panic))
+        _telegram_app.add_handler(CallbackQueryHandler(handle_callback))
+
+        logger.info("텔레그램 양방향 컨트롤 타워 - 백그라운드 폴링 초기화 중...")
+        await _telegram_app.initialize()
+        await _telegram_app.start()
+        await _telegram_app.updater.start_polling(drop_pending_updates=True)
+    except Exception as e:
+        logger.error(f"[텔레그램] 초기화 실패 — 서버는 계속 가동됩니다: {e}")
+        _telegram_app = None
 
 async def stop_telegram_bot():
     """FastAPI shutdown 단계에서 안전한 자원 해제 트리거"""
     global _telegram_app
     if _telegram_app:
         logger.info("텔레그램 봇 폴링 Graceful Shutdown 진행...")
-        await _telegram_app.updater.stop()
-        await _telegram_app.stop()
-        await _telegram_app.shutdown()
+        try:
+            await _telegram_app.updater.stop()
+            await _telegram_app.stop()
+            await _telegram_app.shutdown()
+        except Exception as e:
+            logger.warning(f"[텔레그램] Shutdown 중 오류 (무시): {e}")
 
 
 async def send_telegram(message: str):
