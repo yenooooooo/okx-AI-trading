@@ -4711,17 +4711,19 @@ async def apply_optimization(rank: int = 1, params: str = ""):
     """
     try:
         # [안전장치 1] 포지션 보유 중 차단
-        _has_pos = False
-        if bot_global_state.get('symbols'):
-            for _sk, _sv in bot_global_state['symbols'].items():
-                if _sv.get('position') and _sv['position'].get('side'):
-                    _has_pos = True
-                    break
+        _has_pos = any(
+            s.get("position", "NONE") != "NONE"
+            for s in bot_global_state.get("symbols", {}).values()
+        )
         if _has_pos:
             return {
                 "success": False,
                 "message": "포지션 보유 중에는 파라미터 변경 불가 — 청산 후 재시도하세요",
             }
+
+        # [안전장치 2] 봇 가동 중 경고 (차단은 안 함, 로그만 기록)
+        if bot_global_state.get("is_running", False):
+            logger.warning("[Optimizer] ⚠️ 봇 가동 중 파라미터 적용 — 다음 루프부터 즉시 반영됩니다.")
 
         # params JSON 파싱
         if not params:
@@ -4736,9 +4738,10 @@ async def apply_optimization(rank: int = 1, params: str = ""):
         if not isinstance(param_dict, dict) or not param_dict:
             return {"success": False, "message": "유효한 파라미터 딕셔너리가 아닙니다"}
 
-        # [안전장치 2] PARAM_BOUNDS 범위 검증
+        # [안전장치 3] PARAM_BOUNDS 범위 검증 + 변경 전 원본 스냅샷 보존
         from optimizer import PARAM_BOUNDS, _clamp
         applied = {}
+        _prev_values = {}  # 롤백 참조용 원본값
         for pk, pv in param_dict.items():
             if pk not in PARAM_BOUNDS:
                 continue
@@ -4747,6 +4750,10 @@ async def apply_optimization(rank: int = 1, params: str = ""):
                 val = _clamp(val, pk)
             except (ValueError, TypeError):
                 continue
+
+            # 원본값 스냅샷 (텔레그램 비교 표시용)
+            _prev_raw = get_config(pk)
+            _prev_values[pk] = float(_prev_raw) if _prev_raw is not None else None
 
             # DB 저장
             set_config(pk, str(val))
@@ -4768,12 +4775,17 @@ async def apply_optimization(rank: int = 1, params: str = ""):
 
         logger.info(f"[Optimizer] 추천안 적용 완료: {applied}")
 
-        # 텔레그램 알림
-        _tg_lines = ["⚙️ <b>파라미터 최적화 적용</b>\n"]
+        # [안전장치 4] 텔레그램 알림 — 변경 전후 비교 포함
+        _tg_lines = [f"⚙️ <b>파라미터 최적화 적용</b>\n{_TG_LINE}"]
         for _ak, _av in applied.items():
-            _tg_lines.append(f"  • {_ak}: <b>{_av}</b>")
+            _prev = _prev_values.get(_ak)
+            if _prev is not None:
+                _tg_lines.append(f"  • {_ak}: {_prev} → <b>{_av}</b>")
+            else:
+                _tg_lines.append(f"  • {_ak}: <b>{_av}</b> (신규)")
+        _tg_lines.append(f"{_TG_LINE}\n📌 다음 루프부터 즉시 반영됩니다.")
         try:
-            await asyncio.to_thread(send_telegram_sync, "\n".join(_tg_lines))
+            send_telegram_sync("\n".join(_tg_lines))
         except Exception:
             pass
 
