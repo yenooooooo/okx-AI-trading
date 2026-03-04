@@ -449,6 +449,7 @@ def _reset_position_state(sym_state: dict):
     sym_state["exchange_tp_filled"] = False
     sym_state["tp_order_amount"] = 0
     sym_state["breakeven_stop_active"] = False  # [Breakeven Stop] 래칫 플래그 초기화
+    sym_state["_candle_lock_set_time"] = 0  # [Phase TF+] 캔들 잠금 시간 초기화
     # PENDING 관련 동적 필드 제거
     for _pk in ["pending_order_id", "pending_order_time", "pending_amount", "pending_price"]:
         sym_state.pop(_pk, None)
@@ -2013,12 +2014,23 @@ async def async_trading_loop():
                     _gw = {}
                     _gw_sym_state = bot_global_state["symbols"][symbol]
 
-                    # 1. 캔들 잠금
+                    # 1. 캔들 잠금 (시간 기반 자동 해제 반영)
                     _gw_candle_ts = int(df['timestamp'].iloc[-1])
                     _gw_last_sig = _gw_sym_state.get("last_signal_candle_ts", 0)
+                    _gw_lock_time = _gw_sym_state.get("_candle_lock_set_time", 0)
+                    _gw_lock_elapsed = _time.time() - _gw_lock_time if _gw_lock_time > 0 else 999
+                    _gw_lock_max = 300  # 5분
+                    _gw_candle_locked = (_gw_last_sig == _gw_candle_ts) and (_gw_lock_elapsed < _gw_lock_max)
+                    if _gw_candle_locked:
+                        _gw_remain = int(_gw_lock_max - _gw_lock_elapsed)
+                        _gw_candle_detail = f"잠금 중 (해제까지 {_gw_remain}초)"
+                    elif _gw_last_sig == _gw_candle_ts:
+                        _gw_candle_detail = "시간 만료 → 자동 해제"
+                    else:
+                        _gw_candle_detail = "대기 중"
                     _gw["candle_lock"] = {
-                        "status": "BLOCKING" if _gw_last_sig == _gw_candle_ts else "CLEAR",
-                        "detail": "현재 캔들 평가 완료" if _gw_last_sig == _gw_candle_ts else "대기 중"
+                        "status": "BLOCKING" if _gw_candle_locked else "CLEAR",
+                        "detail": _gw_candle_detail
                     }
 
                     # 2. 퇴근 모드
@@ -2928,12 +2940,20 @@ async def async_trading_loop():
                     if bot_global_state["symbols"][symbol]["position"] == "NONE":
                         # [Phase 24] 캔들 단위 진입 시그널 중복 방지 — 같은 캔들에서 재평가 스킵
                         # [Fix] LONG/SHORT 신호 발생 시에만 캔들 잠금 → HOLD 상태에서는 매 루프 재평가
-                        # 기존: HOLD여도 첫 루프에서 잠금 → 이후 LONG 신호 와도 진입 불가 버그 수정
+                        # [Phase TF+] 시간 기반 자동 해제: 15분봉에서 최대 5분만 대기 (5분봉은 기존과 동일)
                         _cur_candle_ts = int(df['timestamp'].iloc[-1])
                         _last_signal_ts = bot_global_state["symbols"][symbol].get("last_signal_candle_ts", 0)
+                        _CANDLE_LOCK_MAX_SEC = 300  # 캔들 잠금 최대 지속시간: 5분
                         if _last_signal_ts == _cur_candle_ts:
-                            continue  # 이미 이 캔들에서 LONG/SHORT 시그널 평가 완료 → 다음 캔들까지 대기
-                        # 캔들 잠금은 LONG/SHORT 신호가 실제로 평가될 때만 (line 1808 진입 시점에서 설정)
+                            # 시간 기반 자동 해제 체크
+                            _lock_set_time = bot_global_state["symbols"][symbol].get("_candle_lock_set_time", 0)
+                            _lock_elapsed = _time.time() - _lock_set_time if _lock_set_time > 0 else 0
+                            if _lock_elapsed < _CANDLE_LOCK_MAX_SEC:
+                                continue  # 아직 쿨다운 중 → 대기
+                            else:
+                                # 5분 경과 → 자동 해제, 재진입 허용
+                                _emit_thought(symbol, f"🔓 캔들 잠금 시간 만료({_lock_elapsed:.0f}s ≥ {_CANDLE_LOCK_MAX_SEC}s) → 재진입 평가 허용", throttle_key=f"candle_unlock_{symbol}", throttle_sec=60.0)
+                        # 캔들 잠금은 LONG/SHORT 신호가 실제로 평가될 때만 설정됨
 
                         # [Phase 19] 퇴근 모드 작동 시 신규 진입 강제 차단
                         if _exit_only:
@@ -3186,6 +3206,7 @@ async def async_trading_loop():
                                     except Exception as _sh_err:
                                         logger.error(f"[{symbol}] 🐸 Shadow Hunting 주문 실패: {_sh_err}")
                                         bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts  # 실패 시 캔들 잠금
+                                        bot_global_state["symbols"][symbol]["_candle_lock_set_time"] = _time.time()
                                         _log_trade_attempt(symbol, signal, "FAILED", f"shadow_hunting: {str(_sh_err)[:80]}")
                                         _pipeline.append({"step": "order_execution", "status": "FAILED", "detail": f"Shadow: {str(_sh_err)[:50]}"})
                                         _log_decision_trail(symbol, signal, "FAILED", _finalize_pipeline(_pipeline))
@@ -3223,6 +3244,7 @@ async def async_trading_loop():
 
                                     # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
                                     bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
+                                    bot_global_state["symbols"][symbol]["_candle_lock_set_time"] = _time.time()
                                     _log_trade_attempt(symbol, signal, "SUCCESS")
                                     _pipeline.append({"step": "order_execution", "status": "PASS", "detail": f"Smart Limit ${executed_price:.2f}"})
                                     _log_decision_trail(symbol, signal, "SUCCESS", _finalize_pipeline(_pipeline))
@@ -3254,6 +3276,7 @@ async def async_trading_loop():
 
                                     # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
                                     bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
+                                    bot_global_state["symbols"][symbol]["_candle_lock_set_time"] = _time.time()
                                     _log_trade_attempt(symbol, signal, "SUCCESS")
                                     _pipeline.append({"step": "order_execution", "status": "PASS", "detail": f"Market ${executed_price:.2f}"})
                                     _log_decision_trail(symbol, signal, "SUCCESS", _finalize_pipeline(_pipeline))
@@ -3332,6 +3355,7 @@ async def async_trading_loop():
 
                             except Exception as e:
                                 bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts  # 실패 시 캔들 잠금
+                                bot_global_state["symbols"][symbol]["_candle_lock_set_time"] = _time.time()
                                 _log_trade_attempt(symbol, signal, "FAILED", str(e)[:100])
                                 error_msg = f"[{symbol}] 진입 실패: {str(e)}"
                                 bot_global_state["logs"].append(error_msg)
