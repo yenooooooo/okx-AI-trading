@@ -1232,6 +1232,46 @@ async def async_trading_loop():
                                 logger.info(scan_msg)
                                 send_telegram_sync(_tg_scanner(top_symbols))
                                 last_scan_time = current_time
+
+                                # [Margin Guard] 스캐너 전환 직후 즉시 레버리지/증거금 검증
+                                # _margin_guard_bg_loop과 동일한 쿨다운 키 공유 → 중복 알림 방지
+                                import math as _scan_mg_math
+                                _scan_mg_bal = bot_global_state.get("balance", 0)
+                                _scan_mg_safe = _scan_mg_bal * 0.50
+                                for _scan_sym in top_symbols:
+                                    try:
+                                        _scan_mkt = engine_api.exchange.market(_scan_sym)
+                                        _scan_cs = float(_scan_mkt.get('contractSize', 0.01))
+                                        _scan_lev = max(1, int(get_config('leverage', _scan_sym) or 1))
+                                        _scan_price = await asyncio.to_thread(engine_api.get_current_price, _scan_sym)
+                                        if not _scan_price or _scan_price <= 0:
+                                            continue
+                                        # 추정 계약수 계산
+                                        _scan_risk = float(get_config('risk_per_trade', _scan_sym) or 0.02)
+                                        if _scan_risk >= 1.0:
+                                            _scan_risk /= 100.0
+                                        _scan_notional = _scan_mg_bal * _scan_risk * _scan_lev
+                                        _scan_estimated = max(1, round((_scan_notional / _scan_price) / _scan_cs))
+                                        _scan_margin_per = (_scan_cs * _scan_price) / _scan_lev
+                                        _scan_max = int(_scan_mg_safe / _scan_margin_per) if _scan_margin_per > 0 else 0
+                                        if _scan_max >= 1:
+                                            _scan_estimated = min(_scan_estimated, _scan_max)
+                                        _scan_margin_total = (_scan_cs * _scan_price * _scan_estimated) / _scan_lev
+                                        _scan_feasible = _scan_mg_safe >= _scan_margin_total
+
+                                        if not _scan_feasible:
+                                            _scan_rec = min(100, _scan_mg_math.ceil((_scan_cs * _scan_price * _scan_estimated) / _scan_mg_safe)) if _scan_mg_safe > 0 else 100
+                                            # 쿨다운 키 공유: _margin_guard_bg_loop과 동일 → 60초 내 중복 알림 방지
+                                            _scan_alert_key = f"_margin_guard_last_alert_{_scan_sym}"
+                                            set_config(_scan_alert_key, str(_time.time()))
+                                            try:
+                                                send_telegram_sync(_tg_margin_guard(
+                                                    _scan_sym, _scan_lev, _scan_rec, _scan_mg_bal, _scan_margin_total
+                                                ))
+                                            except Exception:
+                                                pass
+                                    except Exception as _scan_mg_err:
+                                        logger.debug(f"[Scanner Margin Guard] {_scan_sym} 검증 스킵: {_scan_mg_err}")
                         except Exception as scan_err:
                             err_msg = f"[오류] 스캐너 로직 실패: {scan_err}"
                             bot_global_state["logs"].append(err_msg)
