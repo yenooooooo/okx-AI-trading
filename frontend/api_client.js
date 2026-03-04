@@ -3519,6 +3519,8 @@ async function applyOptimization(rank, paramsJSON) {
 
         if (data.success) {
             alert(`✅ ${data.count}개 파라미터 적용 완료!\n\n적용 항목:\n${Object.entries(data.applied).map(([k, v]) => `  ${k}: ${v}`).join('\n')}`);
+            // 뇌구조 모달 즉시 동기화 + 배지 갱신 (커스텀 전환)
+            await syncConfig(currentSymbol);
         } else {
             alert(`❌ 적용 실패: ${data.message}`);
         }
