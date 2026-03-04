@@ -1003,58 +1003,70 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     pnl_pct        = 0.0
 
     # ── OKX 체결 영수증(Trades) 조회 (최대 6회, 약 12초 대기) ─────────────────────────
-    # [Phase 20.5] 수동청산 영수증 확보 로직 확장 (최대 6회, 약 12초 대기)
+    # [Bug Fix] info.pnl → info.fillPnl 교정 + 전체 체결 합산 + calculate_realized_pnl DRY 사용
     since_ts = int((_time.time() - 120) * 1000)  # 최근 2분 이내 체결 내역 조회
-    pnl = 0.0
-    fee = 0.0
     found_receipt = False
 
     for attempt in range(6):
         try:
             trades = await asyncio.to_thread(engine_api.exchange.fetch_my_trades, symbol, since=since_ts)
             if trades:
-                # 최신 체결 내역 확인
-                latest_trade = trades[-1]
-                pnl = float(latest_trade.get('info', {}).get('pnl', 0.0))
-                fee = float(latest_trade.get('fee', {}).get('cost', 0.0))
+                # 청산 방향 필터: LONG 청산 = sell, SHORT 청산 = buy
+                close_side = 'sell' if prev_pos == 'LONG' else 'buy'
+                closing_trades = [t for t in trades if t.get('side') == close_side]
+                if not closing_trades:
+                    closing_trades = [trades[-1]]  # fallback: 마지막 체결 사용
+
+                # [DRY] 자동청산과 동일한 PnL 계산 함수 사용 (info.fillPnl + 양방향 수수료 역산)
+                pnl_amount, total_gross, _fee_raw, avg_fill_price = engine_api.calculate_realized_pnl(closing_trades, prev_entry)
+                total_fee = abs(_fee_raw)  # 디스플레이용 양수 변환
                 found_receipt = True
-                logger.info(f"[{symbol}] 🧾 수동청산 영수증 확보 성공 (시도: {attempt+1}/6) | PnL: {pnl}, Fee: {fee}")
+                logger.info(f"[{symbol}] 🧾 수동청산 영수증 확보 성공 (시도: {attempt+1}/6, 체결 {len(closing_trades)}건) | Net: {pnl_amount:.4f}, Gross: {total_gross:.4f}, Fee: {total_fee:.4f}")
                 break
         except Exception as e:
             logger.warning(f"[{symbol}] 영수증 조회 에러 (시도: {attempt+1}/6): {e}")
 
         await asyncio.sleep(2.0)  # 2초 간격 폴링
 
-    # [Phase 20.5] 12초 대기 후에도 영수증이 없다면 '가상 영수증(Estimated PnL)' 직접 발급
+    # 12초 대기 후에도 영수증이 없다면 '가상 영수증(Estimated PnL)' 직접 발급
     if not found_receipt:
         logger.warning(f"[{symbol}] ⚠️ 거래소 응답 지연으로 영수증 확보 실패. 가상 수익(Estimated PnL) 추정 계산 실행!")
+        pnl_amount = 0.0
+        total_gross = 0.0
+        total_fee = 0.0
         try:
-            # sym_state["entry_price"]는 이미 0.0으로 초기화됨 → prev_entry 사용
             entry_p = prev_entry
             amount  = float(prev_contracts)
             _fallback_price = (sym_state.get("current_price", 0)
                                or await asyncio.to_thread(engine_api.get_current_price, symbol)
                                or prev_entry)
+            avg_fill_price = _fallback_price
 
             if entry_p > 0:
-                if prev_pos == "LONG":
-                    pnl = (_fallback_price - entry_p) * amount
-                else:
-                    pnl = (entry_p - _fallback_price) * amount
+                try:
+                    _cs = float(engine_api.exchange.market(symbol).get('contractSize', 0.01))
+                except Exception:
+                    _cs = 0.01
 
-                fee = (entry_p * amount * 0.0005) + (_fallback_price * amount * 0.0005)
-                pnl = pnl - fee
-                logger.info(f"[{symbol}] 🧮 가상 영수증 발급 완료 | 추정 PnL: {pnl:.4f}, 추정 Fee: {fee:.4f}")
+                if prev_pos == "LONG":
+                    total_gross = (_fallback_price - entry_p) * amount * _cs
+                else:
+                    total_gross = (entry_p - _fallback_price) * amount * _cs
+
+                total_fee = (entry_p * amount * _cs * 0.0005) + (_fallback_price * amount * _cs * 0.0005)
+                pnl_amount = total_gross - total_fee
+                logger.info(f"[{symbol}] 🧮 가상 영수증 발급 완료 | 추정 Net: {pnl_amount:.4f}, Gross: {total_gross:.4f}, Fee: {total_fee:.4f}")
         except Exception as calc_err:
             logger.error(f"[{symbol}] 🚨 가상 수익 추정마저 실패: {calc_err}")
-            pnl = 0.0
+        # 가상 영수증 사용 경고 알림
+        send_telegram_sync(
+            f"⚠️ <b>수동청산 영수증 미확보</b>\n{_TG_LINE}\n"
+            f"<code>{_sym_short(symbol)}</code> │ 거래소 응답 지연으로 추정 PnL 사용\n"
+            f"📌 OKX 앱에서 실제 체결 내역을 확인하세요."
+        )
 
-    # [Phase 20.5] 하위 호환 변수 매핑 (기존 DB 저장 및 PnL% 계산 로직과 연결)
-    pnl_amount = pnl
-    total_gross = pnl + fee
-    total_fee   = fee
-
-    if avg_fill_price == 0:
+    # [방어] avg_fill_price가 0이면 현재가 또는 진입가로 대체
+    if avg_fill_price <= 0:
         avg_fill_price = await asyncio.to_thread(engine_api.get_current_price, symbol) or prev_entry
 
     # ── PnL% 계산 (공식 수익금 기반) ──────────────────────────────────────────────────────────
@@ -1817,52 +1829,55 @@ async def async_trading_loop():
                         ai_brain_state["symbols"][symbol]["gates_passed"] = _passed
 
                         # ── [Preset Fitness] 전체 프리셋 적합도 채점 및 최적 추천 ──
-                        _pf_scores = {}
-                        for _pf_name, _pf_cfg in PRESET_GATE_CONFIGS.items():
-                            _pf_scores[_pf_name] = _calc_preset_fitness(_adx_v, _chop_v, _vol_ratio, _macro_ok, _rsi_v, _pf_cfg)
+                        try:
+                            _pf_scores = {}
+                            for _pf_name, _pf_cfg in PRESET_GATE_CONFIGS.items():
+                                _pf_scores[_pf_name] = _calc_preset_fitness(_adx_v, _chop_v, _vol_ratio, _macro_ok, _rsi_v, _pf_cfg)
 
-                        # 최적 프리셋: 점수 내림차순 → 동점 시 우선순위(보수적) 순서
-                        _pf_best_name = max(_pf_scores, key=lambda k: (_pf_scores[k], -_PRESET_PRIORITY.index(k)))
-                        _pf_best_score = _pf_scores[_pf_best_name]
-                        _pf_icon, _pf_label = PRESET_DISPLAY.get(_pf_best_name, ('❓', _pf_best_name))
+                            # 최적 프리셋: 점수 내림차순 → 동점 시 우선순위(보수적) 순서
+                            _pf_best_name = max(_pf_scores, key=lambda k: (_pf_scores[k], -_PRESET_PRIORITY.index(k)))
+                            _pf_best_score = _pf_scores[_pf_best_name]
+                            _pf_icon, _pf_label = PRESET_DISPLAY.get(_pf_best_name, ('❓', _pf_best_name))
 
-                        # ai_brain_state에 저장 (프론트엔드 전달용)
-                        ai_brain_state["symbols"][symbol]["preset_fitness"] = _pf_scores
-                        ai_brain_state["symbols"][symbol]["recommended_preset"] = _pf_best_name
-                        ai_brain_state["symbols"][symbol]["recommended_preset_score"] = _pf_best_score
-                        ai_brain_state["symbols"][symbol]["recommended_preset_icon"] = _pf_icon
-                        ai_brain_state["symbols"][symbol]["recommended_preset_label"] = _pf_label
+                            # ai_brain_state에 저장 (프론트엔드 전달용)
+                            ai_brain_state["symbols"][symbol]["preset_fitness"] = _pf_scores
+                            ai_brain_state["symbols"][symbol]["recommended_preset"] = _pf_best_name
+                            ai_brain_state["symbols"][symbol]["recommended_preset_score"] = _pf_best_score
+                            ai_brain_state["symbols"][symbol]["recommended_preset_icon"] = _pf_icon
+                            ai_brain_state["symbols"][symbol]["recommended_preset_label"] = _pf_label
 
-                        # 하위호환: 기존 scalp_fitness 키 유지
-                        ai_brain_state["symbols"][symbol]["scalp_fitness"] = _pf_scores.get('scalp_context', 0)
-                        ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _pf_scores.get('scalp_context', 0) >= 6 else "대기"
+                            # 하위호환: 기존 scalp_fitness 키 유지
+                            ai_brain_state["symbols"][symbol]["scalp_fitness"] = _pf_scores.get('scalp_context', 0)
+                            ai_brain_state["symbols"][symbol]["scalp_fitness_label"] = "스캘핑 적합" if _pf_scores.get('scalp_context', 0) >= 6 else "대기"
 
-                        # ── TG 알림: 최적 프리셋 변경 시 (5분 쿨다운) ──
-                        _sf_now = _time.time()
-                        if symbol not in _scalp_fitness_alert_state:
-                            _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "last_preset": None}
-                        _sf_st = _scalp_fitness_alert_state[symbol]
+                            # ── TG 알림: 최적 프리셋 변경 시 (5분 쿨다운) ──
+                            _sf_now = _time.time()
+                            if symbol not in _scalp_fitness_alert_state:
+                                _scalp_fitness_alert_state[symbol] = {"last_alert_time": 0, "last_preset": None}
+                            _sf_st = _scalp_fitness_alert_state[symbol]
 
-                        if _pf_best_score >= 6 and (
-                            _sf_st.get("last_preset") != _pf_best_name
-                            or (_sf_now - _sf_st["last_alert_time"] >= 300)
-                        ):
-                            _pf_sorted = sorted(_pf_scores.items(), key=lambda x: x[1], reverse=True)[:3]
-                            _pf_detail = "\n".join(
-                                f"  {PRESET_DISPLAY.get(n, ('', n))[0]} {PRESET_DISPLAY.get(n, ('', n))[1]} │ <b>{s}/8</b>"
-                                for n, s in _pf_sorted
-                            )
-                            send_telegram_sync(
-                                f"📊 <b>프리셋 추천</b>\n{_TG_LINE}\n"
-                                f"코인 │ <code>{_sym_short(symbol)}</code>\n"
-                                f"최적 │ {_pf_icon} <b>{_pf_label}</b> ({_pf_best_score}/8)\n{_TG_LINE}\n"
-                                f"{_pf_detail}\n{_TG_LINE}\n"
-                                f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
-                                f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}\n"
-                                f"📌 튜닝 패널에서 {_pf_icon} {_pf_label} 프리셋 적용 권장"
-                            )
-                            _sf_st["last_alert_time"] = _sf_now
-                        _sf_st["last_preset"] = _pf_best_name if _pf_best_score >= 6 else None
+                            if _pf_best_score >= 6 and (
+                                _sf_st.get("last_preset") != _pf_best_name
+                                or (_sf_now - _sf_st["last_alert_time"] >= 300)
+                            ):
+                                _pf_sorted = sorted(_pf_scores.items(), key=lambda x: x[1], reverse=True)[:3]
+                                _pf_detail = "\n".join(
+                                    f"  {PRESET_DISPLAY.get(n, ('', n))[0]} {PRESET_DISPLAY.get(n, ('', n))[1]} │ <b>{s}/8</b>"
+                                    for n, s in _pf_sorted
+                                )
+                                send_telegram_sync(
+                                    f"📊 <b>프리셋 추천</b>\n{_TG_LINE}\n"
+                                    f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                                    f"최적 │ {_pf_icon} <b>{_pf_label}</b> ({_pf_best_score}/8)\n{_TG_LINE}\n"
+                                    f"{_pf_detail}\n{_TG_LINE}\n"
+                                    f"ADX {_adx_v:.1f} · CHOP {_chop_v:.1f} · VOL {_vol_ratio:.2f}x\n"
+                                    f"RSI {_rsi_v:.1f} · 거시추세 {'일치' if _macro_ok else '불일치'}\n"
+                                    f"📌 튜닝 패널에서 {_pf_icon} {_pf_label} 프리셋 적용 권장"
+                                )
+                                _sf_st["last_alert_time"] = _sf_now
+                            _sf_st["last_preset"] = _pf_best_name if _pf_best_score >= 6 else None
+                        except Exception as _pf_err:
+                            logger.debug(f"[Preset Fitness] 채점 오류 (메인 루프 보호): {_pf_err}")
 
                     # 봇 혼잣말 — 확정봉 시각 기준 1회 생성 (새 봉에서만)
                     if _new_candle and _gc:
