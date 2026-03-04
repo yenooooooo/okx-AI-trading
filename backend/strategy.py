@@ -198,8 +198,18 @@ class TradingStrategy:
         long_disparity_ok = self.bypass_disparity or (current_price <= ema_20_val * (1.0 + self.disparity_threshold))
         short_disparity_ok = self.bypass_disparity or (current_price >= ema_20_val * (1.0 - self.disparity_threshold))
 
+        # ── [v4.0] MACD 히스토그램 모멘텀 — 크로스오버 대기 없이 반전 초입 포착 ──
+        # 히스토그램 = MACD - Signal: 증가 = 상승 모멘텀, 감소 = 하락 모멘텀
+        # 골든크로스보다 1~3캔들 빠르게 진입 → 눌림목 매수 구조적 해결
+        _macd_sig_val = float(latest['macd_signal']) if 'macd_signal' in latest and not pd.isna(latest['macd_signal']) else 0.0
+        _prev_macd = float(previous['macd']) if 'macd' in previous and not pd.isna(previous['macd']) else 0.0
+        _prev_sig = float(previous['macd_signal']) if 'macd_signal' in previous and not pd.isna(previous['macd_signal']) else 0.0
+
+        _hist_now = float(macd_val) - _macd_sig_val
+        _hist_prev = _prev_macd - _prev_sig
+
         # Payload 패키징 (Telegram HTML 파싱 에러 방지를 위해 <, > 기호 제거)
-        _macd_cross = "상향" if latest['macd'] > latest['macd_signal'] else "하향"
+        _macd_momentum = "모멘텀↑" if _hist_now > _hist_prev else "모멘텀↓"
         _vol_ratio = vol_val / vol_sma_20 if not pd.isna(vol_sma_20) and vol_sma_20 > 0 else 0.0
         _macro_label = "PASS" if (macro_ema_200 is None or self.bypass_macro) else "PASS"
 
@@ -223,20 +233,20 @@ class TradingStrategy:
                 "Disparity": f"PASS ({disparity_pct:.1f}%)",
                 "Macro": _macro_label,
                 "RSI": f"PASS ({rsi_val:.1f})",
-                "MACD": f"PASS ({_macd_cross})",
+                "MACD": f"PASS ({_macd_momentum} | Hist {_hist_now:.4f})",
             },
         }
 
-        # [v2.1] MACD 크로스오버 + RSI 구간 복합 조건
-        # LONG: MACD > Signal AND RSI 30~55 (과매도 반등 구간)
-        # SHORT: MACD < Signal AND RSI 45~70 (과매수 하락 구간)
-        long_macd = (latest['macd'] > latest['macd_signal'])
+        # [v4.0] MACD 히스토그램 모멘텀 + RSI 구간 복합 조건
+        # LONG: 히스토그램 증가(하락 둔화/반등 시작) AND RSI 30~55
+        # SHORT: 히스토그램 감소(상승 둔화/하락 시작) AND RSI 45~70
+        long_macd = (_hist_now > _hist_prev)   # 히스토그램 상승 = 반등 모멘텀
         long_rsi = (30 <= latest['rsi'] <= 55)
 
-        short_macd = (latest['macd'] < latest['macd_signal'])
+        short_macd = (_hist_now < _hist_prev)  # 히스토그램 하락 = 하락 모멘텀
         short_rsi = (45 <= latest['rsi'] <= 70)
 
-        # [v3.5] bypass_indicator: True 시 RSI 조건 무시, MACD 방향만으로 진입 판단
+        # [v3.5] bypass_indicator: True 시 RSI 조건 무시, MACD 모멘텀만으로 진입 판단
         long_entry = long_macd and (self.bypass_indicator or long_rsi)
         short_entry = short_macd and (self.bypass_indicator or short_rsi)
 
@@ -245,24 +255,24 @@ class TradingStrategy:
             if not long_disparity_ok:
                 return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 위로 이격 (LONG 추격 금지, 한계 {self.disparity_threshold * 100:.1f}%)", None
             if not volume_verified:
-                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
+                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} 미만 SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
             # [v2.1] 거시 추세 강제 필터: 1h EMA200 아래에서 LONG 절대 차단 ([v3.5] bypass_macro 해제 시 무시)
             if not self.bypass_macro and macro_ema_200 is not None and current_price is not None and current_price < macro_ema_200:
                 return "HOLD", f"거시 추세 역행 차단 — 1h EMA200(${macro_ema_200:.2f}) 아래에서 LONG 금지", None
-            return "LONG", f"상승 감지 (RSI {rsi_val:.1f}, MACD 상향, ADX {adx_val:.1f}, 거래량 충족)", payload
+            return "LONG", f"상승 모멘텀 감지 (RSI {rsi_val:.1f}, {_macd_momentum}, ADX {adx_val:.1f}, 거래량 충족)", payload
 
         # SHORT 신호 판단
         if short_entry:
             if not short_disparity_ok:
                 return "HOLD", f"이격도 초과 차단 — EMA20 대비 {disparity_pct:.2f}% 아래로 이격 (SHORT 추격 금지, 한계 {self.disparity_threshold * 100:.1f}%)", None
             if not volume_verified:
-                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} <= SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
+                return "HOLD", f"거래량 부족 차단 (현재 {vol_val:.1f} 미만 SMA {vol_sma_20:.1f} * {self.volume_surge_multiplier})", None
             # [v2.1] 거시 추세 강제 필터: 1h EMA200 위에서 SHORT 절대 차단 ([v3.5] bypass_macro 해제 시 무시)
             if not self.bypass_macro and macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200:
                 return "HOLD", f"거시 추세 역행 차단 — 1h EMA200(${macro_ema_200:.2f}) 위에서 SHORT 금지", None
-            return "SHORT", f"하락 감지 (RSI {rsi_val:.1f}, MACD 하향, ADX {adx_val:.1f}, 거래량 충족)", payload
+            return "SHORT", f"하락 모멘텀 감지 (RSI {rsi_val:.1f}, {_macd_momentum}, ADX {adx_val:.1f}, 거래량 충족)", payload
 
-        return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD {macd_val:.2f} / ADX {adx_val:.1f} - 타점 탐색 중", None
+        return "HOLD", f"현재 RSI {rsi_val:.1f} / MACD Hist {_hist_now:.4f}({_macd_momentum}) / ADX {adx_val:.1f} - 타점 탐색 중", None
 
     def evaluate_risk_management(self, entry_price, current_price, highest_price, position_side, current_atr, symbol="BTC/USDT:USDT", partial_tp_executed=False, contracts=1, breakeven_stop_active=False):
         """

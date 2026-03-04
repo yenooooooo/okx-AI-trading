@@ -1786,11 +1786,15 @@ async def async_trading_loop():
                         import datetime as _dt
                         _row       = _confirmed_row
                         # 확정봉 지표 캐시 — 봉이 바뀔 때만 갱신 (지표값 불변)
+                        # [v4.0] 이전 확정봉 MACD 값 — 히스토그램 모멘텀 계산용
+                        _prev_confirmed = df_confirmed.iloc[-2] if len(df_confirmed) >= 2 else _row
                         _gate_cache = {
                             "rsi_v":     float(latest_rsi)  if not pd.isna(latest_rsi)  else 50.0,
                             "adx_v":     float(latest_adx)  if not pd.isna(latest_adx)  else 0.0,
                             "macd_v":    float(latest_macd) if not pd.isna(latest_macd) else 0.0,
                             "msig_v":    float(_row['macd_signal']) if 'macd_signal' in _row.index and not pd.isna(_row['macd_signal']) else 0.0,
+                            "prev_macd_v": float(_prev_confirmed['macd']) if 'macd' in _prev_confirmed.index and not pd.isna(_prev_confirmed['macd']) else 0.0,
+                            "prev_msig_v": float(_prev_confirmed['macd_signal']) if 'macd_signal' in _prev_confirmed.index and not pd.isna(_prev_confirmed['macd_signal']) else 0.0,
                             "chop_v":    float(_row['chop'])     if 'chop'     in _row.index and not pd.isna(_row['chop'])     else 50.0,
                             "vol_v":     float(_row['volume'])   if not pd.isna(_row['volume'])   else 0.0,
                             "vsma_v":    float(_row['vol_sma_20']) if 'vol_sma_20' in _row.index and not pd.isna(_row['vol_sma_20']) else 1.0,
@@ -1817,8 +1821,11 @@ async def async_trading_loop():
 
                         _vol_ratio  = float(_vol_v / _vsma_v) if _vsma_v > 0 else 0.0
                         _disparity  = float(abs((_gc_close - _ema20_v) / _ema20_v) * 100) if _gc_close and _ema20_v else 0.0
-                        _long_macd  = bool(_macd_v > _msig_v)
-                        _short_macd = bool(_macd_v < _msig_v)
+                        # [v4.0] MACD 히스토그램 모멘텀 기반 M+R 판정 (strategy.py와 100% 동기화)
+                        _hist_now   = _macd_v - _msig_v
+                        _hist_prev  = _gc.get("prev_macd_v", 0.0) - _gc.get("prev_msig_v", 0.0)
+                        _long_macd  = bool(_hist_now > _hist_prev)   # 히스토그램 상승 = 반등 모멘텀
+                        _short_macd = bool(_hist_now < _hist_prev)   # 히스토그램 하락 = 하락 모멘텀
                         _long_rsi   = bool(30 <= _rsi_v <= 55)
                         _short_rsi  = bool(45 <= _rsi_v <= 70)
                         _mr_ok      = bool((_long_macd and _long_rsi) or (_short_macd and _short_rsi))
@@ -1843,7 +1850,7 @@ async def async_trading_loop():
                             "chop":      {"pass": bool(_chop_v < _chop_max),                      "value": f"{_chop_v:.1f}",                                                  "target": f"< {_chop_max:.1f}"},
                             "volume":    {"pass": bool(_vol_ratio >= _vol_mul),                   "value": f"{_vol_ratio:.2f}x",                                              "target": f"≥ {_vol_mul:.1f}x"},
                             "disparity": {"pass": bool(_bypass_disp or _disparity < _disp_th),   "value": f"{_disparity:.2f}%" + (" [우회]" if _bypass_disp else ""),        "target": f"< {_disp_th:.1f}%"},
-                            "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),                  "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "크로스+구간"},
+                            "macd_rsi":  {"pass": bool(_bypass_ind  or _mr_ok),                  "value": f"RSI {_rsi_v:.1f}"  + (" [우회]" if _bypass_ind  else ""),        "target": "모멘텀+구간"},
                             "macro":     {"pass": bool(_bypass_mac  or _macro_ok),               "value": _macro_lbl             + (" [우회]" if _bypass_mac  else ""),       "target": "EMA200"},
                         }
                         _passed = int(sum(1 for g in _gates.values() if g["pass"]))
@@ -1929,11 +1936,11 @@ async def async_trading_loop():
                             _mono = f"[{_ts}] EMA200 역방향({_macro_lbl}) — 큰 흐름 거슬러 들어가면 안 돼. 추세 전환 대기 중... ({_passed}/6)"
                         elif (not _bypass_ind) and not _mr_ok:
                             if _long_macd and not _long_rsi:
-                                _mono = f"[{_ts}] MACD 상향 ✓, RSI {_rsi_v:.1f} — LONG 진입 구간(30~55)으로 내려올 때까지 대기... ({_passed}/6)"
+                                _mono = f"[{_ts}] 모멘텀↑ ✓, RSI {_rsi_v:.1f} — LONG 진입 구간(30~55)으로 내려올 때까지 대기... ({_passed}/6)"
                             elif _short_macd and not _short_rsi:
-                                _mono = f"[{_ts}] MACD 하향 ✓, RSI {_rsi_v:.1f} — SHORT 진입 구간(45~70)으로 올라올 때까지 대기... ({_passed}/6)"
+                                _mono = f"[{_ts}] 모멘텀↓ ✓, RSI {_rsi_v:.1f} — SHORT 진입 구간(45~70)으로 올라올 때까지 대기... ({_passed}/6)"
                             else:
-                                _mono = f"[{_ts}] RSI {_rsi_v:.1f}, MACD {_macd_v:.4f} vs Signal {_msig_v:.4f} — 크로스 신호 계산 중... ({_passed}/6)"
+                                _mono = f"[{_ts}] RSI {_rsi_v:.1f}, Hist {_hist_now:.4f}(prev {_hist_prev:.4f}) — 모멘텀 반전 대기 중... ({_passed}/6)"
                         else:
                             _mono = f"[{_ts}] {_passed}/6 조건 충족 — RSI {_rsi_v:.1f} / MACD {_macd_v:.4f} 타점 탐색 중..."
 
