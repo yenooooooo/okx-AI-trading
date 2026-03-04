@@ -1165,6 +1165,20 @@ async def execute_entry_order(engine_api, symbol: str, signal: str, trade_amount
                 else:
                     order = await asyncio.to_thread(engine_api.exchange.create_market_sell_order, symbol, trade_amount)
 
+                # [방어막] 시장가 실제 체결가 반영 — current_price 대신 거래소 응답 체결가 사용
+                _fill_price = order.get('average') or order.get('price')
+                if _fill_price and float(_fill_price) > 0:
+                    executed_price = float(_fill_price)
+                    # 슬리피지 경고 (0.3% 초과 시 텔레그램 알림)
+                    _slip_pct = abs(executed_price - current_price) / current_price * 100
+                    if _slip_pct > 0.3:
+                        send_telegram_sync(
+                            f"⚠️ <b>슬리피지 감지</b>\n"
+                            f"코인: <code>{symbol.split(':')[0]}</code>\n"
+                            f"예상가: ${current_price:.4f} → 체결가: ${executed_price:.4f}\n"
+                            f"슬리피지: {_slip_pct:.3f}%"
+                        )
+
             order_success = True
             break
         except Exception as api_err:
