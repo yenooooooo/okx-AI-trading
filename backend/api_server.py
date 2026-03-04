@@ -694,11 +694,13 @@ async def _okx_trade_sync_loop():
 # ════════════ [Heartbeat Monitor] 서버 헬스 자동 감시 + 텔레그램 알림 ════════════
 _heartbeat_task = None
 _heartbeat_prev_status = {}  # 이전 상태 기억 (장애→복구 전환 감지용)
+_heartbeat_fail_streak = {}  # 연속 FAIL 카운터 (오탐 방지: 2회 연속 FAIL 시에만 알림)
 
 async def _heartbeat_monitor_loop():
-    """5분 간격으로 핵심 서브시스템 상태를 점검하고, 장애 발생/복구 시 텔레그램 알림 발송"""
-    await asyncio.sleep(60)  # 서버 시작 후 60초 대기 (안정화)
-    global _heartbeat_prev_status
+    """5분 간격으로 핵심 서브시스템 상태를 점검하고, 장애 발생/복구 시 텔레그램 알림 발송
+    [오탐 방지] 2회 연속 FAIL 시에만 장애 알림 (WS 재연결 중 일시적 FAIL 무시)"""
+    await asyncio.sleep(120)  # 서버 시작 후 120초 대기 (WS 연결 안정화 충분 대기)
+    global _heartbeat_prev_status, _heartbeat_fail_streak
 
     while True:
         try:
@@ -714,15 +716,29 @@ async def _heartbeat_monitor_loop():
             except Exception:
                 checks['okx_rest'] = 'FAIL'
 
-            # 2) Private WebSocket
+            # 2) Private WebSocket — 태스크 존재 + 살아있으면 OK
+            #    태스크가 없어도(websockets 미설치 등) WARN으로 격하 (FAIL 아님)
             try:
-                checks['okx_ws'] = 'OK' if (_private_ws_task and not _private_ws_task.done()) else 'FAIL'
+                if _private_ws_task and not _private_ws_task.done():
+                    checks['okx_ws'] = 'OK'
+                elif _private_ws_task and _private_ws_task.done():
+                    # 태스크가 종료됨 — 예외 확인
+                    _ws_exc = _private_ws_task.exception() if not _private_ws_task.cancelled() else None
+                    if _ws_exc:
+                        logger.error(f"[Heartbeat] Private WS 태스크 사망 원인: {_ws_exc}")
+                    checks['okx_ws'] = 'FAIL'
+                else:
+                    # _private_ws_task가 None (엔진 미초기화)
+                    checks['okx_ws'] = 'WARN'
             except Exception:
-                checks['okx_ws'] = 'FAIL'
+                checks['okx_ws'] = 'WARN'
 
-            # 3) Trading Loop
+            # 3) Trading Loop — 미가동은 WARN (사용자가 아직 Start 안 누른 상태)
             try:
-                checks['trading_loop'] = 'OK' if (_trading_task and not _trading_task.done()) else 'WARN'
+                if _trading_task and not _trading_task.done():
+                    checks['trading_loop'] = 'OK'
+                else:
+                    checks['trading_loop'] = 'WARN'
             except Exception:
                 checks['trading_loop'] = 'WARN'
 
@@ -732,6 +748,13 @@ async def _heartbeat_monitor_loop():
                 checks['telegram'] = 'OK' if (_hb_tg and _hb_tg.bot) else 'WARN'
             except Exception:
                 checks['telegram'] = 'WARN'
+
+            # [오탐 방지] 연속 FAIL 카운터 업데이트
+            for key, status in checks.items():
+                if status == 'FAIL':
+                    _heartbeat_fail_streak[key] = _heartbeat_fail_streak.get(key, 0) + 1
+                else:
+                    _heartbeat_fail_streak[key] = 0
 
             # 장애 발생/복구 감지 및 알림
             alerts = []
@@ -745,12 +768,23 @@ async def _heartbeat_monitor_loop():
 
             for key, status in checks.items():
                 prev = _heartbeat_prev_status.get(key, 'OK')
-                if status == 'FAIL' and prev != 'FAIL':
+                streak = _heartbeat_fail_streak.get(key, 0)
+
+                # [핵심] 2회 연속 FAIL일 때만 장애 알림 (1회는 무시 — 재연결 중일 수 있음)
+                if status == 'FAIL' and streak >= 2 and prev != 'FAIL':
                     alerts.append(_check_labels.get(key, key))
                 elif status == 'OK' and prev == 'FAIL':
                     recoveries.append(_check_labels.get(key, key))
+                # WARN은 장애 알림 대상 아님 (정보성)
 
-            _heartbeat_prev_status = checks
+            # prev_status는 2회 연속 FAIL 확정 시에만 FAIL로 기록
+            for key, status in checks.items():
+                streak = _heartbeat_fail_streak.get(key, 0)
+                if status == 'FAIL' and streak >= 2:
+                    _heartbeat_prev_status[key] = 'FAIL'
+                elif status == 'OK':
+                    _heartbeat_prev_status[key] = 'OK'
+                # streak 1회(아직 미확정)이면 prev 변경 안 함
 
             # 장애 알림
             if alerts:
@@ -758,7 +792,7 @@ async def _heartbeat_monitor_loop():
                 _fail_msg = (
                     f"🚨 <b>ANTIGRAVITY</b>  |  시스템 경고\n"
                     f"{_TG_LINE}\n"
-                    f"⚠️ <b>서브시스템 장애 감지</b>\n"
+                    f"⚠️ <b>서브시스템 장애 감지 (2회 연속 확인)</b>\n"
                     f"{_TG_LINE}\n"
                     f"장애 항목 │  <code>{_fail_list}</code>\n"
                     f"조치 필요 │  AWS 서버 상태 확인\n"
