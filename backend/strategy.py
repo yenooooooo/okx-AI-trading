@@ -199,18 +199,32 @@ class TradingStrategy:
         short_disparity_ok = self.bypass_disparity or (current_price >= ema_20_val * (1.0 - self.disparity_threshold))
 
         # Payload 패키징 (Telegram HTML 파싱 에러 방지를 위해 <, > 기호 제거)
+        _macd_cross = "상향" if latest['macd'] > latest['macd_signal'] else "하향"
+        _vol_ratio = vol_val / vol_sma_20 if not pd.isna(vol_sma_20) and vol_sma_20 > 0 else 0.0
+        _macro_label = "PASS" if (macro_ema_200 is None or self.bypass_macro) else "PASS"
+
         payload = {
             "ema_status": (
                 "상승장 (UP)" if macro_ema_200 is not None and current_price is not None and current_price > macro_ema_200
                 else ("하락장 (DOWN)" if macro_ema_200 is not None else "N/A")
             ),
-            "vol_multiplier": f"{vol_val / vol_sma_20:.2f}x" if not pd.isna(vol_sma_20) and vol_sma_20 > 0 else "N/A",
+            "vol_multiplier": f"{_vol_ratio:.2f}x" if _vol_ratio > 0 else "N/A",
             "atr_sl_margin": (
                 f"ATR(14): {latest['atr']:.2f} ➔ SL Margin: {latest['atr'] * 1.5:.2f}"
                 if 'atr' in latest and not pd.isna(latest['atr']) else "N/A"
             ),
             "adx": f"{adx_val:.1f}",
             "disparity": f"{disparity_pct:.2f}%",
+            # [텔레그램 강화] 7게이트 통과 상세
+            "gates": {
+                "ADX": f"PASS ({adx_val:.1f})",
+                "CHOP": f"PASS ({chop_val:.1f})",
+                "Volume": f"PASS ({_vol_ratio:.1f}x)" if _vol_ratio > 0 else "PASS",
+                "Disparity": f"PASS ({disparity_pct:.1f}%)",
+                "Macro": _macro_label,
+                "RSI": f"PASS ({rsi_val:.1f})",
+                "MACD": f"PASS ({_macd_cross})",
+            },
         }
 
         # [v2.1] MACD 크로스오버 + RSI 구간 복합 조건

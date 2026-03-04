@@ -179,13 +179,57 @@ class Backtester:
 
             logger.info(f"백테스팅 완료: {total_trades}거래, 승률 {win_rate:.1f}%, 수익률 {total_pnl_percent:.2f}%")
 
+            # [시각화] 캔들 데이터 + 진입/청산 마커용 데이터 패키징
+            candles = []
+            for _, row in df.iterrows():
+                candles.append({
+                    'time': int(row['timestamp'] / 1000),  # LightweightCharts용 Unix sec
+                    'open': round(float(row['open']), 2),
+                    'high': round(float(row['high']), 2),
+                    'low': round(float(row['low']), 2),
+                    'close': round(float(row['close']), 2),
+                })
+
+            # 진입/청산 마커 생성
+            markers = []
+            for t in trades_log:
+                entry_ts = int(df.iloc[t['entry_idx']]['timestamp'] / 1000)
+                exit_ts = int(df.iloc[t['exit_idx']]['timestamp'] / 1000)
+                is_long = t['position'] == 'LONG'
+                is_win = t['pnl_percent'] > 0
+
+                markers.append({
+                    'time': entry_ts,
+                    'position': 'belowBar' if is_long else 'aboveBar',
+                    'color': '#00ff88' if is_long else '#ff4d4d',
+                    'shape': 'arrowUp' if is_long else 'arrowDown',
+                    'text': f"{'L' if is_long else 'S'} ${t['entry_price']:.2f}",
+                })
+                markers.append({
+                    'time': exit_ts,
+                    'position': 'aboveBar' if is_long else 'belowBar',
+                    'color': '#00ff88' if is_win else '#ff4d4d',
+                    'shape': 'circle',
+                    'text': f"{'✅' if is_win else '❌'} {t['pnl_percent']:+.2f}%",
+                })
+            markers.sort(key=lambda m: m['time'])
+
+            # 잔고 곡선
+            equity_curve = []
+            for t in trades_log:
+                exit_ts = int(df.iloc[t['exit_idx']]['timestamp'] / 1000)
+                equity_curve.append({'time': exit_ts, 'value': round(t['balance'], 4)})
+
             return {
                 'total_trades': total_trades,
                 'win_rate': round(win_rate, 2),
                 'total_pnl_percent': round(total_pnl_percent, 2),
                 'max_drawdown': round(max_drawdown * 100, 2),
                 'sharpe_ratio': round(sharpe_ratio, 2),
-                'trades_log': trades_log
+                'trades_log': trades_log,
+                'candles': candles,
+                'markers': markers,
+                'equity_curve': equity_curve,
             }
 
         except Exception as e:

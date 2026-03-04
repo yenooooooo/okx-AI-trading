@@ -3061,6 +3061,245 @@ async function syncStats() {
     }
 }
 
+// ═══════════ [Advanced Analytics] 심볼별 / 시간대별 / 방향별 분석 ═══════════
+async function syncAdvancedStats() {
+    try {
+        const res = await fetch(`${API_URL}/stats/advanced`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // ── 분석 건수 ──
+        const countEl = document.getElementById('adv-stats-count');
+        if (countEl) countEl.textContent = `${data.total_analyzed || 0} trades analyzed`;
+
+        // ── 방향별 LONG / SHORT ──
+        (data.by_direction || []).forEach(d => {
+            const dir = d.direction.toLowerCase();
+            const wrEl = document.getElementById(`adv-${dir}-wr`);
+            const trEl = document.getElementById(`adv-${dir}-trades`);
+            const pnlEl = document.getElementById(`adv-${dir}-pnl`);
+            if (wrEl) wrEl.textContent = `${d.win_rate}%`;
+            if (trEl) trEl.textContent = `${d.total}회`;
+            if (pnlEl) {
+                const v = d.net_pnl;
+                pnlEl.textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + ' U';
+                pnlEl.className = pnlEl.className.replace(/text-neon-(green|red)/g, '') + (v >= 0 ? ' text-neon-green' : ' text-neon-red');
+            }
+        });
+
+        // ── 심볼별 테이블 ──
+        const tbody = document.getElementById('adv-symbol-tbody');
+        if (tbody) {
+            let html = '';
+            (data.by_symbol || []).forEach(s => {
+                const pnlColor = s.net_pnl >= 0 ? 'text-neon-green' : 'text-neon-red';
+                const pnlSign = s.net_pnl >= 0 ? '+' : '';
+                const wrColor = s.win_rate >= 60 ? 'text-neon-green' : s.win_rate < 40 ? 'text-neon-red' : 'text-text-main';
+                const holdStr = s.avg_hold_min > 0 ? `${s.avg_hold_min}m` : '-';
+                html += `<tr class="border-b border-navy-border/20 hover:bg-navy-800/30 transition-colors">
+                    <td class="py-1.5 px-1 text-left font-semibold text-text-main">${s.symbol}</td>
+                    <td class="py-1.5 px-1 text-center text-gray-400">${s.total} <span class="text-gray-600">(${s.wins}W)</span></td>
+                    <td class="py-1.5 px-1 text-center ${wrColor} font-bold">${s.win_rate}%</td>
+                    <td class="py-1.5 px-1 text-right ${pnlColor} font-bold">${pnlSign}${s.net_pnl.toFixed(2)}</td>
+                    <td class="py-1.5 px-1 text-right text-gray-400">${holdStr}</td>
+                </tr>`;
+            });
+            tbody.innerHTML = html || '<tr><td colspan="5" class="py-3 text-center text-gray-600">데이터 없음</td></tr>';
+        }
+
+        // ── 시간대별 히트맵 ──
+        const heatmapEl = document.getElementById('adv-hour-heatmap');
+        if (heatmapEl) {
+            let html = '';
+            const hours = data.by_hour || [];
+            const maxTrades = Math.max(1, ...hours.map(h => h.total));
+            hours.forEach(h => {
+                let bgColor = '#161b22';  // 거래 없음
+                let borderStyle = 'border:1px solid #30363d;';
+                if (h.total > 0) {
+                    const intensity = Math.min(1, h.total / maxTrades);
+                    if (h.net_pnl > 0) {
+                        const g = Math.round(50 + intensity * 150);
+                        bgColor = `rgb(0, ${g}, ${Math.round(g * 0.3)})`;
+                    } else if (h.net_pnl < 0) {
+                        const r = Math.round(80 + intensity * 175);
+                        bgColor = `rgb(${r}, 0, ${Math.round(r * 0.15)})`;
+                    } else {
+                        bgColor = '#1c2128';
+                    }
+                    borderStyle = 'border:1px solid transparent;';
+                }
+                const tooltip = h.total > 0 ? `${h.label} | ${h.total}회 (${h.wins}W) | ${h.net_pnl >= 0 ? '+' : ''}${h.net_pnl.toFixed(2)} U` : `${h.label} | 거래 없음`;
+                html += `<div class="rounded-sm aspect-square flex items-center justify-center text-[7px] font-mono text-gray-400/60 cursor-default"
+                    style="background:${bgColor};${borderStyle}min-height:20px;" title="${tooltip}">
+                    ${h.hour % 3 === 0 ? h.hour : ''}
+                </div>`;
+            });
+            heatmapEl.innerHTML = html;
+        }
+
+        // ── 요일별 바 차트 ──
+        const weekdayEl = document.getElementById('adv-weekday-chart');
+        if (weekdayEl) {
+            const days = data.by_weekday || [];
+            const maxPnl = Math.max(0.01, ...days.map(d => Math.abs(d.net_pnl)));
+            let html = '';
+            days.forEach(d => {
+                const isProfit = d.net_pnl >= 0;
+                const barH = Math.max(4, Math.round((Math.abs(d.net_pnl) / maxPnl) * 100));
+                const bgClass = isProfit ? 'bg-neon-green' : 'bg-neon-red';
+                const textColor = isProfit ? 'text-neon-green' : 'text-neon-red';
+                const pnlStr = (isProfit ? '+' : '') + d.net_pnl.toFixed(1);
+                html += `<div class="flex-1 flex flex-col items-center gap-0.5" title="${d.day} | ${d.total}회 (WR:${d.win_rate}%) | ${pnlStr} U">
+                    <span class="text-[7px] font-mono ${textColor} font-bold">${pnlStr}</span>
+                    <div class="${bgClass} rounded-t-sm w-full transition-all duration-500" style="height:${barH}%;opacity:${d.total > 0 ? 0.8 : 0.15};min-height:2px;"></div>
+                    <span class="text-[8px] font-mono text-gray-500">${d.day}</span>
+                </div>`;
+            });
+            weekdayEl.innerHTML = html;
+        }
+
+    } catch (e) {
+        console.warn("Advanced Stats Sync Failed:", e);
+    }
+}
+
+// ═══════════ [Backtest Visualizer] 백테스트 실행 + 차트 렌더링 ═══════════
+let _btChart = null;
+let _btEquityChart = null;
+
+async function runBacktestVisualizer() {
+    const statusEl = document.getElementById('bt-status');
+    if (statusEl) statusEl.textContent = '실행 중...';
+
+    const symbol = document.getElementById('bt-symbol')?.value || 'BTC/USDT:USDT';
+    const timeframe = document.getElementById('bt-timeframe')?.value || '15m';
+    const limit = parseInt(document.getElementById('bt-limit')?.value || '500');
+    const slippage = parseFloat(document.getElementById('bt-slippage')?.value || '5');
+
+    try {
+        const res = await fetch(`${API_URL}/backtest?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=${limit}&slippage_bps=${slippage}`, {
+            method: 'POST',
+        });
+        const data = await res.json();
+
+        if (data.error) {
+            if (statusEl) statusEl.textContent = `오류: ${data.error}`;
+            return;
+        }
+
+        // ── 요약 통계 ──
+        const summaryEl = document.getElementById('bt-summary');
+        if (summaryEl) summaryEl.classList.remove('hidden');
+        const totalEl = document.getElementById('bt-total');
+        if (totalEl) totalEl.textContent = data.total_trades;
+        const wrEl = document.getElementById('bt-winrate');
+        if (wrEl) {
+            wrEl.textContent = `${data.win_rate}%`;
+            wrEl.className = wrEl.className.replace(/text-neon-(green|red)/g, '') + (data.win_rate >= 50 ? ' text-neon-green' : ' text-neon-red');
+        }
+        const pnlEl = document.getElementById('bt-pnl');
+        if (pnlEl) {
+            const pv = data.total_pnl_percent;
+            pnlEl.textContent = `${pv >= 0 ? '+' : ''}${pv}%`;
+            pnlEl.className = pnlEl.className.replace(/text-neon-(green|red)/g, '') + (pv >= 0 ? ' text-neon-green' : ' text-neon-red');
+        }
+        const mddEl = document.getElementById('bt-mdd');
+        if (mddEl) mddEl.textContent = `${data.max_drawdown}%`;
+        const sharpeEl = document.getElementById('bt-sharpe');
+        if (sharpeEl) sharpeEl.textContent = data.sharpe_ratio;
+
+        // ── 캔들 차트 + 마커 ──
+        const chartContainer = document.getElementById('bt-chart-container');
+        if (chartContainer && data.candles && data.candles.length > 0) {
+            chartContainer.classList.remove('hidden');
+            chartContainer.innerHTML = '';
+
+            if (_btChart) { _btChart.remove(); _btChart = null; }
+
+            _btChart = LightweightCharts.createChart(chartContainer, {
+                autoSize: true,
+                layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8b949e', fontSize: 10 },
+                grid: { vertLines: { color: 'rgba(48,54,61,0.3)' }, horzLines: { color: 'rgba(48,54,61,0.3)' } },
+                crosshair: { mode: 0 },
+                timeScale: { borderColor: '#30363d', timeVisible: true },
+                rightPriceScale: { borderColor: '#30363d' },
+            });
+
+            const candleSeries = _btChart.addCandlestickSeries({
+                upColor: '#00ff88', downColor: '#ff4d4d',
+                borderUpColor: '#00ff88', borderDownColor: '#ff4d4d',
+                wickUpColor: '#00ff88', wickDownColor: '#ff4d4d',
+            });
+            candleSeries.setData(data.candles);
+
+            if (data.markers && data.markers.length > 0) {
+                candleSeries.setMarkers(data.markers);
+            }
+
+            _btChart.timeScale().fitContent();
+        }
+
+        // ── 잔고 곡선 ──
+        const equityContainer = document.getElementById('bt-equity-container');
+        if (equityContainer && data.equity_curve && data.equity_curve.length > 0) {
+            equityContainer.classList.remove('hidden');
+            equityContainer.innerHTML = '';
+
+            if (_btEquityChart) { _btEquityChart.remove(); _btEquityChart = null; }
+
+            _btEquityChart = LightweightCharts.createChart(equityContainer, {
+                autoSize: true,
+                layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#8b949e', fontSize: 9 },
+                grid: { vertLines: { color: 'rgba(48,54,61,0.2)' }, horzLines: { color: 'rgba(48,54,61,0.2)' } },
+                crosshair: { mode: 0 },
+                timeScale: { borderColor: '#30363d', timeVisible: true },
+                rightPriceScale: { borderColor: '#30363d' },
+            });
+
+            const equitySeries = _btEquityChart.addAreaSeries({
+                topColor: 'rgba(0, 255, 136, 0.3)',
+                bottomColor: 'rgba(0, 255, 136, 0.02)',
+                lineColor: '#00ff88',
+                lineWidth: 2,
+            });
+            equitySeries.setData(data.equity_curve);
+            _btEquityChart.timeScale().fitContent();
+        }
+
+        // ── 거래 로그 테이블 ──
+        const tradesListEl = document.getElementById('bt-trades-list');
+        if (tradesListEl && data.trades_log && data.trades_log.length > 0) {
+            tradesListEl.classList.remove('hidden');
+            let html = '<table class="w-full text-[9px] font-mono"><thead><tr class="text-gray-500 border-b border-navy-border/40">' +
+                '<th class="text-left py-1 px-1">방향</th><th class="text-right py-1 px-1">진입가</th>' +
+                '<th class="text-right py-1 px-1">청산가</th><th class="text-right py-1 px-1">PnL%</th>' +
+                '<th class="text-right py-1 px-1">사유</th></tr></thead><tbody>';
+            data.trades_log.forEach(t => {
+                const pnlColor = t.pnl_percent >= 0 ? 'text-neon-green' : 'text-neon-red';
+                const pnlSign = t.pnl_percent >= 0 ? '+' : '';
+                const dirIcon = t.position === 'LONG' ? '📈' : '📉';
+                const reasonMap = { 'STOP_LOSS': 'SL', 'TRAILING_STOP_EXIT': 'TS', 'END_OF_DATA': 'EOD' };
+                const reason = reasonMap[t.exit_reason] || t.exit_reason;
+                html += `<tr class="border-b border-navy-border/10 hover:bg-navy-800/20">` +
+                    `<td class="py-1 px-1">${dirIcon} ${t.position}</td>` +
+                    `<td class="py-1 px-1 text-right text-gray-400">$${t.entry_price.toFixed(2)}</td>` +
+                    `<td class="py-1 px-1 text-right text-gray-400">$${t.exit_price.toFixed(2)}</td>` +
+                    `<td class="py-1 px-1 text-right ${pnlColor} font-bold">${pnlSign}${t.pnl_percent.toFixed(2)}%</td>` +
+                    `<td class="py-1 px-1 text-right text-gray-500">${reason}</td></tr>`;
+            });
+            html += '</tbody></table>';
+            tradesListEl.innerHTML = html;
+        }
+
+        if (statusEl) statusEl.textContent = `완료 — ${data.total_trades}거래 (${symbol.split('/')[0]} ${timeframe})`;
+
+    } catch (e) {
+        console.error("Backtest error:", e);
+        if (statusEl) statusEl.textContent = `오류: ${e.message}`;
+    }
+}
+
 // --- Manual Override ---
 let isManualPanelOpen = false;
 
@@ -3474,6 +3713,7 @@ async function initializeApp() {
         syncSystemHealth(),
         fetchAndRenderHeatmap(),
         fetchLiveTickers(),
+        syncAdvancedStats(),
     ]);
 
     // 초기 렌더링 후 타이머 설정
@@ -3486,6 +3726,7 @@ async function initializeApp() {
     setInterval(syncSystemHealth, 5000);
     setInterval(fetchAndRenderHeatmap, 60000);
     setInterval(fetchLiveTickers, 5000);
+    setInterval(syncAdvancedStats, 30000);  // [Advanced Analytics] 30초마다 갱신
     // [Phase 21.2] 스트레스 바이패스 상태 주기적 갱신 (10초마다 카운트다운 동기화)
     setInterval(refreshStressBypassUI, 10000);
     refreshStressBypassUI();
@@ -4351,6 +4592,7 @@ function switchMainTab(tabName) {
     if (tabName === 'analytics') {
         syncStats();
         fetchAndRenderHeatmap();
+        syncAdvancedStats();
     }
 }
 

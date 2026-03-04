@@ -1149,6 +1149,82 @@
                     </button>
                 </div>
 
+                <!-- ══ Advanced Analytics Dashboard ══ -->
+                <div class="glass-panel p-5 flex flex-col gap-4 text-xs" id="advanced-analytics-panel">
+                    <div class="flex items-center justify-between border-b border-navy-border pb-2">
+                        <div class="flex items-center gap-1.5">
+                            <h3 class="text-gray-400 uppercase tracking-widest text-[10px]">Advanced Analytics</h3>
+                        </div>
+                        <span class="text-[8px] font-mono text-gray-600" id="adv-stats-count">0 trades analyzed</span>
+                    </div>
+
+                    <!-- 방향별 LONG vs SHORT 비교 -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="bg-navy-900/60 rounded-xl p-3 border border-neon-green/20 relative overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-br from-neon-green/5 to-transparent pointer-events-none rounded-xl"></div>
+                            <div class="text-[8px] text-gray-500 uppercase tracking-widest mb-1 font-semibold flex items-center gap-1">
+                                <span>📈</span> LONG
+                            </div>
+                            <div id="adv-long-wr" class="font-mono text-lg font-black text-neon-green leading-none">0%</div>
+                            <div class="text-[8px] text-gray-600 mt-1 font-mono">
+                                <span id="adv-long-trades">0회</span> · <span id="adv-long-pnl" class="text-neon-green">+0.00</span>
+                            </div>
+                        </div>
+                        <div class="bg-navy-900/60 rounded-xl p-3 border border-neon-red/20 relative overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-br from-neon-red/5 to-transparent pointer-events-none rounded-xl"></div>
+                            <div class="text-[8px] text-gray-500 uppercase tracking-widest mb-1 font-semibold flex items-center gap-1">
+                                <span>📉</span> SHORT
+                            </div>
+                            <div id="adv-short-wr" class="font-mono text-lg font-black text-neon-red leading-none">0%</div>
+                            <div class="text-[8px] text-gray-600 mt-1 font-mono">
+                                <span id="adv-short-trades">0회</span> · <span id="adv-short-pnl" class="text-neon-red">+0.00</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 심볼별 성과 테이블 -->
+                    <div>
+                        <div class="text-[9px] text-gray-500 uppercase tracking-widest mb-2 font-semibold">Symbol Breakdown</div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-[10px] font-mono">
+                                <thead>
+                                    <tr class="text-gray-500 border-b border-navy-border/40">
+                                        <th class="text-left py-1.5 px-1 font-semibold">Symbol</th>
+                                        <th class="text-center py-1.5 px-1 font-semibold">Trades</th>
+                                        <th class="text-center py-1.5 px-1 font-semibold">Win%</th>
+                                        <th class="text-right py-1.5 px-1 font-semibold">Net PnL</th>
+                                        <th class="text-right py-1.5 px-1 font-semibold">Avg Hold</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adv-symbol-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- 시간대별 히트맵 (KST) -->
+                    <div>
+                        <div class="text-[9px] text-gray-500 uppercase tracking-widest mb-2 font-semibold">Hourly Performance (KST)</div>
+                        <div id="adv-hour-heatmap" class="grid grid-cols-12 gap-[2px]"></div>
+                        <div class="flex items-center justify-between mt-1.5">
+                            <span class="text-[8px] text-gray-600 font-mono">00:00</span>
+                            <div class="flex items-center gap-1 text-[8px] text-gray-600 font-mono">
+                                <span>손실</span>
+                                <div class="w-2 h-2 rounded-sm" style="background:#7a0000;"></div>
+                                <div class="w-2 h-2 rounded-sm" style="background:#161b22;border:1px solid #30363d;"></div>
+                                <div class="w-2 h-2 rounded-sm" style="background:#006d32;"></div>
+                                <span>수익</span>
+                            </div>
+                            <span class="text-[8px] text-gray-600 font-mono">23:00</span>
+                        </div>
+                    </div>
+
+                    <!-- 요일별 성과 바 차트 -->
+                    <div>
+                        <div class="text-[9px] text-gray-500 uppercase tracking-widest mb-2 font-semibold">Day of Week</div>
+                        <div id="adv-weekday-chart" class="flex items-end gap-1 h-16"></div>
+                    </div>
+                </div>
+
                 <!-- AI Confidence Matrix (moved from RIGHT) -->
                 <div class="glass-panel p-5 relative overflow-hidden">
                     <h3 class="text-xs text-gray-400 uppercase tracking-widest border-b border-navy-border pb-2 mb-4">
@@ -1224,6 +1300,93 @@
                     </div>
                     <div id="heatmap-stats-bar" class="mt-3 pt-2.5 border-t border-navy-border/40"></div>
                 </div>
+
+                <!-- ══ Backtest Visualizer ══ -->
+                <div class="glass-panel p-5 flex flex-col gap-3.5 text-xs">
+                    <div class="flex items-center justify-between border-b border-navy-border pb-2">
+                        <h3 class="text-gray-400 uppercase tracking-widest text-[10px]">Backtest Visualizer</h3>
+                        <span class="text-[8px] font-mono text-gray-600" id="bt-status">대기 중</span>
+                    </div>
+                    <!-- 컨트롤 패널 -->
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[8px] text-gray-500 uppercase tracking-wider">Symbol</label>
+                            <select id="bt-symbol"
+                                class="bg-navy-900/80 border border-navy-border rounded px-2 py-1.5 text-[10px] font-mono text-text-main focus:outline-none focus:border-accent-purple">
+                                <option value="BTC/USDT:USDT">BTC/USDT</option>
+                                <option value="ETH/USDT:USDT">ETH/USDT</option>
+                                <option value="SOL/USDT:USDT">SOL/USDT</option>
+                                <option value="XRP/USDT:USDT">XRP/USDT</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[8px] text-gray-500 uppercase tracking-wider">Timeframe</label>
+                            <select id="bt-timeframe"
+                                class="bg-navy-900/80 border border-navy-border rounded px-2 py-1.5 text-[10px] font-mono text-text-main focus:outline-none focus:border-accent-purple">
+                                <option value="5m">5m</option>
+                                <option value="15m" selected>15m</option>
+                                <option value="1h">1h</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[8px] text-gray-500 uppercase tracking-wider">Candles</label>
+                            <select id="bt-limit"
+                                class="bg-navy-900/80 border border-navy-border rounded px-2 py-1.5 text-[10px] font-mono text-text-main focus:outline-none focus:border-accent-purple">
+                                <option value="200">200</option>
+                                <option value="500" selected>500</option>
+                                <option value="1000">1000</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[8px] text-gray-500 uppercase tracking-wider">Slippage</label>
+                            <select id="bt-slippage"
+                                class="bg-navy-900/80 border border-navy-border rounded px-2 py-1.5 text-[10px] font-mono text-text-main focus:outline-none focus:border-accent-purple">
+                                <option value="0">0 bps</option>
+                                <option value="5" selected>5 bps</option>
+                                <option value="10">10 bps</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button onclick="runBacktestVisualizer()"
+                        class="w-full py-2.5 px-3 rounded-lg border border-accent-purple/50 bg-accent-purple/10 text-[11px] font-mono text-accent-purple hover:bg-accent-purple/20 hover:border-accent-purple transition-all duration-200 flex items-center justify-center gap-2 font-bold tracking-widest uppercase">
+                        <span>🧪</span> Run Backtest
+                    </button>
+
+                    <!-- 결과 요약 -->
+                    <div id="bt-summary" class="hidden grid grid-cols-2 md:grid-cols-5 gap-2">
+                        <div class="bg-navy-900/40 rounded-lg p-2 border border-navy-border/60 flex flex-col items-center">
+                            <span class="text-[8px] text-gray-500 uppercase">Trades</span>
+                            <span id="bt-total" class="font-mono text-sm font-bold text-text-main">0</span>
+                        </div>
+                        <div class="bg-navy-900/40 rounded-lg p-2 border border-navy-border/60 flex flex-col items-center">
+                            <span class="text-[8px] text-gray-500 uppercase">Win Rate</span>
+                            <span id="bt-winrate" class="font-mono text-sm font-bold text-neon-green">0%</span>
+                        </div>
+                        <div class="bg-navy-900/40 rounded-lg p-2 border border-navy-border/60 flex flex-col items-center">
+                            <span class="text-[8px] text-gray-500 uppercase">PnL</span>
+                            <span id="bt-pnl" class="font-mono text-sm font-bold text-neon-green">0%</span>
+                        </div>
+                        <div class="bg-navy-900/40 rounded-lg p-2 border border-navy-border/60 flex flex-col items-center">
+                            <span class="text-[8px] text-gray-500 uppercase">Max DD</span>
+                            <span id="bt-mdd" class="font-mono text-sm font-bold text-neon-red">0%</span>
+                        </div>
+                        <div class="bg-navy-900/40 rounded-lg p-2 border border-navy-border/60 flex flex-col items-center">
+                            <span class="text-[8px] text-gray-500 uppercase">Sharpe</span>
+                            <span id="bt-sharpe" class="font-mono text-sm font-bold text-text-main">0</span>
+                        </div>
+                    </div>
+
+                    <!-- 차트 (진입/청산 마커 포함) -->
+                    <div id="bt-chart-container" class="hidden rounded-lg border border-navy-border bg-navy-900/40 overflow-hidden" style="height:300px;"></div>
+
+                    <!-- 잔고 곡선 -->
+                    <div id="bt-equity-container" class="hidden rounded-lg border border-navy-border bg-navy-900/40 overflow-hidden" style="height:150px;">
+                    </div>
+
+                    <!-- 거래 로그 -->
+                    <div id="bt-trades-list" class="hidden max-h-40 overflow-y-auto"></div>
+                </div>
+
             </div><!-- /tab-analytics -->
 
             <!-- ══ Tab: Settings ══ -->

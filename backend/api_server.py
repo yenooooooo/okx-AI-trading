@@ -48,6 +48,19 @@ def _tg_entry(symbol: str, direction: str, price: float, amount: int, leverage: 
             f"🔥 거래량 폭발: {_vol}\n"
             f"🛡️ ATR 방어선: {_atr}\n"
         )
+        # [텔레그램 강화] 7게이트 통과 상세 표시
+        gates = payload.get('gates')
+        if gates and isinstance(gates, dict):
+            _gate_icons = {
+                'ADX': '📊', 'CHOP': '🔀', 'Volume': '🔥',
+                'Disparity': '📏', 'Macro': '🌍', 'RSI': '📉', 'MACD': '📈',
+            }
+            msg += f"{_TG_LINE}\n"
+            msg += f"[7-Gate Scoreboard]\n"
+            for gate_name, gate_val in gates.items():
+                _icon = _gate_icons.get(gate_name, '✅')
+                _safe_val = str(gate_val).replace('<', '&lt;').replace('>', '&gt;')
+                msg += f"{_icon} {gate_name}: {_safe_val}\n"
     msg += f"{_TG_LINE}"
     return msg
 
@@ -678,12 +691,109 @@ async def _okx_trade_sync_loop():
             logger.warning(f"[OKX Sync] 싱크 실패: {e}")
         await asyncio.sleep(300)  # 5분
 
+# ════════════ [Heartbeat Monitor] 서버 헬스 자동 감시 + 텔레그램 알림 ════════════
+_heartbeat_task = None
+_heartbeat_prev_status = {}  # 이전 상태 기억 (장애→복구 전환 감지용)
+
+async def _heartbeat_monitor_loop():
+    """5분 간격으로 핵심 서브시스템 상태를 점검하고, 장애 발생/복구 시 텔레그램 알림 발송"""
+    await asyncio.sleep(60)  # 서버 시작 후 60초 대기 (안정화)
+    global _heartbeat_prev_status
+
+    while True:
+        try:
+            checks = {}
+
+            # 1) OKX REST API
+            try:
+                if _engine and _engine.exchange:
+                    await asyncio.to_thread(_engine.exchange.fetch_balance)
+                    checks['okx_rest'] = 'OK'
+                else:
+                    checks['okx_rest'] = 'FAIL'
+            except Exception:
+                checks['okx_rest'] = 'FAIL'
+
+            # 2) Private WebSocket
+            try:
+                checks['okx_ws'] = 'OK' if (_private_ws_task and not _private_ws_task.done()) else 'FAIL'
+            except Exception:
+                checks['okx_ws'] = 'FAIL'
+
+            # 3) Trading Loop
+            try:
+                checks['trading_loop'] = 'OK' if (_trading_task and not _trading_task.done()) else 'WARN'
+            except Exception:
+                checks['trading_loop'] = 'WARN'
+
+            # 4) Telegram Bot
+            try:
+                from notifier import _telegram_app as _hb_tg
+                checks['telegram'] = 'OK' if (_hb_tg and _hb_tg.bot) else 'WARN'
+            except Exception:
+                checks['telegram'] = 'WARN'
+
+            # 장애 발생/복구 감지 및 알림
+            alerts = []
+            recoveries = []
+            _check_labels = {
+                'okx_rest': 'OKX REST API',
+                'okx_ws': 'OKX Private WebSocket',
+                'trading_loop': '매매 루프',
+                'telegram': '텔레그램 봇',
+            }
+
+            for key, status in checks.items():
+                prev = _heartbeat_prev_status.get(key, 'OK')
+                if status == 'FAIL' and prev != 'FAIL':
+                    alerts.append(_check_labels.get(key, key))
+                elif status == 'OK' and prev == 'FAIL':
+                    recoveries.append(_check_labels.get(key, key))
+
+            _heartbeat_prev_status = checks
+
+            # 장애 알림
+            if alerts:
+                _fail_list = ' / '.join(alerts)
+                _fail_msg = (
+                    f"🚨 <b>ANTIGRAVITY</b>  |  시스템 경고\n"
+                    f"{_TG_LINE}\n"
+                    f"⚠️ <b>서브시스템 장애 감지</b>\n"
+                    f"{_TG_LINE}\n"
+                    f"장애 항목 │  <code>{_fail_list}</code>\n"
+                    f"조치 필요 │  AWS 서버 상태 확인\n"
+                    f"{_TG_LINE}"
+                )
+                send_telegram_sync(_fail_msg)
+                bot_global_state["logs"].append(f"🚨 [Heartbeat] 서브시스템 장애 감지: {_fail_list}")
+                logger.error(f"[Heartbeat] 서브시스템 장애: {_fail_list}")
+
+            # 복구 알림
+            if recoveries:
+                _rec_list = ' / '.join(recoveries)
+                _rec_msg = (
+                    f"✅ <b>ANTIGRAVITY</b>  |  시스템 복구\n"
+                    f"{_TG_LINE}\n"
+                    f"🟢 <b>서브시스템 복구 확인</b>\n"
+                    f"{_TG_LINE}\n"
+                    f"복구 항목 │  <code>{_rec_list}</code>\n"
+                    f"{_TG_LINE}"
+                )
+                send_telegram_sync(_rec_msg)
+                bot_global_state["logs"].append(f"✅ [Heartbeat] 서브시스템 복구 확인: {_rec_list}")
+                logger.info(f"[Heartbeat] 서브시스템 복구: {_rec_list}")
+
+        except Exception as e:
+            logger.error(f"[Heartbeat] 모니터링 루프 예외: {e}")
+
+        await asyncio.sleep(300)  # 5분
+
 # ════════════════════════════════════════════════════════════════════
 
 @app_server.on_event("startup")
 async def startup_event():
     """서버 시작 시 OKXEngine 1회만 초기화 + 프라이빗 WS 시작"""
-    global _engine, _private_ws_task, _margin_guard_bg_task, _trade_sync_task
+    global _engine, _private_ws_task, _margin_guard_bg_task, _trade_sync_task, _heartbeat_task
     init_db()
     bot_global_state["logs"].append("[봇] 🔴 실전망(LIVE) 서버 시스템 가동 시작 - 실전 API 연동 완료")
     logger.info("API 서버 시작 - OKXEngine 초기화 중...")
@@ -717,6 +827,10 @@ async def startup_event():
     await init_telegram_bot()
     bot_global_state["logs"].append("[봇] 텔레그램 양방향 컨트롤 타워 비동기 가동 완료")
     logger.info("텔레그램 양방향 컨트롤 타워 비동기 시작 완료")
+
+    # Heartbeat Monitor 시작 (서브시스템 장애 자동 감지 + 텔레그램 알림)
+    _heartbeat_task = asyncio.create_task(_heartbeat_monitor_loop())
+    logger.info("Heartbeat Monitor 백그라운드 태스크 시작 (5분 간격)")
 
     # [DRY] broadcast_dashboard_state: 프론트는 OKX Public WS 직결 사용 중
     # 클라이언트 연결 시점에 on-demand 활성화 구조로 대기 (startup 공회전 제거)
@@ -3509,6 +3623,159 @@ async def fetch_history_stats():
     }
 
 
+@app_server.get("/api/v1/stats/advanced")
+async def fetch_advanced_stats():
+    """[통계 대시보드] 심볼별 / 시간대별 / 방향별 분석 (READ-ONLY, 사이드이펙트 없음)"""
+    from datetime import datetime, timezone, timedelta
+    from collections import defaultdict
+
+    trades = get_trades(limit=99999)
+
+    # [Season Filter]
+    _season_start = get_config('season_start_date')
+    if _season_start:
+        trades = [t for t in trades if (t.get('created_at') or '') >= str(_season_start)]
+
+    KST = timezone(timedelta(hours=9))
+
+    # ── 1. 심볼별 통계 ──────────────────────────────────────────────────────
+    symbol_map = defaultdict(lambda: {
+        'total': 0, 'wins': 0, 'net_pnl': 0.0, 'gross_pnl': 0.0,
+        'total_hold_sec': 0.0, 'hold_count': 0,
+    })
+    # ── 2. 시간대별 (KST) 통계 ──────────────────────────────────────────────
+    hour_map = defaultdict(lambda: {'total': 0, 'wins': 0, 'net_pnl': 0.0})
+    # ── 3. 방향별 통계 ──────────────────────────────────────────────────────
+    dir_map = defaultdict(lambda: {'total': 0, 'wins': 0, 'net_pnl': 0.0})
+    # ── 4. 요일별 (KST) 통계 ──────────────────────────────────────────────
+    weekday_map = defaultdict(lambda: {'total': 0, 'wins': 0, 'net_pnl': 0.0})
+    _weekday_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+    for t in trades:
+        sym = (t.get('symbol') or 'UNKNOWN').split(':')[0]
+        net_pnl = t.get('pnl') or 0
+        gross_pnl = t.get('gross_pnl') or 0
+        is_win = net_pnl > 0
+        direction = (t.get('position_type') or 'UNKNOWN').upper()
+
+        # 심볼별
+        symbol_map[sym]['total'] += 1
+        symbol_map[sym]['net_pnl'] += net_pnl
+        symbol_map[sym]['gross_pnl'] += gross_pnl
+        if is_win:
+            symbol_map[sym]['wins'] += 1
+
+        # 보유 시간 계산
+        entry_time_str = t.get('entry_time')
+        exit_time_str = t.get('exit_time')
+        if entry_time_str and exit_time_str:
+            try:
+                et = datetime.fromisoformat(str(entry_time_str).replace(' ', 'T'))
+                xt = datetime.fromisoformat(str(exit_time_str).replace(' ', 'T'))
+                hold_sec = max(0, (xt - et).total_seconds())
+                symbol_map[sym]['total_hold_sec'] += hold_sec
+                symbol_map[sym]['hold_count'] += 1
+            except Exception:
+                pass
+
+        # 시간대별 (진입 시각 기준, KST 변환)
+        created_at_str = t.get('created_at')
+        dt_kst = None
+        if created_at_str:
+            try:
+                dt = datetime.fromisoformat(str(created_at_str).replace(' ', 'T'))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                dt_kst = dt.astimezone(KST)
+            except Exception:
+                pass
+
+        if dt_kst:
+            hour_key = dt_kst.hour
+            hour_map[hour_key]['total'] += 1
+            hour_map[hour_key]['net_pnl'] += net_pnl
+            if is_win:
+                hour_map[hour_key]['wins'] += 1
+
+            # 요일별
+            wd_key = _weekday_names[dt_kst.weekday()]
+            weekday_map[wd_key]['total'] += 1
+            weekday_map[wd_key]['net_pnl'] += net_pnl
+            if is_win:
+                weekday_map[wd_key]['wins'] += 1
+
+        # 방향별
+        if direction in ('LONG', 'SHORT'):
+            dir_map[direction]['total'] += 1
+            dir_map[direction]['net_pnl'] += net_pnl
+            if is_win:
+                dir_map[direction]['wins'] += 1
+
+    # ── 결과 조립 ──────────────────────────────────────────────────────────
+    def _wr(wins, total):
+        return round(wins / total * 100, 1) if total > 0 else 0.0
+
+    # 심볼별 (PnL 내림차순 정렬)
+    by_symbol = []
+    for sym, d in symbol_map.items():
+        avg_hold_min = round(d['total_hold_sec'] / d['hold_count'] / 60, 1) if d['hold_count'] > 0 else 0.0
+        by_symbol.append({
+            'symbol': sym,
+            'total': d['total'],
+            'wins': d['wins'],
+            'losses': d['total'] - d['wins'],
+            'win_rate': _wr(d['wins'], d['total']),
+            'net_pnl': round(d['net_pnl'], 4),
+            'avg_hold_min': avg_hold_min,
+        })
+    by_symbol.sort(key=lambda x: x['net_pnl'], reverse=True)
+
+    # 시간대별 (0~23시)
+    by_hour = []
+    for h in range(24):
+        d = hour_map[h]
+        by_hour.append({
+            'hour': h,
+            'label': f"{h:02d}:00",
+            'total': d['total'],
+            'wins': d['wins'],
+            'win_rate': _wr(d['wins'], d['total']),
+            'net_pnl': round(d['net_pnl'], 4),
+        })
+
+    # 방향별
+    by_direction = []
+    for dir_name in ['LONG', 'SHORT']:
+        d = dir_map[dir_name]
+        by_direction.append({
+            'direction': dir_name,
+            'total': d['total'],
+            'wins': d['wins'],
+            'win_rate': _wr(d['wins'], d['total']),
+            'net_pnl': round(d['net_pnl'], 4),
+        })
+
+    # 요일별 (Mon~Sun 순서)
+    by_weekday = []
+    for wd in _weekday_names:
+        d = weekday_map[wd]
+        by_weekday.append({
+            'day': wd,
+            'total': d['total'],
+            'wins': d['wins'],
+            'win_rate': _wr(d['wins'], d['total']),
+            'net_pnl': round(d['net_pnl'], 4),
+        })
+
+    return {
+        'by_symbol': by_symbol,
+        'by_hour': by_hour,
+        'by_direction': by_direction,
+        'by_weekday': by_weekday,
+        'total_analyzed': len(trades),
+    }
+
+
 @app_server.post("/api/v1/wipe_db")
 async def wipe_database():
     """[ADMIN] trades 테이블 전면 삭제 — 실전 투입 전 테스트 데이터 초기화"""
@@ -4632,6 +4899,7 @@ async def run_health_check():
         {"method": "GET", "path": "/api/v1/ohlcv", "name": "차트 데이터"},
         {"method": "GET", "path": "/api/v1/stress_bypass", "name": "바이패스 현황"},
         {"method": "GET", "path": "/api/v1/history_stats", "name": "기간별 통계"},
+        {"method": "GET", "path": "/api/v1/stats/advanced", "name": "심화 분석"},
         {"method": "GET", "path": "/api/v1/export_csv", "name": "CSV 내보내기"},
         {"method": "GET", "path": "/api/v1/health_check", "name": "연결 점검"},
         {"method": "POST", "path": "/api/v1/toggle", "name": "봇 시작/중지"},
