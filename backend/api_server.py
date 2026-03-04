@@ -2247,8 +2247,9 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["lowest_price"] = executed_price
                                         bot_global_state["symbols"][symbol]["contracts"] = trade_amount  # 청산 시 재사용
                                         bot_global_state["symbols"][symbol]["partial_tp_executed"] = False  # [Partial TP] 진입 시 반드시 초기화
+                                        bot_global_state["symbols"][symbol]["breakeven_stop_active"] = False  # [방어막] 이전 포지션 잔류 플래그 강제 초기화
                                         bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
-                                        
+
                                         del bot_global_state["symbols"][symbol]["pending_order_id"]
                                         del bot_global_state["symbols"][symbol]["pending_order_time"]
                                         del bot_global_state["symbols"][symbol]["pending_amount"]
@@ -2285,6 +2286,10 @@ async def async_trading_loop():
 
                                                 # SL: hard_stop_loss_rate 직결
                                                 _sl_rate_init = strategy_instance.hard_stop_loss_rate
+                                                # [방어막] SL rate 최소 0.2% 보장
+                                                if _sl_rate_init < 0.002:
+                                                    logger.warning(f"[{symbol}] ⚠️ Smart Limit SL rate 이상({_sl_rate_init}) → 0.002로 교정")
+                                                    _sl_rate_init = 0.002
                                                 _sl_init_sl = round(_entry_p_sl * (1 - _sl_rate_init), 4) if real_side == "LONG" else round(_entry_p_sl * (1 + _sl_rate_init), 4)
 
                                                 # [TP Split] 멀티계약: TP 50% / 1계약: TP 100%
@@ -2625,8 +2630,20 @@ async def async_trading_loop():
 
                                     # 이상적인 손절가(real_sl)가 존재하고, 기존에 걸어둔 손절가가 있을 경우 비교
                                     if _current_ideal_sl > 0 and _last_sl > 0 and _active_sl_id:
+                                        # [방어막] SL이 진입가 방향으로 비정상적으로 이동하는 것 차단
+                                        # breakeven_stop_active 없이 SL이 entry 근처로 이동 = 플래그 오염 의심
+                                        _amend_entry = float(bot_global_state["symbols"][symbol].get("entry_price", 0.0))
+                                        _amend_be_active = bot_global_state["symbols"][symbol].get("breakeven_stop_active", False)
+                                        _amend_pt_done = bot_global_state["symbols"][symbol].get("partial_tp_executed", False)
+                                        if _amend_entry > 0 and not _amend_be_active and not _amend_pt_done:
+                                            # 본전 방어/분할 익절 미발동 상태에서 SL이 진입가 대비 0.1% 이내로 이동 시도 → 차단
+                                            _sl_to_entry_dist = abs(_current_ideal_sl - _amend_entry) / _amend_entry
+                                            if _sl_to_entry_dist < 0.001:
+                                                logger.warning(f"[{symbol}] 🚨 [Smart Amend 차단] SL({_current_ideal_sl:.4f})이 진입가({_amend_entry:.4f}) 대비 {_sl_to_entry_dist*100:.3f}%로 비정상 접근 — 갱신 스킵")
+                                                _current_ideal_sl = 0  # 갱신 방지
+
                                         # 오차율 계산 (절대값(목표가 - 기존가) / 기존가)
-                                        _diff_ratio = abs(_current_ideal_sl - _last_sl) / _last_sl
+                                        _diff_ratio = abs(_current_ideal_sl - _last_sl) / _last_sl if _current_ideal_sl > 0 and _last_sl > 0 else 0
 
                                         # 0.05% 이상 목표가가 변동되었을 때만 거래소 주문 갱신 (API Rate Limit 및 DDoS 오인 방어)
                                         if _diff_ratio >= 0.0005:
@@ -3230,6 +3247,10 @@ async def async_trading_loop():
                                         bot_global_state["symbols"][symbol]["contracts"] = trade_amount
                                         bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_entry
                                         bot_global_state["symbols"][symbol]["entry_timestamp"] = time.time()  # [Race Condition Fix]
+                                        # [방어막] 이전 포지션 잔류 플래그 강제 초기화 — SL 진입가 이동 방지
+                                        bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+                                        bot_global_state["symbols"][symbol]["breakeven_stop_active"] = False
+                                        bot_global_state["symbols"][symbol]["exchange_tp_filled"] = False
 
                                     # [Phase 24 Fix] 주문 성공 후 캔들 잠금 — 차단 시 재시도 허용
                                     bot_global_state["symbols"][symbol]["last_signal_candle_ts"] = _cur_candle_ts
@@ -3267,6 +3288,10 @@ async def async_trading_loop():
                                             _init_tp = round(_entry_p + _target_offset, 4) if signal == "LONG" else round(_entry_p - _target_offset, 4)
                                             # [Phase 26] 초기 손절가: 튜닝 패널 hard_stop_loss_rate 설정 직결
                                             _sl_rate = strategy_instance.hard_stop_loss_rate
+                                            # [방어막] SL rate가 0이거나 비정상적으로 작으면 최소 0.2% 보장
+                                            if _sl_rate < 0.002:
+                                                logger.warning(f"[{symbol}] ⚠️ hard_stop_loss_rate 이상({_sl_rate}) → 최소 0.002(0.2%)로 교정")
+                                                _sl_rate = 0.002
                                             _init_sl = round(_entry_p * (1 - _sl_rate), 4) if signal == "LONG" else round(_entry_p * (1 + _sl_rate), 4)
 
                                             # [TP Split] 멀티계약: TP 50% / 1계약: TP 미등록(트레일링 전용)
@@ -3599,6 +3624,8 @@ async def execute_test_order(direction: str = "LONG"):
                     bot_global_state["symbols"][symbol]["contracts"] = trade_amount
                     bot_global_state["symbols"][symbol]["leverage"] = trade_leverage
                     bot_global_state["symbols"][symbol]["partial_tp_executed"] = False
+                    bot_global_state["symbols"][symbol]["breakeven_stop_active"] = False  # [방어막] 이전 포지션 잔류 플래그 강제 초기화
+                    bot_global_state["symbols"][symbol]["exchange_tp_filled"] = False
                     bot_global_state["symbols"][symbol]["is_paper"] = _is_shadow_test
 
                 entry_emoji = "📈" if signal == "LONG" else "📉"
@@ -4400,26 +4427,9 @@ async def update_config(key: str, value: str, symbol: str = "GLOBAL"):
                         _fee = -(_pv * 0.0005 * 2)
                         _pnl = _gross + _fee
                         _pnl_pct = (_pnl / (_pv / _lev) * 100) if _pv > 0 else 0.0
-                        # 상태 초기화
+                        # [Phase 32] 통합 상태 초기화 헬퍼 사용 (breakeven_stop_active 등 누락 필드 방지)
                         async with state_lock:
-                            _sym_st["position"] = "NONE"
-                            _sym_st["entry_price"] = 0.0
-                            _sym_st["last_exit_time"] = _time.time()
-                            _sym_st["take_profit_price"] = "대기중"
-                            _sym_st["stop_loss_price"] = 0.0
-                            _sym_st["real_sl"] = 0.0
-                            _sym_st["trailing_active"] = False
-                            _sym_st["trailing_target"] = 0.0
-                            _sym_st["partial_tp_executed"] = False
-                            _sym_st["is_paper"] = False
-                            _sym_st["entry_timestamp"] = 0.0
-                            _sym_st["active_tp_order_id"] = None
-                            _sym_st["active_sl_order_id"] = None
-                            _sym_st["last_placed_tp_price"] = 0.0
-                            _sym_st["last_placed_sl_price"] = 0.0
-                            # PENDING 관련 필드 제거
-                            for _pk in ["pending_order_id", "pending_order_time", "pending_amount", "pending_price"]:
-                                _sym_st.pop(_pk, None)
+                            _reset_position_state(_sym_st)
                         _emoji = "+" if _pnl >= 0 else ""
                         _closed_papers.append(f"{_sym} {_pos} (PnL: {_emoji}{_pnl:.4f} USDT)")
                 if _closed_papers:
