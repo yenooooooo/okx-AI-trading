@@ -141,7 +141,8 @@ async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             trades = _engine.get_recent_trade_receipts(sym, limit=10)
                             matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
                             if matching_trades:
-                                net_pnl, total_gross_pnl, total_fee, avg_fill_price = _engine.calculate_realized_pnl(matching_trades, entry)
+                                net_pnl, total_gross_pnl, _fee_raw, avg_fill_price = _engine.calculate_realized_pnl(matching_trades, entry)
+                                total_fee = abs(_fee_raw)  # OKX fee 음수 → 양수 통일
                                 receipt_found = True
                                 break
                         except Exception:

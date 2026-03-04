@@ -723,18 +723,22 @@ async def _sync_okx_trades(engine):
         entry_price = float(pos.get('openAvgPx') or 0)
         exit_price = float(pos.get('closeAvgPx') or 0)
         gross_pnl = float(pos.get('pnl') or 0)
-        fee = float(pos.get('fee') or 0)
-        net_pnl = gross_pnl + fee  # fee는 음수
+        _fee_raw = float(pos.get('fee') or 0)
+        fee = abs(_fee_raw)  # OKX fee 음수 → 양수 통일
+        net_pnl = gross_pnl - fee  # gross - fee(양수) = 순수익
         leverage = int(float(pos.get('lever') or 1))
         amount = float(pos.get('closeTotalPos') or 0)
 
-        # pnl_percent 계산
+        # pnl_percent 계산 — 순수익(net_pnl) 기준 ROE (레버리지 반영)
         pnl_percent = 0.0
-        if entry_price > 0:
-            if direction == 'LONG':
-                pnl_percent = (exit_price - entry_price) / entry_price * 100
-            else:
-                pnl_percent = (entry_price - exit_price) / entry_price * 100
+        if entry_price > 0 and amount > 0:
+            try:
+                _sync_cs = float(engine_api.exchange.market(symbol).get('contractSize', 0.01)) if engine_api else 0.01
+            except Exception:
+                _sync_cs = 0.01
+            _sync_pos_val = entry_price * amount * _sync_cs
+            _sync_margin = _sync_pos_val / leverage if leverage > 0 else _sync_pos_val
+            pnl_percent = (net_pnl / _sync_margin * 100) if _sync_margin > 0 else 0.0
 
         # 타임스탬프 변환 (ms → datetime)
         entry_time = _sync_dt.fromtimestamp(int(pos.get('cTime', 0)) / 1000) if pos.get('cTime') else None
@@ -2691,8 +2695,8 @@ async def async_trading_loop():
                                                 total_gross_pnl = (current_price - entry) * amount * contract_size
                                             else:
                                                 total_gross_pnl = (entry - current_price) * amount * contract_size
-                                            total_fee = -(position_value * 0.0005 * 2)  # 0.05% Taker 양방향 가상 수수료
-                                            pnl_amount = total_gross_pnl + total_fee
+                                            total_fee = position_value * 0.0005 * 2  # 0.05% Taker 양방향 가상 수수료 (양수)
+                                            pnl_amount = total_gross_pnl - total_fee
                                             pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
                                             # DB 저장 차단 (is_paper == True)
                                         else:
@@ -2709,7 +2713,8 @@ async def async_trading_loop():
                                                     trades = await asyncio.to_thread(engine_api.get_recent_trade_receipts, symbol, limit=20)
                                                     matching_trades = [t for t in trades if str(t.get('order')) == str(order_id)]
                                                     if matching_trades:
-                                                        net_pnl, total_gross_pnl, total_fee, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
+                                                        net_pnl, total_gross_pnl, _fee_raw, avg_fill_price = engine_api.calculate_realized_pnl(matching_trades, entry)
+                                                        total_fee = abs(_fee_raw)  # OKX fee는 음수 → 표시/DB용 양수 변환
                                                         receipt_found = True
                                                         break
                                                 except Exception as receipt_err:
@@ -2735,8 +2740,8 @@ async def async_trading_loop():
                                                     total_gross_pnl = (current_price - entry) * amount * contract_size_est
                                                 else:
                                                     total_gross_pnl = (entry - current_price) * amount * contract_size_est
-                                                total_fee = -(entry * amount * contract_size_est * 0.0005 * 2)
-                                                net_pnl = total_gross_pnl + total_fee
+                                                total_fee = entry * amount * contract_size_est * 0.0005 * 2  # 양수 통일
+                                                net_pnl = total_gross_pnl - total_fee
                                                 avg_fill_price = current_price
                                             pnl_amount = net_pnl
                                             try:
@@ -3632,8 +3637,8 @@ async def close_paper_position():
             total_gross = (current_price - entry) * amount * contract_size
         else:
             total_gross = (entry - current_price) * amount * contract_size
-        total_fee = -(position_value * 0.0005 * 2)
-        pnl_amount = total_gross + total_fee
+        total_fee = position_value * 0.0005 * 2  # 양수 통일
+        pnl_amount = total_gross - total_fee
         pnl_percent = (pnl_amount / (position_value / leverage) * 100) if position_value > 0 else 0.0
 
         # DB 저장 차단 (Paper → save_trade 절대 호출 안함)
