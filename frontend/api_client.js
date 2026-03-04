@@ -1574,6 +1574,8 @@ async function syncConfig(symbol = null) {
                 // [Phase 18.1] 모달 심볼 드롭다운 동기화
                 const modalSymSel = document.getElementById('modal-target-symbol');
                 if (modalSymSel && activeSymbol) modalSymSel.value = activeSymbol;
+                // [Dynamic Symbol] 스캐너가 찾은 코인을 드롭다운에 동적 추가
+                if (Array.isArray(val)) _syncSymbolDropdowns(val, activeSymbol);
                 // 타겟 그리드 버튼 활성 상태 동기화
                 document.querySelectorAll('.target-coin-btn').forEach(btn => {
                     if (btn.dataset.symbol === activeSymbol) {
@@ -3820,6 +3822,65 @@ async function fetchLiveTickers() {
         });
     } catch (e) {
         // OKX Public API 오류 시 조용히 무시 (뱃지 미갱신)
+    }
+}
+
+// ════════════ [Dynamic Symbol] 스캐너 연동 심볼 드롭다운 동적 갱신 ════════════
+
+// 기본 하드코딩 심볼 (HTML에 항상 존재 — fallback 보장)
+const _BASE_SYMBOLS = new Set([
+    'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT',
+    'DOGE/USDT:USDT', 'XRP/USDT:USDT', 'AVAX/USDT:USDT',
+]);
+
+function _syncSymbolDropdowns(symbolList, activeSymbol) {
+    // 대상 드롭다운 ID 목록
+    const selectIds = ['modal-target-symbol', 'bt-symbol', 'opt-symbol'];
+
+    for (const selId of selectIds) {
+        const sel = document.getElementById(selId);
+        if (!sel) continue;
+
+        // 현재 드롭다운에 있는 값 수집
+        const existing = new Set();
+        for (const opt of sel.options) {
+            existing.add(opt.value);
+        }
+
+        // API 심볼 중 드롭다운에 없는 것만 추가
+        for (const sym of symbolList) {
+            if (!existing.has(sym)) {
+                const opt = document.createElement('option');
+                opt.value = sym;
+                opt.textContent = sym.split(':')[0]; // "PEPE/USDT:USDT" → "PEPE/USDT"
+                sel.appendChild(opt);
+                existing.add(sym);
+            }
+        }
+
+        // 활성 심볼 선택 동기화
+        if (activeSymbol && existing.has(activeSymbol)) {
+            sel.value = activeSymbol;
+        }
+    }
+
+    // 튜닝 패널 타겟 그리드 버튼도 동적 추가
+    const btnGrid = document.querySelector('.target-coin-btn')?.parentElement;
+    if (btnGrid) {
+        const existingBtns = new Set();
+        btnGrid.querySelectorAll('.target-coin-btn').forEach(b => existingBtns.add(b.dataset.symbol));
+
+        for (const sym of symbolList) {
+            if (!existingBtns.has(sym)) {
+                const btn = document.createElement('button');
+                btn.className = 'target-coin-btn flex items-center justify-center text-xs py-2 rounded font-mono font-bold transition-all border border-navy-border/50 bg-navy-900/40 text-gray-500 hover:text-gray-300';
+                btn.dataset.symbol = sym;
+                btn.onclick = () => setTargetSymbol(sym);
+                btn.textContent = sym.split('/')[0]; // "PEPE/USDT:USDT" → "PEPE"
+                btnGrid.appendChild(btn);
+                existingBtns.add(sym);
+            }
+        }
     }
 }
 
