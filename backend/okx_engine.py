@@ -35,6 +35,7 @@ class OKXEngine:
                 'secret': self.secret_key,
                 'password': self.password,
                 'enableRateLimit': True,
+                'timeout': 10000,
                 'options': {
                     'defaultType': 'swap',
                 }
@@ -44,9 +45,19 @@ class OKXEngine:
             self.exchange.check_required_credentials()
             print("[OKX 엔진] check_required_credentials() 통과 — 키 형식 이상 없음")
 
-            # [진단 Step 2] 퍼블릭 마켓 로드
-            self.exchange.load_markets()
-            print("[OKX 엔진] load_markets() 성공 — 퍼블릭 연결 정상")
+            # [진단 Step 2] 퍼블릭 마켓 로드 (최대 3회 재시도)
+            import time as _init_time
+            for _retry in range(3):
+                try:
+                    self.exchange.load_markets()
+                    print("[OKX 엔진] load_markets() 성공 — 퍼블릭 연결 정상")
+                    break
+                except Exception as _lm_err:
+                    print(f"[OKX 엔진] load_markets() 실패 ({_retry+1}/3): {_lm_err}")
+                    if _retry < 2:
+                        _init_time.sleep(3)
+                    else:
+                        raise _lm_err
 
             # [진단 Step 3] 프라이빗 인증 강제 테스트 (잔고 1회 동기 호출)
             test_balance = self.exchange.fetch_balance({'type': 'trading'})
