@@ -1278,17 +1278,6 @@ function updateActiveTuningBadge() {
         currentVals[key] = input ? parse(input.value) : NaN;
     }
 
-    const PRESET_LABELS = {
-        sniper: ['🎯 스나이퍼', 'text-yellow-300 border-yellow-500/50 bg-yellow-500/10'],
-        trend_rider: ['🌊 트렌드라이더', 'text-blue-300 border-blue-500/50 bg-blue-500/10'],
-        scalper: ['⚡ 스캘퍼', 'text-neon-green border-neon-green/50 bg-neon-green/10'],
-        iron_dome: ['🛡️ 아이언돔', 'text-orange-300 border-orange-500/50 bg-orange-500/10'],
-        factory_reset: ['🏭 팩토리', 'text-gray-300 border-gray-500/50 bg-gray-500/10'],
-        frenzy: ['🔥 FRENZY', 'text-red-400 border-red-500/50 bg-red-500/10'],
-        micro_seed: ['💎 마이크로', 'text-emerald-300 border-emerald-500/50 bg-emerald-500/10'],
-        scalp_context: ['📡 스캘프CTX', 'text-cyan-300 border-cyan-500/50 bg-cyan-500/10'],
-    };
-
     let matchedLabel = null;
     let matchedClass = null;
 
@@ -1360,6 +1349,18 @@ async function toggleBot() {
         alert('Toggle target failed: ' + error.message);
     }
 }
+
+// 프리셋 라벨 + 스타일 (syncBrain, renderPresets 공용)
+const PRESET_LABELS = {
+    sniper: ['🎯 스나이퍼', 'text-yellow-300 border-yellow-500/50 bg-yellow-500/10'],
+    trend_rider: ['🌊 트렌드라이더', 'text-blue-300 border-blue-500/50 bg-blue-500/10'],
+    scalper: ['⚡ 스캘퍼', 'text-neon-green border-neon-green/50 bg-neon-green/10'],
+    iron_dome: ['🛡️ 아이언돔', 'text-orange-300 border-orange-500/50 bg-orange-500/10'],
+    factory_reset: ['🏭 팩토리', 'text-gray-300 border-gray-500/50 bg-gray-500/10'],
+    frenzy: ['🔥 FRENZY', 'text-red-400 border-red-500/50 bg-red-500/10'],
+    micro_seed: ['💎 마이크로', 'text-emerald-300 border-emerald-500/50 bg-emerald-500/10'],
+    scalp_context: ['📡 스캘프CTX', 'text-cyan-300 border-cyan-500/50 bg-cyan-500/10'],
+};
 
 // 원클릭 전술 프리셋 정의 — 5가지 매매 스타일별 10개 파라미터 완전 매핑
 const PRESET_CONFIGS = {
