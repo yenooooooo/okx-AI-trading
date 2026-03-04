@@ -1726,15 +1726,19 @@ async def async_trading_loop():
                                 signal = _hybrid_signal
                                 analysis_msg = f"[실시간] {_hybrid_msg}"
                                 payload = _hybrid_payload
-                                _emit_thought(symbol, f"🎯 하이브리드 진입! 라이브봉 {_hybrid_signal} — 거래량 보정 {_vol_proj_ratio:.1f}x 적용")
-                                send_telegram_sync(
-                                    f"🎯 <b>하이브리드 진입 감지</b>\n{_TG_LINE}\n"
-                                    f"코인 │ <code>{_sym_short(symbol)}</code>\n"
-                                    f"방향 │ <b>{_hybrid_signal}</b> (라이브봉 실시간)\n"
-                                    f"사유 │ 확정봉 HOLD → 라이브봉 관문 충족\n"
-                                    f"보정 │ 거래량 {_vol_proj_ratio:.1f}x 프로젝션 ({_elapsed_sec:.0f}초/{_tf_seconds}초)\n{_TG_LINE}\n"
-                                    f"📌 확정봉 대기 없이 실시간 진입 시도"
-                                )
+                                # 텔레그램 + 의식 로그: 동일 라이브봉에서 1회만 발송
+                                _hybrid_live_ts = int(df['timestamp'].iloc[-1])
+                                if bot_global_state["symbols"][symbol].get("_last_hybrid_alert_ts", 0) != _hybrid_live_ts:
+                                    bot_global_state["symbols"][symbol]["_last_hybrid_alert_ts"] = _hybrid_live_ts
+                                    _emit_thought(symbol, f"🎯 하이브리드 진입! 라이브봉 {_hybrid_signal} — 거래량 보정 {_vol_proj_ratio:.1f}x 적용")
+                                    send_telegram_sync(
+                                        f"🎯 <b>하이브리드 진입 감지</b>\n{_TG_LINE}\n"
+                                        f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                                        f"방향 │ <b>{_hybrid_signal}</b> (라이브봉 실시간)\n"
+                                        f"사유 │ 확정봉 HOLD → 라이브봉 관문 충족\n"
+                                        f"보정 │ 거래량 {_vol_proj_ratio:.1f}x 프로젝션 ({_elapsed_sec:.0f}초/{_tf_seconds}초)\n{_TG_LINE}\n"
+                                        f"📌 확정봉 대기 없이 실시간 진입 시도"
+                                    )
                         except Exception as _hybrid_err:
                             logger.debug(f"[Hybrid Entry] 라이브봉 재평가 오류 (메인 루프 보호): {_hybrid_err}")
 
