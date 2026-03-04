@@ -1599,6 +1599,10 @@ async def async_trading_loop():
                             "last_starvation_report": _time.time(),
                             "last_analyzed_candle_ts": 0,
                             "last_signal_candle_ts": 0,  # [Phase 24] 캔들 단위 진입 시그널 중복 방지
+                            # [재진입 로직] 본전/소익 트레일링 후 같은 방향 1회 재진입 허용
+                            "_reentry_eligible": False,
+                            "_reentry_direction": "",
+                            "_reentry_count": 0,
                             # [Phase 22.1] 동적 지정가 방어막(Dynamic Limit TP/SL) 기억 장치
                             "active_tp_order_id": None,
                             "active_sl_order_id": None,
@@ -1726,6 +1730,10 @@ async def async_trading_loop():
 
                     if _new_candle:
                         bot_global_state["symbols"][symbol]["_last_confirmed_candle_ts"] = _confirmed_ts
+                        # [재진입 로직] 새 캔들 → 재진입 카운터/자격 초기화
+                        bot_global_state["symbols"][symbol]["_reentry_count"] = 0
+                        bot_global_state["symbols"][symbol]["_reentry_eligible"] = False
+                        bot_global_state["symbols"][symbol]["_reentry_direction"] = ""
                         # [Consciousness] 새 캔들 확정
                         import datetime as _cs_dt
                         _cs_kst = _cs_dt.timezone(_cs_dt.timedelta(hours=9))
@@ -2028,9 +2036,21 @@ async def async_trading_loop():
                         _gw_candle_detail = "시간 만료 → 자동 해제"
                     else:
                         _gw_candle_detail = "대기 중"
+                    # 재진입 자격이면 캔들 잠금 상태를 "재진입 대기"로 표시
+                    _gw_reentry_eligible = _gw_sym_state.get("_reentry_eligible", False)
+                    if _gw_candle_locked and _gw_reentry_eligible:
+                        _gw_candle_detail = f"🔄 재진입 대기 (캔들 잠금 면제)"
+                        _gw_candle_locked = False  # Guard Wall에서는 CLEAR로 표시
                     _gw["candle_lock"] = {
                         "status": "BLOCKING" if _gw_candle_locked else "CLEAR",
                         "detail": _gw_candle_detail
+                    }
+
+                    # 재진입 상태
+                    _gw_reentry_dir = _gw_sym_state.get("_reentry_direction", "")
+                    _gw["reentry"] = {
+                        "status": "ACTIVE" if _gw_reentry_eligible else "CLEAR",
+                        "detail": f"{_gw_reentry_dir} 재진입 대기 중" if _gw_reentry_eligible else "비활성"
                     }
 
                     # 2. 퇴근 모드
@@ -2039,13 +2059,14 @@ async def async_trading_loop():
                         "detail": "퇴근 모드 활성화" if _exit_only else "정상"
                     }
 
-                    # 3. 재진입 쿨다운 (60초)
+                    # 3. 재진입 쿨다운 (재진입: 30초 / 일반: 60초)
                     _gw_last_exit = _gw_sym_state.get("last_exit_time", 0)
-                    _gw_cd_remain = max(0, 60 - (_time.time() - _gw_last_exit)) if _gw_last_exit > 0 else 0
+                    _gw_cd_max = 30 if _gw_reentry_eligible else 60
+                    _gw_cd_remain = max(0, _gw_cd_max - (_time.time() - _gw_last_exit)) if _gw_last_exit > 0 else 0
                     _gw_cd_bypass = _is_bypass_active('stress_bypass_reentry_cd')
                     _gw["reentry_cd"] = {
                         "status": "BLOCKING" if _gw_cd_remain > 0 and not _gw_cd_bypass else "CLEAR",
-                        "detail": f"남은 {int(_gw_cd_remain)}초" if _gw_cd_remain > 0 and not _gw_cd_bypass else ("바이패스" if _gw_cd_bypass and _gw_cd_remain > 0 else "정상")
+                        "detail": f"남은 {int(_gw_cd_remain)}초 ({'재진입' if _gw_reentry_eligible else '일반'})" if _gw_cd_remain > 0 and not _gw_cd_bypass else ("바이패스" if _gw_cd_bypass and _gw_cd_remain > 0 else "정상")
                     }
 
                     # 4. 타 포지션 보유
@@ -2282,6 +2303,21 @@ async def async_trading_loop():
                                             strategy_instance.trailing_stop_activation = abs(_sh_new_act - executed_price) / executed_price
                                             bot_global_state["symbols"][symbol]["is_shadow_hunting"] = False  # 재계산 완료, 플래그 리셋
                                             logger.info(f"[{symbol}] 🐸 Shadow Hunting 체결! 리스크 재계산 완료 | 신규 SL: {_sh_new_sl:.4f} | 트레일링 발동선: {_sh_new_act:.4f}")
+
+                                        # ── [재진입 로직] Smart Limit 체결 시 자격 소멸 + 카운터 ──
+                                        if bot_global_state["symbols"][symbol].get("_reentry_eligible", False):
+                                            bot_global_state["symbols"][symbol]["_reentry_count"] = bot_global_state["symbols"][symbol].get("_reentry_count", 0) + 1
+                                            bot_global_state["symbols"][symbol]["_reentry_eligible"] = False
+                                            bot_global_state["symbols"][symbol]["_reentry_direction"] = ""
+                                            logger.info(f"[{symbol}] 🔄 재진입(Smart Limit) 실행 완료! {real_side}")
+                                            send_telegram_sync(
+                                                f"🔄 <b>재진입 실행</b>\n{_TG_LINE}\n"
+                                                f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                                                f"방향 │ <b>{real_side}</b> (같은 방향 재진입)\n"
+                                                f"체결가 │ ${executed_price:,.2f}\n"
+                                                f"사유 │ 본전/소익 트레일링 후 추세 지속\n{_TG_LINE}\n"
+                                                f"📌 재진입 1/1회 사용 (추가 재진입 차단)"
+                                            )
 
                                         # [Phase 28] Smart Limit 체결 직후 거래소 초기 TP/SL 배치
                                         # Market 진입(Line 1820-1860)과 100% 동일한 방어막 로직
@@ -2843,6 +2879,18 @@ async def async_trading_loop():
                                                     except Exception:
                                                         pass  # 에러 무시 (안전 종료)
 
+                                        # ── [재진입 로직] 청산 직전 자격 판정 ──
+                                        # 트레일링 본전/소익(±0.3%) 청산만 자격 부여, 손절은 제외
+                                        _prev_reentry_count = bot_global_state["symbols"][symbol].get("_reentry_count", 0)
+                                        if action == "TRAILING_STOP_EXIT" and abs(pnl_percent) <= 0.3 and _prev_reentry_count < 1:
+                                            bot_global_state["symbols"][symbol]["_reentry_eligible"] = True
+                                            bot_global_state["symbols"][symbol]["_reentry_direction"] = position_side
+                                            logger.info(f"[{symbol}] 🔄 재진입 자격 부여: {position_side} 방향 | PnL: {pnl_percent:+.2f}%")
+                                            _emit_thought(symbol, f"🔄 재진입 자격 부여! {position_side} 방향 — 본전/소익 트레일링 청산 (PnL {pnl_percent:+.2f}%)")
+                                        else:
+                                            bot_global_state["symbols"][symbol]["_reentry_eligible"] = False
+                                            bot_global_state["symbols"][symbol]["_reentry_direction"] = ""
+
                                         # 4. 프론트엔드 포지션 초기화
                                         # [Phase 32] 통합 상태 초기화 헬퍼 사용
                                         async with state_lock:
@@ -2948,10 +2996,14 @@ async def async_trading_loop():
                             # 시간 기반 자동 해제 체크
                             _lock_set_time = bot_global_state["symbols"][symbol].get("_candle_lock_set_time", 0)
                             _lock_elapsed = _time.time() - _lock_set_time if _lock_set_time > 0 else 0
-                            if _lock_elapsed < _CANDLE_LOCK_MAX_SEC:
-                                continue  # 아직 쿨다운 중 → 대기
+                            _is_reentry_eligible = bot_global_state["symbols"][symbol].get("_reentry_eligible", False)
+                            if _lock_elapsed < _CANDLE_LOCK_MAX_SEC and not _is_reentry_eligible:
+                                continue  # 아직 쿨다운 중 + 재진입 자격 없음 → 대기
+                            elif _is_reentry_eligible:
+                                _reentry_dir = bot_global_state["symbols"][symbol].get("_reentry_direction", "")
+                                _emit_thought(symbol, f"🔄 재진입 자격 → 캔들 잠금 면제 ({_reentry_dir} 방향)", throttle_key=f"reentry_unlock_{symbol}", throttle_sec=15.0)
                             else:
-                                # 5분 경과 → 자동 해제, 재진입 허용
+                                # 5분 경과 → 자동 해제
                                 _emit_thought(symbol, f"🔓 캔들 잠금 시간 만료({_lock_elapsed:.0f}s ≥ {_CANDLE_LOCK_MAX_SEC}s) → 재진입 평가 허용", throttle_key=f"candle_unlock_{symbol}", throttle_sec=60.0)
                         # 캔들 잠금은 LONG/SHORT 신호가 실제로 평가될 때만 설정됨
 
@@ -2961,11 +3013,12 @@ async def async_trading_loop():
                             _log_trade_attempt(symbol, "N/A", "BLOCKED", "exit_only_mode")
                             continue
 
-                        # [Phase 19.3] 60초 호흡 고르기 (동일 캔들 무한 단타 방지)
+                        # [Phase 19.3] 호흡 고르기 (재진입: 30초 / 일반: 60초)
                         # [Phase 21.2] 스트레스 바이패스: reentry_cd 활성 시 쿨다운 스킵
                         last_exit = bot_global_state["symbols"][symbol].get("last_exit_time", 0)
-                        if time.time() - last_exit < 60 and not _is_bypass_active('stress_bypass_reentry_cd'):
-                            _log_trade_attempt(symbol, "N/A", "BLOCKED", "reentry_cooldown_60s")
+                        _reentry_cd_sec = 30 if bot_global_state["symbols"][symbol].get("_reentry_eligible", False) else 60
+                        if time.time() - last_exit < _reentry_cd_sec and not _is_bypass_active('stress_bypass_reentry_cd'):
+                            _log_trade_attempt(symbol, "N/A", "BLOCKED", f"reentry_cooldown_{_reentry_cd_sec}s")
                             continue
 
                         # 현재 사이클 최신 상태 기준 — 다른 심볼에 포지션이 있으면 진입 차단
@@ -2989,9 +3042,21 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            # ── [재진입 로직] 방향 검증 ──
+                            _is_reentry_trade = bot_global_state["symbols"][symbol].get("_reentry_eligible", False)
+                            if _is_reentry_trade:
+                                _reentry_dir = bot_global_state["symbols"][symbol].get("_reentry_direction", "")
+                                if signal != _reentry_dir:
+                                    # 반대 방향 → 재진입 자격 소멸, 일반 진입으로 전환
+                                    bot_global_state["symbols"][symbol]["_reentry_eligible"] = False
+                                    bot_global_state["symbols"][symbol]["_reentry_direction"] = ""
+                                    _is_reentry_trade = False
+                                    _emit_thought(symbol, f"🔄❌ 재진입 방향 불일치 ({_reentry_dir} ≠ {signal}) → 일반 진입으로 전환")
+
                             # [Consciousness] 진입 신호 발견
                             _cs_sig_emoji = "🟢" if signal == "LONG" else "🔴"
-                            _emit_thought(symbol, f"{_cs_sig_emoji} {signal} 진입 신호 포착! 진입 파이프라인 검증 시작...")
+                            _reentry_tag = " (🔄 재진입)" if _is_reentry_trade else ""
+                            _emit_thought(symbol, f"{_cs_sig_emoji} {signal} 진입 신호 포착!{_reentry_tag} 진입 파이프라인 검증 시작...")
                             # [Flight Recorder] Decision Trail 파이프라인 추적 시작
                             _pipeline = []
 
@@ -3297,6 +3362,21 @@ async def async_trading_loop():
                                     bot_global_state["logs"].append(entry_msg)
                                     logger.info(entry_msg)
                                     send_telegram_sync(_tg_entry(symbol, signal, executed_price, trade_amount, trade_leverage, payload=payload, is_test=_is_shadow_entry))
+
+                                    # ── [재진입 로직] 재진입 성공 시 자격 소멸 + 카운터 + 알림 ──
+                                    if bot_global_state["symbols"][symbol].get("_reentry_eligible", False):
+                                        bot_global_state["symbols"][symbol]["_reentry_count"] = bot_global_state["symbols"][symbol].get("_reentry_count", 0) + 1
+                                        bot_global_state["symbols"][symbol]["_reentry_eligible"] = False
+                                        bot_global_state["symbols"][symbol]["_reentry_direction"] = ""
+                                        logger.info(f"[{symbol}] 🔄 재진입 실행 완료! {signal} | 카운터: {bot_global_state['symbols'][symbol]['_reentry_count']}/1")
+                                        send_telegram_sync(
+                                            f"🔄 <b>재진입 실행</b>\n{_TG_LINE}\n"
+                                            f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                                            f"방향 │ <b>{signal}</b> (같은 방향 재진입)\n"
+                                            f"체결가 │ ${executed_price:,.2f}\n"
+                                            f"사유 │ 본전/소익 트레일링 후 추세 지속\n{_TG_LINE}\n"
+                                            f"📌 재진입 1/1회 사용 (추가 재진입 차단)"
+                                        )
 
                                     # [Phase 22.2] 진입 직후 거래소 서버에 초기 거미줄(Limit TP / Stop SL) 투척
                                     if not _is_shadow_entry:  # 페이퍼 모드가 아닐 때만 실제 주문 전송
