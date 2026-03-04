@@ -1709,17 +1709,30 @@ async def async_trading_loop():
                     # 거래량/RSI/MACD = 실시간 폭발을 즉시 포착
                     if not _new_candle and signal == "HOLD" and len(df) >= 50:
                         try:
-                            _hybrid_signal, _hybrid_msg, _hybrid_payload = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
+                            # [거래량 시간비례 보정] 미완성 라이브봉 → 봉 전체 기간으로 프로젝션
+                            _hybrid_df = df.copy()
+                            _tf_sec_map = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400}
+                            _tf_seconds = _tf_sec_map.get(_tf, 900)
+                            _live_ts_ms = float(_hybrid_df['timestamp'].iloc[-1])
+                            _elapsed_sec = (_time.time() * 1000 - _live_ts_ms) / 1000
+                            _elapsed_sec = max(_elapsed_sec, 30.0)  # 최소 30초 (극초반 과대추정 방지)
+                            _vol_proj_ratio = min(_tf_seconds / _elapsed_sec, 10.0)  # 최대 10배 캡
+                            if _vol_proj_ratio > 1.0:
+                                _vol_col_idx = _hybrid_df.columns.get_loc('volume')
+                                _hybrid_df.iloc[-1, _vol_col_idx] = _hybrid_df['volume'].iloc[-1] * _vol_proj_ratio
+
+                            _hybrid_signal, _hybrid_msg, _hybrid_payload = strategy_instance.check_entry_signal(_hybrid_df, current_price, macro_ema_200)
                             if _hybrid_signal in ("LONG", "SHORT"):
                                 signal = _hybrid_signal
                                 analysis_msg = f"[실시간] {_hybrid_msg}"
                                 payload = _hybrid_payload
-                                _emit_thought(symbol, f"🎯 하이브리드 진입! 라이브봉 {_hybrid_signal} — 확정봉 대기 없이 즉시 시그널")
+                                _emit_thought(symbol, f"🎯 하이브리드 진입! 라이브봉 {_hybrid_signal} — 거래량 보정 {_vol_proj_ratio:.1f}x 적용")
                                 send_telegram_sync(
                                     f"🎯 <b>하이브리드 진입 감지</b>\n{_TG_LINE}\n"
                                     f"코인 │ <code>{_sym_short(symbol)}</code>\n"
                                     f"방향 │ <b>{_hybrid_signal}</b> (라이브봉 실시간)\n"
-                                    f"사유 │ 확정봉 HOLD → 라이브봉 관문 충족\n{_TG_LINE}\n"
+                                    f"사유 │ 확정봉 HOLD → 라이브봉 관문 충족\n"
+                                    f"보정 │ 거래량 {_vol_proj_ratio:.1f}x 프로젝션 ({_elapsed_sec:.0f}초/{_tf_seconds}초)\n{_TG_LINE}\n"
                                     f"📌 확정봉 대기 없이 실시간 진입 시도"
                                 )
                         except Exception as _hybrid_err:
