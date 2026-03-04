@@ -85,6 +85,17 @@ def init_db():
         )
     ''')
 
+    # config_history 테이블 (설정 변경 이력 추적)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS config_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT NOT NULL,
+            changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
     conn.commit()
 
     # 기본 설정값 초기화 (INSERT OR IGNORE: 기존 값 유지, 신규 키만 추가)
@@ -226,10 +237,37 @@ def set_config(key: str, value: Any, symbol: str = "GLOBAL"):
     else:
         value = str(value)
 
+    # [변경 이력] 이전 값 조회 후 기록
+    try:
+        cursor.execute('SELECT value FROM bot_config WHERE key = ?', (actual_key,))
+        row = cursor.fetchone()
+        old_value = row[0] if row else None
+        # 값이 실제로 변경된 경우에만 이력 기록 (동일 값 재저장 시 이력 미생성)
+        if old_value != value:
+            cursor.execute(
+                'INSERT INTO config_history (key, old_value, new_value, changed_at) VALUES (?, ?, ?, ?)',
+                (actual_key, old_value, value, datetime.now())
+            )
+    except Exception:
+        pass  # 이력 기록 실패가 설정 저장을 막으면 안 됨
+
     cursor.execute('INSERT OR REPLACE INTO bot_config (key, value, updated_at) VALUES (?, ?, ?)',
                    (actual_key, value, datetime.now()))
     conn.commit()
     conn.close()
+
+
+def get_config_history(limit: int = 50) -> List[Dict]:
+    """설정 변경 이력 조회 (최신순)"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT id, key, old_value, new_value, changed_at FROM config_history ORDER BY id DESC LIMIT ?',
+        (limit,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 def save_log(level: str, message: str):
     """시스템 로그 저장"""

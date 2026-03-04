@@ -12,7 +12,7 @@ from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from okx_engine import OKXEngine
 from strategy import TradingStrategy
-from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs, delete_symbol_configs, trade_exists_by_okx_id
+from database import init_db, save_trade, get_trades, get_config, set_config, save_log, get_logs, wipe_all_trades, delete_configs, delete_symbol_configs, trade_exists_by_okx_id, get_config_history
 from backtester import Backtester
 from notifier import send_telegram_sync
 from logger import get_logger
@@ -4372,6 +4372,17 @@ async def apply_optimization(rank: int = 1, params: str = ""):
     except Exception as e:
         logger.error(f"[Optimizer] 적용 실패: {e}")
         return {"success": False, "message": str(e)}
+
+
+@app_server.get("/api/v1/config/history")
+async def fetch_config_history(limit: int = 50):
+    """설정 변경 이력 조회 (READ-ONLY)"""
+    try:
+        history = get_config_history(limit=limit)
+        return {"history": history, "count": len(history)}
+    except Exception as e:
+        logger.error(f"[ConfigHistory] 조회 실패: {e}")
+        return {"history": [], "count": 0}
 
 
 @app_server.get("/api/v1/symbols")

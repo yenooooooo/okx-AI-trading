@@ -1303,6 +1303,8 @@ function updateActiveTuningBadge() {
 }
 
 async function toggleBot() {
+    const confirmed = confirm('⚠️ 봇 상태 변경\n\n시스템 가동/중지 상태를 전환합니다.\n계속하시겠습니까?');
+    if (!confirmed) return;
     try {
         const response = await fetch(`${API_URL}/toggle`, { method: 'POST' });
         const result = await response.json();
@@ -3910,6 +3912,57 @@ async function wipeDatabase() {
     } catch (e) {
         alert(`❌ 서버 통신 오류: ${e.message}`);
         console.error('wipeDatabase Error:', e);
+    }
+}
+
+// ════════════ Config History (설정 변경 이력) ════════════
+
+async function loadConfigHistory() {
+    const container = document.getElementById('config-history-table');
+    if (!container) return;
+    container.textContent = '로딩 중...';
+
+    try {
+        const res = await fetch(`${API_URL}/config/history?limit=50`);
+        const data = await res.json();
+        const history = data.history || [];
+
+        if (history.length === 0) {
+            container.textContent = '변경 이력이 없습니다.';
+            return;
+        }
+
+        let html = `<table class="w-full"><thead>
+            <tr class="text-gray-500 border-b border-navy-border">
+                <th class="text-left py-1 px-2">시간</th>
+                <th class="text-left py-1 px-2">설정 키</th>
+                <th class="text-right py-1 px-2">이전값</th>
+                <th class="text-center py-1 px-1">→</th>
+                <th class="text-right py-1 px-2">새값</th>
+            </tr></thead><tbody>`;
+
+        history.forEach(h => {
+            const time = h.changed_at ? h.changed_at.replace('T', ' ').substring(0, 19) : '—';
+            const oldVal = h.old_value !== null && h.old_value !== undefined ? h.old_value : '(신규)';
+            const newVal = h.new_value || '—';
+            // 키 이름에서 SYMBOL:: 접두사 분리
+            const keyDisplay = h.key || '—';
+
+            html += `<tr class="border-b border-navy-border/20 hover:bg-navy-800/50">
+                <td class="py-1 px-2 text-gray-500 whitespace-nowrap">${time}</td>
+                <td class="py-1 px-2 text-cyan-300">${keyDisplay}</td>
+                <td class="py-1 px-2 text-right text-gray-400">${oldVal}</td>
+                <td class="py-1 px-1 text-center text-gray-600">→</td>
+                <td class="py-1 px-2 text-right text-white font-bold">${newVal}</td>
+            </tr>`;
+        });
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+    } catch (e) {
+        console.error('Config history error:', e);
+        container.textContent = `오류: ${e.message}`;
     }
 }
 
