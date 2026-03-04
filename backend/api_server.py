@@ -578,6 +578,7 @@ async def _apply_position_ws_update(pos: dict):
         bot_global_state["symbols"][symbol]["unrealized_pnl"] = round(upl, 4)
         if mark_px > 0:
             bot_global_state["symbols"][symbol]["current_price"] = mark_px
+            bot_global_state["symbols"][symbol]["last_price_update_time"] = _time.time()
         if avg_px > 0 and bot_global_state["symbols"][symbol].get("entry_price", 0) == 0:
             bot_global_state["symbols"][symbol]["entry_price"] = avg_px
 
@@ -2306,13 +2307,14 @@ async def async_trading_loop():
                                 _now = _time.time()
                                 _last_update = bot_global_state["symbols"][symbol].get("last_price_update_time", _now)
 
-                                # 마지막 가격 갱신이 3초 이상 지연되었다면 웹소켓 이상으로 간주하고 REST API 강제 호출
+                                # 마지막 가격 갱신이 10초 이상 지연되었다면 웹소켓 이상으로 간주하고 REST API 강제 호출
+                                # [Phase 20.2 Fix] 임계값 3s→10s: 멀티심볼 순차 루프 + fetch_ohlcv 지연으로 3초는 false alarm 발생
                                 # [Phase 21.2] 스트레스 바이패스: stale_price watchdog 스킵
-                                if _now - _last_update > 3.0 and not _is_bypass_active('stress_bypass_stale_price'):
+                                if _now - _last_update > 10.0 and not _is_bypass_active('stress_bypass_stale_price'):
                                     # [Consciousness] Stale Price 감지
                                     _emit_thought(symbol, f"⚠️ 실시간 데이터 수신 지연 감지({_now - _last_update:.1f}초)! REST API 비상 폴링 실행")
                                     try:
-                                        logger.warning(f"[{symbol}] ⚠️ 실시간 데이터 수신 지연 감지 (>3초). REST API 비상 우회 폴링 실행!")
+                                        logger.warning(f"[{symbol}] ⚠️ 실시간 데이터 수신 지연 감지 (>10초). REST API 비상 우회 폴링 실행!")
                                         _emergency_ticker = await asyncio.to_thread(engine_api.exchange.fetch_ticker, symbol)
                                         current_price = float(_emergency_ticker['last'])
                                         # 비상 갱신 후 타임스탬프 리셋
