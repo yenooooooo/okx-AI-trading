@@ -3300,6 +3300,139 @@ async function runBacktestVisualizer() {
     }
 }
 
+
+// ═══════════════════════════════════════════════════════
+// [Parameter Auto-Optimizer] 그리드 서치 최적화 UI
+// ═══════════════════════════════════════════════════════
+
+async function runOptimizer() {
+    const statusEl = document.getElementById('opt-status');
+    const resultsEl = document.getElementById('opt-results');
+    const cardsEl = document.getElementById('opt-cards');
+    const compEl = document.getElementById('opt-comparison');
+    const metaEl = document.getElementById('opt-meta');
+
+    const symbol = document.getElementById('opt-symbol').value;
+    const timeframe = document.getElementById('opt-timeframe').value;
+    const limit = parseInt(document.getElementById('opt-limit').value);
+    const slippage = parseFloat(document.getElementById('opt-slippage').value);
+
+    if (statusEl) statusEl.textContent = '최적화 실행 중... (30초~2분 소요)';
+    if (resultsEl) resultsEl.classList.add('hidden');
+
+    try {
+        const res = await fetch(
+            `${API_URL}/optimize?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}&limit=${limit}&slippage_bps=${slippage}`,
+            { method: 'POST' }
+        );
+        const data = await res.json();
+
+        if (data.status === 'cooldown') {
+            if (statusEl) statusEl.textContent = data.message || '쿨다운 중';
+            return;
+        }
+        if (data.status === 'error') {
+            if (statusEl) statusEl.textContent = `오류: ${data.message}`;
+            return;
+        }
+
+        const recs = data.recommendations || [];
+        if (recs.length === 0) {
+            if (statusEl) statusEl.textContent = '유효한 추천안 없음 (과적합 필터 통과 조합 없음)';
+            return;
+        }
+
+        // ── 현재 설정 vs TOP1 비교 테이블 ──
+        const top1 = recs[0];
+        let compHTML = `<div class="overflow-x-auto"><table class="w-full text-xs">
+            <thead><tr class="text-gray-500 border-b border-navy-border">
+                <th class="text-left py-1 px-2">파라미터</th>
+                <th class="text-right py-1 px-2">현재값</th>
+                <th class="text-right py-1 px-2">추천값</th>
+                <th class="text-center py-1 px-2">변경</th>
+            </tr></thead><tbody>`;
+
+        for (const [pName, diff] of Object.entries(top1.diffs || {})) {
+            const curVal = diff.current !== null && diff.current !== undefined ? parseFloat(diff.current) : '—';
+            const recVal = diff.recommended;
+            const dir = diff.direction;
+            const dirColor = dir === 'UP' ? 'text-green-400' : dir === 'DOWN' ? 'text-red-400' : 'text-yellow-400';
+            const dirIcon = dir === 'UP' ? '▲' : dir === 'DOWN' ? '▼' : '●';
+            compHTML += `<tr class="border-b border-navy-border/30 hover:bg-navy-800/50">
+                <td class="py-1 px-2 text-gray-300 font-mono">${pName}</td>
+                <td class="py-1 px-2 text-right text-gray-400">${typeof curVal === 'number' ? curVal.toFixed(4) : curVal}</td>
+                <td class="py-1 px-2 text-right text-white font-bold">${parseFloat(recVal).toFixed(4)}</td>
+                <td class="py-1 px-2 text-center ${dirColor} font-bold">${dirIcon} ${dir}</td>
+            </tr>`;
+        }
+        compHTML += '</tbody></table></div>';
+        if (compEl) compEl.innerHTML = compHTML;
+
+        // ── TOP 3 추천 카드 ──
+        const rankColors = ['border-yellow-500/50 bg-yellow-500/5', 'border-gray-400/40 bg-gray-400/5', 'border-amber-700/40 bg-amber-700/5'];
+        const rankLabels = ['🥇 1위', '🥈 2위', '🥉 3위'];
+
+        let cardsHTML = '';
+        recs.forEach((rec, i) => {
+            const pnlColor = rec.total_pnl_percent >= 0 ? 'text-green-400' : 'text-red-400';
+            const paramsJSON = JSON.stringify(rec.params).replace(/"/g, '&quot;');
+            cardsHTML += `
+            <div class="rounded-lg border ${rankColors[i] || 'border-navy-border'} p-3">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-bold text-white">${rankLabels[i] || `#${rec.rank}`}</span>
+                    <span class="text-[10px] text-gray-500">Score ${rec.score}</span>
+                </div>
+                <div class="grid grid-cols-2 gap-y-1 text-xs mb-3">
+                    <div class="text-gray-400">거래수</div><div class="text-right text-white">${rec.total_trades}</div>
+                    <div class="text-gray-400">승률</div><div class="text-right text-white">${rec.win_rate}%</div>
+                    <div class="text-gray-400">수익률</div><div class="text-right ${pnlColor} font-bold">${rec.total_pnl_percent > 0 ? '+' : ''}${rec.total_pnl_percent}%</div>
+                    <div class="text-gray-400">MDD</div><div class="text-right text-orange-400">${rec.max_drawdown}%</div>
+                    <div class="text-gray-400">Sharpe</div><div class="text-right text-cyan-400">${rec.sharpe_ratio}</div>
+                </div>
+                <button onclick="applyOptimization(${rec.rank}, '${paramsJSON}')"
+                    class="w-full py-1.5 bg-purple-600/80 hover:bg-purple-500 text-white text-[11px] font-bold rounded transition-colors">
+                    적용하기
+                </button>
+            </div>`;
+        });
+        if (cardsEl) cardsEl.innerHTML = cardsHTML;
+
+        // ── 메타 정보 ──
+        if (metaEl) {
+            metaEl.textContent = `${data.total_tested}개 조합 테스트 | ${data.total_valid}개 유효 | ${data.elapsed_sec}초 소요 | ${symbol} ${timeframe} ${limit}봉`;
+        }
+
+        if (resultsEl) resultsEl.classList.remove('hidden');
+        if (statusEl) statusEl.textContent = `완료 — TOP ${recs.length} 추천안 생성`;
+
+    } catch (e) {
+        console.error("Optimizer error:", e);
+        if (statusEl) statusEl.textContent = `오류: ${e.message}`;
+    }
+}
+
+async function applyOptimization(rank, paramsJSON) {
+    if (!confirm(`추천안 #${rank}을 라이브에 적용하시겠습니까?\n\n⚠️ 포지션 보유 중이면 자동 차단됩니다.`)) return;
+
+    try {
+        const res = await fetch(
+            `${API_URL}/optimize/apply?rank=${rank}&params=${encodeURIComponent(paramsJSON)}`,
+            { method: 'POST' }
+        );
+        const data = await res.json();
+
+        if (data.success) {
+            alert(`✅ ${data.count}개 파라미터 적용 완료!\n\n적용 항목:\n${Object.entries(data.applied).map(([k, v]) => `  ${k}: ${v}`).join('\n')}`);
+        } else {
+            alert(`❌ 적용 실패: ${data.message}`);
+        }
+    } catch (e) {
+        console.error("Apply error:", e);
+        alert(`오류: ${e.message}`);
+    }
+}
+
+
 // --- Manual Override ---
 let isManualPanelOpen = false;
 

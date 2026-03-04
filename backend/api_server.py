@@ -4235,6 +4235,145 @@ async def run_backtest(symbol: str = "BTC/USDT:USDT", timeframe: str = "1m", lim
         logger.error(f"백테스팅 실패: {e}")
         return {"error": str(e)}
 
+
+# ═══════════════════════════════════════════════════════════════
+# [Parameter Auto-Optimizer] 그리드 서치 기반 파라미터 추천 엔진
+# ═══════════════════════════════════════════════════════════════
+
+@app_server.post("/api/v1/optimize")
+async def run_optimizer(
+    symbol: str = "BTC/USDT:USDT",
+    timeframe: str = "15m",
+    limit: int = 1000,
+    slippage_bps: float = 5.0,
+):
+    """파라미터 그리드 서치 최적화 실행 (CPU-heavy → to_thread 격리)"""
+    from optimizer import run_optimization
+
+    try:
+        # 현재 설정값 수집 (비교 기준)
+        current_config = {}
+        _opt_keys = [
+            'hard_stop_loss_rate', 'trailing_stop_activation', 'trailing_stop_rate',
+            'adx_threshold', 'adx_max', 'chop_threshold',
+            'volume_surge_multiplier', 'min_take_profit_rate',
+        ]
+        for _ok in _opt_keys:
+            _ov = get_config(_ok)
+            if _ov is not None:
+                current_config[_ok] = _ov
+
+        # 현재 initial_seed
+        _seed = 75.0
+        _seed_cfg = get_config('initial_seed')
+        if _seed_cfg:
+            try:
+                _seed = float(_seed_cfg)
+            except (ValueError, TypeError):
+                pass
+
+        result = await asyncio.to_thread(
+            run_optimization,
+            engine=_engine,
+            symbol=symbol,
+            timeframe=timeframe,
+            limit=limit,
+            slippage_bps=slippage_bps,
+            initial_seed=_seed,
+            selected_params=None,
+            current_config=current_config,
+        )
+
+        # 현재 설정값도 응답에 포함 (UI 비교용)
+        result['current_config'] = current_config
+        return result
+
+    except Exception as e:
+        logger.error(f"[Optimizer] API 호출 실패: {e}")
+        return {"status": "error", "message": str(e), "recommendations": []}
+
+
+@app_server.post("/api/v1/optimize/apply")
+async def apply_optimization(rank: int = 1, params: str = ""):
+    """
+    최적화 추천안 적용 (rank 또는 직접 params JSON)
+    ⚠️ 포지션 보유 중이면 차단 (안전장치)
+    """
+    try:
+        # [안전장치 1] 포지션 보유 중 차단
+        _has_pos = False
+        if bot_global_state.get('symbols'):
+            for _sk, _sv in bot_global_state['symbols'].items():
+                if _sv.get('position') and _sv['position'].get('side'):
+                    _has_pos = True
+                    break
+        if _has_pos:
+            return {
+                "success": False,
+                "message": "포지션 보유 중에는 파라미터 변경 불가 — 청산 후 재시도하세요",
+            }
+
+        # params JSON 파싱
+        if not params:
+            return {"success": False, "message": "적용할 파라미터가 없습니다"}
+
+        import json as _json
+        try:
+            param_dict = _json.loads(params)
+        except _json.JSONDecodeError:
+            return {"success": False, "message": "파라미터 JSON 파싱 실패"}
+
+        if not isinstance(param_dict, dict) or not param_dict:
+            return {"success": False, "message": "유효한 파라미터 딕셔너리가 아닙니다"}
+
+        # [안전장치 2] PARAM_BOUNDS 범위 검증
+        from optimizer import PARAM_BOUNDS, _clamp
+        applied = {}
+        for pk, pv in param_dict.items():
+            if pk not in PARAM_BOUNDS:
+                continue
+            try:
+                val = float(pv)
+                val = _clamp(val, pk)
+            except (ValueError, TypeError):
+                continue
+
+            # DB 저장
+            set_config(pk, str(val))
+
+            # Strategy 인스턴스 즉시 동기화
+            if _active_strategy and hasattr(_active_strategy, pk):
+                try:
+                    if pk == 'disparity_threshold':
+                        setattr(_active_strategy, pk, val / 100.0)
+                    else:
+                        setattr(_active_strategy, pk, val)
+                except (ValueError, TypeError):
+                    pass
+
+            applied[pk] = val
+
+        if not applied:
+            return {"success": False, "message": "적용 가능한 파라미터가 없습니다"}
+
+        logger.info(f"[Optimizer] 추천안 적용 완료: {applied}")
+
+        # 텔레그램 알림
+        _tg_lines = ["⚙️ <b>파라미터 최적화 적용</b>\n"]
+        for _ak, _av in applied.items():
+            _tg_lines.append(f"  • {_ak}: <b>{_av}</b>")
+        try:
+            await asyncio.to_thread(send_telegram_sync, "\n".join(_tg_lines))
+        except Exception:
+            pass
+
+        return {"success": True, "applied": applied, "count": len(applied)}
+
+    except Exception as e:
+        logger.error(f"[Optimizer] 적용 실패: {e}")
+        return {"success": False, "message": str(e)}
+
+
 @app_server.get("/api/v1/symbols")
 async def fetch_symbols():
     """지원 심볼 목록"""

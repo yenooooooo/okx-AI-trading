@@ -1387,6 +1387,67 @@
                     <div id="bt-trades-list" class="hidden max-h-40 overflow-y-auto"></div>
                 </div>
 
+                <!-- ═══ Parameter Auto-Optimizer ═══ -->
+                <div class="glass-panel p-4 border border-purple-500/30">
+                    <h3 class="text-xs font-mono font-bold text-purple-400 tracking-widest uppercase mb-3 flex items-center gap-1.5">
+                        ⚙️ 파라미터 자동 최적화 (Grid Search)
+                    </h3>
+
+                    <!-- 설정 바 -->
+                    <div class="flex flex-wrap items-end gap-3 mb-4">
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] text-gray-500 uppercase">Symbol</label>
+                            <select id="opt-symbol" class="bg-navy-800 text-white text-xs rounded px-2 py-1.5 border border-navy-border w-36">
+                                <option value="BTC/USDT:USDT">BTC/USDT</option>
+                                <option value="ETH/USDT:USDT">ETH/USDT</option>
+                                <option value="SOL/USDT:USDT">SOL/USDT</option>
+                                <option value="XRP/USDT:USDT">XRP/USDT</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] text-gray-500 uppercase">Timeframe</label>
+                            <select id="opt-timeframe" class="bg-navy-800 text-white text-xs rounded px-2 py-1.5 border border-navy-border w-20">
+                                <option value="5m">5m</option>
+                                <option value="15m" selected>15m</option>
+                                <option value="1h">1h</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] text-gray-500 uppercase">Candles</label>
+                            <select id="opt-limit" class="bg-navy-800 text-white text-xs rounded px-2 py-1.5 border border-navy-border w-24">
+                                <option value="500">500</option>
+                                <option value="1000" selected>1,000</option>
+                                <option value="1500">1,500</option>
+                            </select>
+                        </div>
+                        <div class="flex flex-col gap-1">
+                            <label class="text-[10px] text-gray-500 uppercase">Slippage</label>
+                            <select id="opt-slippage" class="bg-navy-800 text-white text-xs rounded px-2 py-1.5 border border-navy-border w-20">
+                                <option value="3">3 bps</option>
+                                <option value="5" selected>5 bps</option>
+                                <option value="10">10 bps</option>
+                            </select>
+                        </div>
+                        <button onclick="runOptimizer()"
+                            class="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold rounded transition-colors">
+                            🔍 최적화 실행
+                        </button>
+                        <span id="opt-status" class="text-[10px] text-gray-500 ml-2"></span>
+                    </div>
+
+                    <!-- 결과 영역 -->
+                    <div id="opt-results" class="hidden">
+                        <!-- 현재 설정 vs 추천 비교 테이블 -->
+                        <div id="opt-comparison" class="mb-4"></div>
+
+                        <!-- TOP 3 추천 카드 -->
+                        <div id="opt-cards" class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3"></div>
+
+                        <!-- 메타 정보 -->
+                        <div id="opt-meta" class="text-[10px] text-gray-600 text-right"></div>
+                    </div>
+                </div>
+
             </div><!-- /tab-analytics -->
 
             <!-- ══ Tab: Settings ══ -->
