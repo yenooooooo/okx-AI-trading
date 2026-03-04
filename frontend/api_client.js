@@ -1275,7 +1275,7 @@ function updateActiveTuningBadge() {
     // [UI Overhaul] Command Bar 프리셋 배지 미러 (색상도 Entry Readiness 뱃지와 동기화)
     const cmdPresetBadge = document.getElementById('cmd-preset-badge');
     if (cmdPresetBadge) {
-        cmdPresetBadge.textContent = matchedLabel || '--';
+        cmdPresetBadge.textContent = matchedLabel || '🛠️ 커스텀';
         cmdPresetBadge.className = matchedClass
             ? `font-mono text-[9px] border px-1.5 py-0.5 rounded transition-all ${matchedClass}`
             : 'font-mono text-[9px] text-purple-300 bg-purple-500/10 border border-purple-500/30 px-1.5 py-0.5 rounded';
