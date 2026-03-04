@@ -56,18 +56,26 @@ def generate_grid(selected_params: List[str] = None) -> List[Dict[str, float]]:
     # 조합 수가 600 초과 시 각 파라미터의 steps 수를 줄임
     param_steps = {}
     for p in valid_params:
-        param_steps[p] = PARAM_BOUNDS[p]['steps']
+        param_steps[p] = list(PARAM_BOUNDS[p]['steps'])
 
-    total_combos = 1
-    for steps in param_steps.values():
-        total_combos *= len(steps)
+    def _calc_total():
+        t = 1
+        for s in param_steps.values():
+            t *= len(s)
+        return t
 
-    # 600개 초과 시 각 파라미터를 3단계로 축소
-    if total_combos > 600:
-        for p in param_steps:
-            steps = param_steps[p]
-            if len(steps) > 3:
-                param_steps[p] = [steps[0], steps[len(steps) // 2], steps[-1]]
+    # 반복적으로 축소: 600개 이하가 될 때까지 가장 steps 많은 파라미터부터 줄임
+    while _calc_total() > 600:
+        # 가장 steps가 많은 파라미터 찾기
+        max_p = max(param_steps, key=lambda p: len(param_steps[p]))
+        steps = param_steps[max_p]
+        if len(steps) <= 2:
+            break  # 더 이상 축소 불가
+        # 양 끝 + 중앙만 남기고 축소
+        if len(steps) > 3:
+            param_steps[max_p] = [steps[0], steps[len(steps) // 2], steps[-1]]
+        elif len(steps) == 3:
+            param_steps[max_p] = [steps[0], steps[-1]]  # 2개로 축소
 
     # 그리드 생성
     keys = list(param_steps.keys())
