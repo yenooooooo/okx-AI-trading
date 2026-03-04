@@ -2008,11 +2008,15 @@
 
                 <!-- ══ Section 1: 기본 제어 (Basic Controls) ══ -->
                 <div class="px-5 py-3 border-b border-navy-border bg-navy-900/30 flex-shrink-0">
-                    <h3 class="text-[11px] font-mono font-bold text-neon-green tracking-widest uppercase mb-3 flex items-center gap-2">
+                    <h3 class="text-[11px] font-mono font-bold text-neon-green tracking-widest uppercase mb-0 flex items-center gap-2 cursor-pointer select-none hover:text-neon-green/80 transition-colors"
+                        onclick="toggleSection1()">
+                        <span id="section1-arrow" class="text-[13px] transition-transform duration-300 inline-block" style="transform: rotate(90deg)">▶</span>
                         🎯 섹션 1: 기본 제어
                         <span class="font-normal text-gray-500">(Target · Leverage · Direction · Risk)</span>
+                        <span id="section1-collapsed-hint" class="hidden text-[9px] font-normal text-gray-500 ml-auto">클릭하여 펼치기</span>
                     </h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div id="section1-content" class="overflow-hidden transition-all duration-300 ease-in-out" style="max-height: 600px; opacity: 1;">
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
                         <!-- 1. 감시 타겟 -->
                         <div>
                             <span class="text-[10px] font-mono text-gray-400 block mb-1.5 uppercase tracking-wide">감시 타겟</span>
@@ -2112,6 +2116,7 @@
                             <div class="w-9 h-5 bg-navy-900 border border-navy-border rounded-full peer peer-checked:border-cyan-400 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-400 after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4 peer-checked:after:bg-cyan-400"></div>
                         </label>
                     </div>
+                    </div><!-- /section1-content -->
                 </div>
 
                 <!-- ══ Sections 2 & 3: 2-column grid ══ -->

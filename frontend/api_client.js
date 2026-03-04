@@ -1766,6 +1766,28 @@ async function applyPreset(presetName) {
     updateActiveTuningBadge();
 }
 
+// ── 섹션 1 접기/펴기 토글 ──
+let _section1Collapsed = false;
+function toggleSection1() {
+    const content = document.getElementById('section1-content');
+    const arrow = document.getElementById('section1-arrow');
+    const hint = document.getElementById('section1-collapsed-hint');
+    if (!content || !arrow) return;
+
+    _section1Collapsed = !_section1Collapsed;
+    if (_section1Collapsed) {
+        content.style.maxHeight = '0px';
+        content.style.opacity = '0';
+        arrow.style.transform = 'rotate(0deg)';
+        if (hint) hint.classList.remove('hidden');
+    } else {
+        content.style.maxHeight = '600px';
+        content.style.opacity = '1';
+        arrow.style.transform = 'rotate(90deg)';
+        if (hint) hint.classList.add('hidden');
+    }
+}
+
 async function openTuningModal() {
     const modal = document.getElementById('tuning-modal');
     if (modal) modal.classList.remove('hidden');
