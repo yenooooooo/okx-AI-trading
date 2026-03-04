@@ -1128,8 +1128,21 @@ async def execute_entry_order(engine_api, symbol: str, signal: str, trade_amount
 
 
 # [Phase 25] Adaptive Shield: 잔고 기반 자동 방어 티어 전환
+_last_valid_balance = 0.0  # [방어 필터] 마지막 정상 잔고 (API 오류 방어용)
+
 async def _auto_tune_by_balance(curr_bal):
     """잔고 규모에 따라 전략 파라미터를 자동 전환하여 자본 보호 극대화"""
+    global _last_valid_balance
+
+    # 0. [방어 필터] API 오류로 잔고가 0이거나 이전 대비 70% 이상 급감 시 무시
+    if curr_bal <= 0:
+        logger.debug(f"[Adaptive Shield] 잔고 0 감지 — API 오류 의심, 티어 전환 스킵")
+        return
+    if _last_valid_balance > 0 and curr_bal < _last_valid_balance * 0.3:
+        logger.warning(f"[Adaptive Shield] 잔고 급감 감지 (${_last_valid_balance:.2f} → ${curr_bal:.2f}) — API 오류 의심, 티어 전환 스킵")
+        return
+    _last_valid_balance = curr_bal
+
     # 1. 기능 활성화 여부 체크
     if str(get_config('auto_preset_enabled') or 'false').lower() != 'true':
         # OFF 전환 시 티어 상태 클리어 (배지 잔류 방지)
