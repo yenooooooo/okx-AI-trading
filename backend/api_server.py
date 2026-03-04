@@ -973,11 +973,13 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
         prev_entry     = manual_prev_state.get("entry_price", 0.0)
         prev_contracts = int(manual_prev_state.get("contracts", 1))
         prev_leverage  = int(manual_prev_state.get("leverage", 1))
+        prev_entry_ts  = float(manual_prev_state.get("entry_timestamp", 0))
     else:
         prev_pos       = sym_state.get("position", "NONE")
         prev_entry     = sym_state.get("entry_price", 0.0)
         prev_contracts = int(sym_state.get("contracts", 1))
         prev_leverage  = int(sym_state.get("leverage", 1))
+        prev_entry_ts  = float(sym_state.get("entry_timestamp", 0))
 
     if prev_pos == "NONE" or prev_entry <= 0:
         return  # 처리할 포지션 없음
@@ -1008,8 +1010,9 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
     pnl_pct        = 0.0
 
     # ── OKX 체결 영수증(Trades) 조회 (최대 6회, 약 12초 대기) ─────────────────────────
-    # [Bug Fix] info.pnl → info.fillPnl 교정 + 전체 체결 합산 + calculate_realized_pnl DRY 사용
-    since_ts = int((_time.time() - 120) * 1000)  # 최근 2분 이내 체결 내역 조회
+    # [Bug Fix] 진입 시각 기준 조회 + 청산 방향/수량 필터로 이전 포지션 체결 혼입 방지
+    _entry_based_ts = int(prev_entry_ts * 1000) if prev_entry_ts > 0 else int((_time.time() - 120) * 1000)
+    since_ts = max(_entry_based_ts, int((_time.time() - 300) * 1000))  # 진입 시각 또는 최대 5분 전
     found_receipt = False
 
     for attempt in range(6):
@@ -1019,6 +1022,25 @@ async def _detect_and_handle_manual_close(engine_api, symbol: str, sym_state: di
                 # 청산 방향 필터: LONG 청산 = sell, SHORT 청산 = buy
                 close_side = 'sell' if prev_pos == 'LONG' else 'buy'
                 closing_trades = [t for t in trades if t.get('side') == close_side]
+
+                # [방어막] 체결 수량 검증 — 보유 계약수와 일치하는 체결만 허용
+                # 이전 포지션의 분할 익절/손절 체결이 혼입되는 것을 방지
+                if len(closing_trades) > 1:
+                    _total_matched = sum(float(t.get('amount', 0)) for t in closing_trades)
+                    if _total_matched > prev_contracts * 1.5:
+                        # 체결 수량이 보유 수량의 1.5배 초과 → 최신 체결만 사용 (이전 포지션 혼입 의심)
+                        # 타임스탬프 역순 정렬 후 보유 수량에 맞는 최신 체결만 추출
+                        closing_trades.sort(key=lambda t: t.get('timestamp', 0), reverse=True)
+                        _trimmed = []
+                        _acc = 0.0
+                        for t in closing_trades:
+                            _acc += float(t.get('amount', 0))
+                            _trimmed.append(t)
+                            if _acc >= prev_contracts:
+                                break
+                        closing_trades = _trimmed
+                        logger.warning(f"[{symbol}] ⚠️ 체결 수량 초과 감지 (합계: {_total_matched} > 보유: {prev_contracts}) → 최신 {len(_trimmed)}건으로 트리밍")
+
                 if not closing_trades:
                     closing_trades = [trades[-1]]  # fallback: 마지막 체결 사용
 
