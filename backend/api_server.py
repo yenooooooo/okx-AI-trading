@@ -1215,6 +1215,7 @@ async def async_trading_loop():
     import time
     last_log_time = 0
     last_scan_time = 0  # 스캐너 마지막 작동 시간
+    last_spike_scan_time = 0  # [Volume Spike] 스파이크 감지 마지막 작동 시간 (3분 주기)
     _circuit_breaker_last_warn = {}  # 서킷 브레이커 로그 쓰로틀 (심볼별 마지막 경고 시각)
     # [Phase 20.3] 조용한 에러(Silent Failure) 추적용 카운터
     consecutive_errors = 0
@@ -1327,7 +1328,9 @@ async def async_trading_loop():
                 else:
                     last_scan_time = current_time  # 비활성 상태: 타이머만 갱신, 스캔 스킵
 
-                # ── [Volume Spike Detector] 거래량 폭발 감지 (15분 주기, 스캐너와 동기화) ──
+            # ── [Volume Spike Detector] 거래량 폭발 감지 (3분 독립 주기) ──
+            if current_time - last_spike_scan_time >= 180:
+                last_spike_scan_time = current_time
                 try:
                     _spike_threshold = float(get_config('spike_threshold') or 3.0)
                     spikes = await engine_api.detect_volume_spikes(spike_multiplier=_spike_threshold)
@@ -1368,6 +1371,10 @@ async def async_trading_loop():
                                     )
                                     for _cs_s in new_symbols:
                                         _emit_thought(_cs_s, f"🔥 스파이크 자동 전환! {best_spike['base']} ({best_spike['price_change_pct']:+.1f}%) → 3번 슬롯 교체")
+                    else:
+                        # 스파이크 없음 → 의식의 흐름에 정상 상태 표시
+                        for _cs_s in (get_config('symbols') or ['BTC/USDT:USDT']):
+                            _emit_thought(_cs_s, "🔥 스파이크 스캔 완료 — 현재 급등 코인 없음", throttle_key=f"spike_none_{_cs_s}", throttle_sec=180.0)
                 except Exception as _spike_err:
                     logger.debug(f"[Spike Detector] 감지 실패: {_spike_err}")
 
