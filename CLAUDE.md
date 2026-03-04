@@ -126,6 +126,7 @@
      // 브라우저 콘솔(F12)에서 실행
      fetch('/api/v1/config?key=KEY명&value=값', { method: 'POST' }).then(r => r.json()).then(console.log)
      ```
+**7. 항상 코드를 추가할때에는 중요한코드일경우 방어막 로직과, 알림 연동은 필수**
 
 모든 마무리 설명은 한국어로 작성해.
 

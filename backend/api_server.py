@@ -1703,6 +1703,27 @@ async def async_trading_loop():
                         # [Consciousness] 동일 봉 대기
                         _emit_thought(symbol, f"🔎 동일 봉 대기 중 — 캐시된 시그널({signal}) 재사용", throttle_key=f"same_candle_{symbol}", throttle_sec=15.0)
 
+                    # ── [하이브리드 진입] 확정봉 HOLD → 라이브봉 실시간 재평가 ──
+                    # ADX/CHOP = 14기간 평균이라 라이브봉에서도 확정봉과 거의 동일
+                    # 거래량/RSI/MACD = 실시간 폭발을 즉시 포착
+                    if not _new_candle and signal == "HOLD" and len(df) >= 50:
+                        try:
+                            _hybrid_signal, _hybrid_msg, _hybrid_payload = strategy_instance.check_entry_signal(df, current_price, macro_ema_200)
+                            if _hybrid_signal in ("LONG", "SHORT"):
+                                signal = _hybrid_signal
+                                analysis_msg = f"[실시간] {_hybrid_msg}"
+                                payload = _hybrid_payload
+                                _emit_thought(symbol, f"🎯 하이브리드 진입! 라이브봉 {_hybrid_signal} — 확정봉 대기 없이 즉시 시그널")
+                                send_telegram_sync(
+                                    f"🎯 <b>하이브리드 진입 감지</b>\n{_TG_LINE}\n"
+                                    f"코인 │ <code>{_sym_short(symbol)}</code>\n"
+                                    f"방향 │ <b>{_hybrid_signal}</b> (라이브봉 실시간)\n"
+                                    f"사유 │ 확정봉 HOLD → 라이브봉 관문 충족\n{_TG_LINE}\n"
+                                    f"📌 확정봉 대기 없이 실시간 진입 시도"
+                                )
+                        except Exception as _hybrid_err:
+                            logger.debug(f"[Hybrid Entry] 라이브봉 재평가 오류 (메인 루프 보호): {_hybrid_err}")
+
                     # 뇌 상태 업데이트
                     if symbol not in ai_brain_state["symbols"]:
                         ai_brain_state["symbols"][symbol] = {}
