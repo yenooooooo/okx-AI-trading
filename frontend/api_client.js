@@ -1016,7 +1016,7 @@ function renderGates(gates, passed, liveGates) {
     }
 }
 
-// --- [B] 봇 혼잣말 피드 렌더링 ---
+// --- [B] Bot Consciousness — 의식의 흐름 렌더링 ---
 let _lastMonologueLatest = '';
 function renderMonologue(lines) {
     if (!lines || lines.length === 0) return;
@@ -1027,15 +1027,30 @@ function renderMonologue(lines) {
     const feed = document.getElementById('monologue-feed');
     if (!feed) return;
 
-    // 최신 10개만 표시 (위에서 아래로 최신 → 오래된 순)
-    const recent = lines.slice(-10).reverse();
+    // 최신 20개 표시 (위에서 아래로 최신 → 오래된 순)
+    const recent = lines.slice(-20).reverse();
     feed.innerHTML = recent.map((line, i) => {
         const isLatest = i === 0;
-        const isEntry = line.includes('🟢') || line.includes('🔴');
+        // 카테고리 기반 컬러 코딩
         let cls = 'text-[11px] font-mono py-0.5 px-1 rounded transition-all';
-        if (isEntry) cls += ' text-neon-green bg-neon-green/10 font-bold animate-pulse';
-        else if (isLatest) cls += ' text-gray-300';
-        else cls += ' text-gray-600';
+        if (line.includes('🟢') || line.includes('🔴') || line.includes('🎯'))
+            cls += ' text-neon-green bg-neon-green/10 font-bold animate-pulse';
+        else if (line.includes('🚨') || line.includes('⚠️'))
+            cls += ' text-red-400 bg-red-500/10';
+        else if (line.includes('💰') || line.includes('🔥'))
+            cls += ' text-yellow-400';
+        else if (line.includes('🔍') || line.includes('📊'))
+            cls += ' text-blue-400';
+        else if (line.includes('🛡️') || line.includes('❄️'))
+            cls += ' text-cyan-400';
+        else if (line.includes('🕯️') || line.includes('✅'))
+            cls += ' text-purple-400';
+        else if (line.includes('💤'))
+            cls += ' text-gray-600 italic';
+        else if (isLatest)
+            cls += ' text-gray-300';
+        else
+            cls += ' text-gray-500';
         return `<div class="${cls}">${line}</div>`;
     }).join('');
 }

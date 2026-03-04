@@ -442,6 +442,27 @@ ai_brain_state = {
     "symbols": {}  # symbol별 뇌 상태
 }
 _scalp_fitness_alert_state = {}  # 스캘핑 적합도 TG 알림 쿨다운 상태
+_thought_throttle = {}  # [Consciousness Stream] 반복 사고 쓰로틀 딕셔너리
+
+
+def _emit_thought(symbol: str, msg: str, throttle_key: str = None, throttle_sec: float = 10.0):
+    """[Consciousness Stream] 봇 의식의 흐름 — ai_brain_state monologue에 실시간 사고 추가
+    throttle_key 지정 시 throttle_sec 초 이내 동일 키 중복 방출 차단"""
+    try:
+        if throttle_key:
+            _now = _time.time()
+            _last = _thought_throttle.get(throttle_key, 0)
+            if _now - _last < throttle_sec:
+                return
+            _thought_throttle[throttle_key] = _now
+        _ml = ai_brain_state.get("symbols", {}).get(symbol, {}).get("monologue", [])
+        _ml.append(msg)
+        if len(_ml) > 50:
+            _ml = _ml[-50:]
+        if symbol in ai_brain_state.get("symbols", {}):
+            ai_brain_state["symbols"][symbol]["monologue"] = _ml
+    except Exception:
+        pass  # 사고 기록 실패가 메인 루프를 방해하면 안 됨
 
 trade_history = []
 _trading_task = None  # 중복 루프 방지용 태스크 추적
@@ -1211,9 +1232,15 @@ async def async_trading_loop():
                     )
                     if any_pos_open:
                         last_scan_time = current_time  # 포지션 유지 중: 스캐너 가동 보류
+                        # [Consciousness] 스캐너 보류 알림
+                        for _cs_s in bot_global_state["symbols"]:
+                            _emit_thought(_cs_s, "🔍 볼륨 스캐너: 포지션 보유 중 → 타겟 변경 보류", throttle_key=f"scan_hold_{_cs_s}", throttle_sec=60.0)
                     else:
                         try:
                             bot_global_state["logs"].append("[엔진] 다이내믹 볼륨 스캐너 가동: 24h 거래량 Top 3 탐색 중...")
+                            # [Consciousness] 스캐너 가동 시작
+                            for _cs_s in (get_config('symbols') or ['BTC/USDT:USDT']):
+                                _emit_thought(_cs_s, "🔍 볼륨 스캐너 가동 중... 전체 OKX 마켓 24h 거래량 Top 3 탐색")
                             await asyncio.sleep(0.5)  # [Phase 4] API Rate Limit 보호용 미세 비동기 지연
                             top_symbols = await engine_api.scan_top_volume_coins(limit=3)
                             if top_symbols:
@@ -1232,6 +1259,10 @@ async def async_trading_loop():
                                 logger.info(scan_msg)
                                 send_telegram_sync(_tg_scanner(top_symbols))
                                 last_scan_time = current_time
+                                # [Consciousness] 스캐너 결과 방출
+                                _cs_short_syms = [s.split('/')[0] for s in top_symbols]
+                                for _cs_s in top_symbols:
+                                    _emit_thought(_cs_s, f"🔍 스캐너 결과: {_cs_short_syms} → 타겟 자동 갱신 완료!")
 
                                 # [Margin Guard] 스캐너 전환 직후 즉시 레버리지/증거금 검증
                                 # _margin_guard_bg_loop과 동일한 쿨다운 키 공유 → 중복 알림 방지
@@ -1261,6 +1292,8 @@ async def async_trading_loop():
 
                                         if not _scan_feasible:
                                             _scan_rec = min(100, _scan_mg_math.ceil((_scan_cs * _scan_price * _scan_estimated) / _scan_mg_safe)) if _scan_mg_safe > 0 else 100
+                                            # [Consciousness] Margin Guard 경고
+                                            _emit_thought(_scan_sym, f"⚠️ Margin Guard: {_scan_sym.split('/')[0]} 레버리지 {_scan_lev}x 부적합! 추천: {_scan_rec}x")
                                             # 쿨다운 키 공유: _margin_guard_bg_loop과 동일 → 60초 내 중복 알림 방지
                                             _scan_alert_key = f"_margin_guard_last_alert_{_scan_sym}"
                                             set_config(_scan_alert_key, str(_time.time()))
@@ -1285,6 +1318,10 @@ async def async_trading_loop():
 
             # [Phase 25] Adaptive Shield: 잔고 기반 자동 방어 티어 전환
             await _auto_tune_by_balance(curr_bal)
+            # [Consciousness] 잔고 + 티어 상태 방출
+            _cs_tier = get_config('_current_adaptive_tier') or '—'
+            for _cs_sym in (get_config('symbols') or ['BTC/USDT:USDT']):
+                _emit_thought(_cs_sym, f"💰 잔고: ${curr_bal:.2f} USDT | 🛡️ 방어 티어: {_cs_tier}", throttle_key=f"bal_{_cs_sym}", throttle_sec=15.0)
 
             # 설정된 심볼 목록 로드
             symbols_config = get_config('symbols')
@@ -1432,6 +1469,8 @@ async def async_trading_loop():
                     current_price = await asyncio.to_thread(engine_api.get_current_price, symbol)
 
                     bot_global_state["symbols"][symbol]["current_price"] = current_price
+                    # [Consciousness] 데이터 수집 완료
+                    _emit_thought(symbol, f"📊 {symbol.split('/')[0]} {_tf} 캔들 {len(df)}개 수집 | 현재가 ${current_price:,.2f}", throttle_key=f"ohlcv_{symbol}", throttle_sec=15.0)
 
                     # ── 수동 청산 감지: 내부엔 포지션이 있는데 거래소엔 없으면 외부 청산 ──
                     # [Shadow Mode] Paper 포지션은 거래소에 실제 포지션이 없으므로 감지 대상에서 제외
@@ -1446,6 +1485,8 @@ async def async_trading_loop():
                             and bot_global_state["symbols"][symbol]["position"] != "NONE"
                             and bot_global_state["symbols"][symbol]["entry_price"] > 0
                             and symbol not in exchange_open_symbols):
+                        # [Consciousness] 수동 청산 감지
+                        _emit_thought(symbol, f"👤 외부 수동 청산 감지! {symbol.split('/')[0]} 포지션이 거래소에서 사라짐 — 상태 동기화 중...")
                         await _detect_and_handle_manual_close(
                             engine_api, symbol, bot_global_state["symbols"][symbol]
                         )
@@ -1486,6 +1527,11 @@ async def async_trading_loop():
 
                     if _new_candle:
                         bot_global_state["symbols"][symbol]["_last_confirmed_candle_ts"] = _confirmed_ts
+                        # [Consciousness] 새 캔들 확정
+                        import datetime as _cs_dt
+                        _cs_kst = _cs_dt.timezone(_cs_dt.timedelta(hours=9))
+                        _cs_candle_t = _cs_dt.datetime.fromtimestamp(_confirmed_ts / 1000, tz=_cs_kst).strftime("%H:%M")
+                        _emit_thought(symbol, f"🕯️ 새 {_tf} 캔들 확정! {_cs_candle_t}봉 종가 ${candle_close:,.2f} → 시그널 재평가 시작")
                         # 확정봉 기준 매매 시그널 평가 (candle_close = 확정봉 종가)
                         signal, analysis_msg, payload = strategy_instance.check_entry_signal(df_confirmed, candle_close, macro_ema_200)
                         # 캐시 저장 (봉 간 재사용)
@@ -1497,6 +1543,8 @@ async def async_trading_loop():
                         signal = bot_global_state["symbols"][symbol].get("_cached_signal", "HOLD")
                         analysis_msg = bot_global_state["symbols"][symbol].get("_cached_analysis", "")
                         payload = bot_global_state["symbols"][symbol].get("_cached_payload", {})
+                        # [Consciousness] 동일 봉 대기
+                        _emit_thought(symbol, f"🔎 동일 봉 대기 중 — 캐시된 시그널({signal}) 재사용", throttle_key=f"same_candle_{symbol}", throttle_sec=15.0)
 
                     # 뇌 상태 업데이트
                     if symbol not in ai_brain_state["symbols"]:
@@ -1689,8 +1737,8 @@ async def async_trading_loop():
 
                         _ml = ai_brain_state["symbols"][symbol].get("monologue", [])
                         _ml.append(_mono)
-                        if len(_ml) > 30:
-                            _ml = _ml[-30:]
+                        if len(_ml) > 50:
+                            _ml = _ml[-50:]
                         ai_brain_state["symbols"][symbol]["monologue"] = _ml
 
                     # ══════════ [Flight Recorder] Guard Wall — 진입 방벽 실시간 상태 ══════════
@@ -1860,6 +1908,12 @@ async def async_trading_loop():
                     if bot_global_state["symbols"][symbol]["position"] != "NONE":
                         entry = bot_global_state["symbols"][symbol]["entry_price"]
                         position_side = bot_global_state["symbols"][symbol]["position"]
+                        # [Consciousness] 포지션 모니터링
+                        if position_side in ("LONG", "SHORT") and entry > 0:
+                            _cs_pnl = ((current_price - entry) / entry * 100) if position_side == "LONG" else ((entry - current_price) / entry * 100)
+                            _cs_lev = bot_global_state["symbols"][symbol].get("leverage", 1)
+                            _cs_pnl_lev = _cs_pnl * _cs_lev
+                            _emit_thought(symbol, f"👁️ {position_side} 감시 중 | 진입 ${entry:,.2f} → 현재 ${current_price:,.2f} | PnL {_cs_pnl_lev:+.2f}% ({_cs_lev}x)", throttle_key=f"pos_mon_{symbol}", throttle_sec=10.0)
 
                         # [BUGFIX] PENDING 상태에서는 entry_price=0이므로 entry > 0 가드를 우회하여 타임아웃 체크 도달 보장
                         if (entry > 0 or position_side in ["PENDING_LONG", "PENDING_SHORT"]) and current_price:
@@ -1916,6 +1970,8 @@ async def async_trading_loop():
                                         # 체결 성공 -> 실제 포지션으로 전환
                                         real_side = "LONG" if position_side == "PENDING_LONG" else "SHORT"
                                         executed_price = order_status.get('average') or order_status.get('price') or bot_global_state["symbols"][symbol]["pending_price"]
+                                        # [Consciousness] 지정가 체결 완료
+                                        _emit_thought(symbol, f"✅ 스마트 지정가 체결 완료! {real_side} 체결가 ${executed_price:,.2f}")
                                         trade_amount = bot_global_state["symbols"][symbol]["pending_amount"]
                                         trade_leverage = bot_global_state["symbols"][symbol].get("leverage", 1)
                                         
@@ -1996,6 +2052,8 @@ async def async_trading_loop():
                                                 logger.error(f"[{symbol}] 🚨 [Smart Limit 체결] 초기 방어막 전송 실패. 자가 치유가 다음 사이클에서 복구 시도: {sl_init_err}")
 
                                     elif status in ['canceled', 'rejected'] or (time.time() - pending_time > 300):
+                                        # [Consciousness] 미체결 취소
+                                        _emit_thought(symbol, f"⏱️ 지정가 5분 미체결 → 주문 취소, 새 타점 재탐색 시작")
                                         # 취소되었거나 5분 초과 시 -> 주문 취소 및 PENDING 해제 (고스트 오더 방지)
                                         if status not in ['canceled', 'rejected']:
                                             if not _is_paper_pending: # Paper면 cancel_order API 호출 절대 금지
@@ -2050,6 +2108,8 @@ async def async_trading_loop():
                                 # 마지막 가격 갱신이 3초 이상 지연되었다면 웹소켓 이상으로 간주하고 REST API 강제 호출
                                 # [Phase 21.2] 스트레스 바이패스: stale_price watchdog 스킵
                                 if _now - _last_update > 3.0 and not _is_bypass_active('stress_bypass_stale_price'):
+                                    # [Consciousness] Stale Price 감지
+                                    _emit_thought(symbol, f"⚠️ 실시간 데이터 수신 지연 감지({_now - _last_update:.1f}초)! REST API 비상 폴링 실행")
                                     try:
                                         logger.warning(f"[{symbol}] ⚠️ 실시간 데이터 수신 지연 감지 (>3초). REST API 비상 우회 폴링 실행!")
                                         _emergency_ticker = await asyncio.to_thread(engine_api.exchange.fetch_ticker, symbol)
@@ -2070,12 +2130,18 @@ async def async_trading_loop():
                                 action, _real_sl, _trailing_active, _trailing_target = strategy_instance.evaluate_risk_management(
                                     entry, current_price, extreme_price, position_side, current_atr, symbol, partial_tp_executed, _pos_contracts, _breakeven_active
                                 )
+                                # [Consciousness] 리스크 관리 결과
+                                _cs_trail_tag = "ON" if _trailing_active else "OFF"
+                                _emit_thought(symbol, f"🔧 리스크 체크: {action} | SL ${_real_sl:,.2f} | 트레일링 {_cs_trail_tag}", throttle_key=f"risk_{symbol}", throttle_sec=10.0)
 
                                 # [Breakeven Stop] 래칫(Ratchet) — 1계약 trailing 최초 활성화 시 SL → 진입가 업그레이드
                                 # 한번 True가 되면 포지션 종료까지 절대 False로 돌아가지 않음
                                 if _trailing_active and _pos_contracts <= 1 and not partial_tp_executed and not _breakeven_active:
                                     bot_global_state["symbols"][symbol]["breakeven_stop_active"] = True
                                     _breakeven_active = True
+                                    # [Consciousness] 트레일링 + 본전 방어 활성화
+                                    _emit_thought(symbol, f"🔥 트레일링 스탑 활성화! 추적가 ${_trailing_target:,.2f}")
+                                    _emit_thought(symbol, f"🛡️ 본전 방어(Breakeven) 활성화 — SL이 진입가 ${entry:,.2f}로 업그레이드!")
                                     # [즉시 반영] 방금 활성화 → strategy.py는 아직 모르므로 직접 SL 바닥 적용
                                     if position_side == "LONG":
                                         _real_sl = max(_real_sl, entry)
@@ -2103,6 +2169,10 @@ async def async_trading_loop():
                                     # 1차 분할 익절 타겟 선제적 계산 (수수료 0.15% + ATR 50%)
                                     _target_offset = (entry * 0.0015) + (current_atr * 0.5)
                                     _first_target = (entry + _target_offset) if position_side == "LONG" else (entry - _target_offset)
+                                    # [Consciousness] 다이내믹 TP 상태
+                                    _cs_dist = abs(current_price - _first_target)
+                                    _cs_dist_pct = (_cs_dist / entry * 100) if entry > 0 else 0
+                                    _emit_thought(symbol, f"📐 1차 타겟 ${_first_target:,.2f} | 현재가까지 거리: ${_cs_dist:,.2f} ({_cs_dist_pct:.2f}%)", throttle_key=f"tp_dyn_{symbol}", throttle_sec=10.0)
                                     # [TP Split] 멀티계약 vs 1계약 구분 표시
                                     _cur_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                     if _cur_contracts > 1:
@@ -2134,6 +2204,8 @@ async def async_trading_loop():
                                         partial_profit = entry - current_price
 
                                     if _exchange_tp_filled or partial_profit >= partial_tp_threshold:
+                                        # [Consciousness] 1차 타겟 도달
+                                        _emit_thought(symbol, f"🎯 1차 타겟 도달! 수익 ${partial_profit:,.2f} >= 임계값 ${partial_tp_threshold:,.2f} → 분할 익절 실행!")
                                         try:
                                             full_contracts = int(bot_global_state["symbols"][symbol].get("contracts", 1))
                                             _is_paper = bot_global_state["symbols"][symbol].get("is_paper", False)
@@ -2345,6 +2417,13 @@ async def async_trading_loop():
                                                     logger.warning(f"[{symbol}] ⚠️ 익절 거미줄 갱신 예외: {tp_amend_err}")
 
                                 if action != "KEEP":
+                                    # [Consciousness] 청산 사유 방출
+                                    if action == "STOP_LOSS":
+                                        _emit_thought(symbol, f"🚨 하드 손절 발동! ${current_price:,.2f} → SL ${_real_sl:,.2f} 돌파 — 즉시 청산 실행!")
+                                    elif action == "TRAILING_STOP_EXIT":
+                                        _emit_thought(symbol, f"💰 트레일링 익절 발동! 고점 대비 하락 → 추적가 ${_trailing_target:,.2f} 돌파 — 수익 확정!")
+                                    else:
+                                        _emit_thought(symbol, f"⚡ 청산 실행: {action} | 현재가 ${current_price:,.2f}")
                                     # 1. 청산 실행 (Paper/Real 분기)
                                     try:
                                         amount = int(bot_global_state["symbols"][symbol].get("contracts", 0))
@@ -2453,6 +2532,11 @@ async def async_trading_loop():
                                         # [v2.1] 연패 쿨다운 카운터 업데이트 (Paper도 카운트하여 전략 검증)
                                         is_loss = (pnl_amount < 0)
                                         strategy_instance.record_trade_result(is_loss)
+                                        # [Consciousness] 쿨다운 진입 감지
+                                        if strategy_instance.loss_cooldown_until > _time.time():
+                                            import datetime as _cs_cd_dt
+                                            _cs_cd_end = _cs_cd_dt.datetime.fromtimestamp(strategy_instance.loss_cooldown_until, tz=_cs_cd_dt.timezone(_cs_cd_dt.timedelta(hours=9))).strftime("%H:%M:%S")
+                                            _emit_thought(symbol, f"❄️ {strategy_instance.consecutive_loss_count}연패 쿨다운 진입 — {_cs_cd_end} KST까지 진입 차단")
                                         # [Phase 21.2] 스트레스 바이패스: 연패 쿨다운 즉시 해제
                                         if _is_bypass_active('stress_bypass_cooldown_loss'):
                                             strategy_instance.loss_cooldown_until = 0
@@ -2501,10 +2585,12 @@ async def async_trading_loop():
                                             kill_triggered = strategy_instance.record_daily_pnl(pnl_amount)
                                             _save_strategy_state(strategy_instance)
                                             if kill_triggered:
-                                                kill_msg = f"🚨 [킬스위치 발동] 일일 최대 손실({strategy_instance.daily_max_loss_pct*100:.0f}%) 도달. 24시간 동안 매매 엔진 셋다운."
+                                                kill_msg = f"🚨 [킬스위치 발동] 일일 최대 손실({strategy_instance.daily_max_loss_pct*100:.0f}%) 도달. 24시간 동안 매매 엔진 셧다운."
                                                 bot_global_state["logs"].append(kill_msg)
                                                 logger.warning(kill_msg)
                                                 send_telegram_sync(f"🚨 킬스위치 발동\n일일 누적 손실: {strategy_instance.daily_pnl_accumulated:+.2f} USDT\n24시간 거래 중단")
+                                                # [Consciousness] 킬스위치 발동
+                                                _emit_thought(symbol, f"🚨 킬스위치 발동! 일일 손실 한도({strategy_instance.daily_max_loss_pct*100:.0f}%) 초과 — 24시간 거래 중단")
 
                                     except Exception as e:
                                         error_msg = f"[{symbol}] 청산 실패 ({action}): {str(e)}"
@@ -2536,6 +2622,7 @@ async def async_trading_loop():
 
                         # [Phase 19] 퇴근 모드 작동 시 신규 진입 강제 차단
                         if _exit_only:
+                            _emit_thought(symbol, "🛏️ 퇴근 모드(Exit-Only) 활성 — 신규 진입 차단 중", throttle_key=f"exit_only_{symbol}", throttle_sec=30.0)
                             _log_trade_attempt(symbol, "N/A", "BLOCKED", "exit_only_mode")
                             continue
 
@@ -2567,6 +2654,9 @@ async def async_trading_loop():
 
                         # signal, analysis_msg는 위에서 이미 평가됨
                         if signal in ["LONG", "SHORT"]:
+                            # [Consciousness] 진입 신호 발견
+                            _cs_sig_emoji = "🟢" if signal == "LONG" else "🔴"
+                            _emit_thought(symbol, f"{_cs_sig_emoji} {signal} 진입 신호 포착! 진입 파이프라인 검증 시작...")
                             # [Flight Recorder] Decision Trail 파이프라인 추적 시작
                             _pipeline = []
 
@@ -2778,6 +2868,12 @@ async def async_trading_loop():
                                         continue  # 실패 시 이번 사이클 스킵
 
                                 if not _is_shadow_hunt_order:
+                                    # [Consciousness] 진입 주문 실행
+                                    _cs_emoji = "🟢" if signal == "LONG" else "🔴"
+                                    if order_type == 'Market':
+                                        _emit_thought(symbol, f"{_cs_emoji} {signal} 시장가 진입 실행! ${current_price:,.2f} × {trade_amount}계약 ({trade_leverage}x)")
+                                    else:
+                                        _emit_thought(symbol, f"{_cs_emoji} {signal} 스마트 지정가 주문 제출 중... EMA20 ${ema_20_val:,.2f} 기준")
                                     # [DRY] 단일 헬퍼로 주문 실행 (Shadow Hunting이 아닐 때만)
                                     executed_price, pending_order_id = await execute_entry_order(
                                         engine_api, symbol, signal, trade_amount, order_type, current_price, ema_20_val
@@ -2976,6 +3072,9 @@ async def async_trading_loop():
                     bot_global_state["is_running"] = False
                     break
 
+            # [Consciousness] 루프 대기
+            for _cs_idle_sym in (symbols if 'symbols' in dir() else []):
+                _emit_thought(_cs_idle_sym, "💤 다음 사이클 대기 중... (3초 후 재분석)", throttle_key=f"idle_{_cs_idle_sym}", throttle_sec=30.0)
             await asyncio.sleep(3)
 
 # ===== [Phase 21.2] 스트레스 테스트 바이패스 엔드포인트 =====
