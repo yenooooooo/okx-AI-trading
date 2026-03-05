@@ -585,15 +585,18 @@ async def _apply_position_ws_update(pos: dict):
 
         # [TP Split] 거래소 TP 부분 체결 감지 — 포지션 수량 감소 시 플래그
         stored_contracts = float(bot_global_state["symbols"][symbol].get("contracts", 0))
-        if stored_contracts > 0 and pos_qty < stored_contracts and not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
-            # [방어막] 진입 후 10초 이내 WebSocket 업데이트는 이전 포지션 잔류 데이터일 수 있으므로 무시
+        # [핵심 방어] pos_qty > 0 필수: qty=0은 '완전 청산'이지 '부분 익절'이 아님 → 오탐 원천 차단
+        if stored_contracts > 0 and pos_qty > 0 and pos_qty < stored_contracts and not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
+            # [방어막] 진입 후 30초 이내 WebSocket 업데이트는 이전 포지션 잔류 데이터일 수 있으므로 무시
             _ws_entry_ts = bot_global_state["symbols"][symbol].get("entry_timestamp", 0)
-            if _time.time() - _ws_entry_ts > 10:
+            if _time.time() - _ws_entry_ts > 30:
                 bot_global_state["symbols"][symbol]["contracts"] = int(pos_qty)
                 bot_global_state["symbols"][symbol]["exchange_tp_filled"] = True
                 logger.info(f"[{symbol}] 📋 거래소 TP 부분 체결 감지 | {int(stored_contracts)} → {int(pos_qty)}계약")
             else:
-                logger.warning(f"[{symbol}] ⏳ [WebSocket Guard] 진입 후 10초 이내 수량 변동 무시 — 잔류 데이터 방어 ({int(stored_contracts)} → {int(pos_qty)})")
+                logger.warning(f"[{symbol}] ⏳ [WebSocket Guard] 진입 후 30초 이내 수량 변동 무시 — 잔류 데이터 방어 ({int(stored_contracts)} → {int(pos_qty)})")
+        elif stored_contracts > 0 and pos_qty == 0 and bot_global_state["symbols"][symbol].get("position", "NONE") not in ("NONE", "PENDING_LONG", "PENDING_SHORT"):
+            logger.info(f"[{symbol}] 📋 [WebSocket] 수량 0 감지 — 완전 청산 신호 (exchange_tp_filled 미설정)")
 
 async def private_ws_loop():
     """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
@@ -2560,12 +2563,13 @@ async def async_trading_loop():
                                     else:
                                         partial_profit = entry - current_price
 
-                                    # [방어막] exchange_tp_filled 오탐 차단: 진입 후 10초 이내 or 수익 0 이하면 거래소 신호 무시
+                                    # [방어막] exchange_tp_filled 오탐 차단: 수익이 임계값 50% 미만이면 오탐으로 간주
                                     if _exchange_tp_filled:
                                         _tp_entry_ts = bot_global_state["symbols"][symbol].get("entry_timestamp", 0)
                                         _tp_age = _time.time() - _tp_entry_ts
-                                        if partial_profit <= 0 or _tp_age < 10:
-                                            logger.warning(f"[{symbol}] 🚨 [TP Guard] 거래소 TP 신호 오탐 차단 — 수익 ${partial_profit:.2f} / 진입경과 {_tp_age:.1f}초")
+                                        _tp_min_profit = partial_tp_threshold * 0.5
+                                        if partial_profit < _tp_min_profit or _tp_age < 30:
+                                            logger.warning(f"[{symbol}] 🚨 [TP Guard] 거래소 TP 신호 오탐 차단 — 수익 ${partial_profit:.2f} < 최소 ${_tp_min_profit:.2f} / 진입경과 {_tp_age:.1f}초")
                                             bot_global_state["symbols"][symbol]["exchange_tp_filled"] = False
                                             _exchange_tp_filled = False
 
