@@ -271,14 +271,14 @@ BALANCE_TIERS = {
         'max_balance': 100,
         'config': {
             'exit_only_mode': 'false', 'risk_per_trade': '0.01',
-            'hard_stop_loss_rate': '0.005', 'trailing_stop_activation': '0.01',
-            'trailing_stop_rate': '0.005', 'min_take_profit_rate': '0.01',
+            'hard_stop_loss_rate': '0.005', 'trailing_stop_activation': '0.003',
+            'trailing_stop_rate': '0.002', 'min_take_profit_rate': '0.006',
             'adx_threshold': '28.0', 'adx_max': '50.0', 'chop_threshold': '55.0',
             'volume_surge_multiplier': '1.8', 'fee_margin': '0.002',
             'cooldown_losses_trigger': '2', 'cooldown_duration_sec': '1800',
             'daily_max_loss_rate': '0.05',
         },
-        'emoji': '🟡', 'description': '소액 보호 — R:R 1:2 강제, 저빈도 고확률',
+        'emoji': '🟡', 'description': '소액 보호 — 빠른 트레일링 추적, 수수료 포함 본전 보장',
     },
     'STANDARD': {
         'max_balance': 500,
@@ -2490,25 +2490,33 @@ async def async_trading_loop():
                                 if _trailing_active and _pos_contracts <= 1 and not partial_tp_executed and not _breakeven_active:
                                     bot_global_state["symbols"][symbol]["breakeven_stop_active"] = True
                                     _breakeven_active = True
+                                    # [수수료 포함 본전 방어] SL을 진입가+수수료로 설정 → "본전 청산 = 순손실" 원천 차단
+                                    _fee_margin_rate = strategy_instance.fee_margin  # 0.0015 (0.15%) — 양방향 수수료 커버
+                                    if position_side == "LONG":
+                                        _be_floor_with_fee = entry * (1.0 + _fee_margin_rate)
+                                    else:
+                                        _be_floor_with_fee = entry * (1.0 - _fee_margin_rate)
+                                    bot_global_state["symbols"][symbol]["breakeven_floor_price"] = round(_be_floor_with_fee, 4)
                                     # [Consciousness] 트레일링 + 본전 방어 활성화
                                     _emit_thought(symbol, f"🔥 트레일링 스탑 활성화! 추적가 ${_trailing_target:,.2f}")
-                                    _emit_thought(symbol, f"🛡️ 본전 방어(Breakeven) 활성화 — SL이 진입가 ${entry:,.2f}로 업그레이드!")
+                                    _emit_thought(symbol, f"🛡️ 본전 방어(Breakeven) 활성화 — SL이 진입가+수수료 ${_be_floor_with_fee:,.2f}로 업그레이드!")
                                     # [즉시 반영] 방금 활성화 → strategy.py는 아직 모르므로 직접 SL 바닥 적용
                                     if position_side == "LONG":
-                                        _real_sl = max(_real_sl, entry)
+                                        _real_sl = max(_real_sl, _be_floor_with_fee)
                                     else:
-                                        _real_sl = min(_real_sl, entry)
+                                        _real_sl = min(_real_sl, _be_floor_with_fee)
                                     # 텔레그램 알림
                                     _tf_label = str(get_config('timeframe') or '15m')
                                     _be_msg = (
-                                        f"🛡️ <b>본전 방어 활성화</b>\n"
+                                        f"🛡️ <b>본전 방어 활성화 (수수료 포함)</b>\n"
                                         f"{_TG_LINE}\n"
                                         f"<code>{_sym_short(symbol)}</code>  ·  ⏱️ <code>{_tf_label}</code>\n"
-                                        f"SL이 진입가(${entry:,.2f})로 업그레이드\n"
-                                        f"이후 최소 본전 청산 보장"
+                                        f"진입가: ${entry:,.2f}\n"
+                                        f"SL: ${_be_floor_with_fee:,.2f} (수수료 {_fee_margin_rate*100:.2f}% 포함)\n"
+                                        f"이후 순이익 보장 청산"
                                     )
                                     send_telegram_sync(_be_msg)
-                                    bot_global_state["logs"].append(f"🛡️ [{symbol}] SL → 진입가 업그레이드 (Breakeven Stop)")
+                                    bot_global_state["logs"].append(f"🛡️ [{symbol}] SL → ${_be_floor_with_fee:,.2f} 업그레이드 (수수료 포함 Breakeven)")
 
                                 # [래칫 방어] 트레일링/본전방어 활성 후 SL은 이익 방향으로만 이동 (절대 후퇴 금지)
                                 _prev_real_sl = float(bot_global_state["symbols"][symbol].get("real_sl", 0.0))
@@ -2735,16 +2743,18 @@ async def async_trading_loop():
                                             logger.info(f"[{symbol}] 🔒 [Smart Amend 래칫] SL 후퇴 차단: {_current_ideal_sl:.4f} → {_last_sl:.4f} 유지")
                                             _current_ideal_sl = _last_sl
 
-                                    # [본전 보장] breakeven 활성 시 거래소 SL 최소 진입가 강제
+                                    # [본전 보장 + 수수료] breakeven 활성 시 거래소 SL 최소 진입가+수수료 강제
                                     _be_floor_active = bot_global_state["symbols"][symbol].get("breakeven_stop_active", False)
                                     if _be_floor_active and _current_ideal_sl > 0:
-                                        _entry_floor = float(bot_global_state["symbols"][symbol].get("entry_price", 0.0))
+                                        # breakeven_floor_price가 있으면 수수료 포함 가격, 없으면 진입가 폴백
+                                        _entry_floor = float(bot_global_state["symbols"][symbol].get("breakeven_floor_price",
+                                                             bot_global_state["symbols"][symbol].get("entry_price", 0.0)))
                                         if _entry_floor > 0:
                                             if position_side == "LONG" and _current_ideal_sl < _entry_floor:
-                                                logger.warning(f"[{symbol}] 🛡️ [본전 보장] SL({_current_ideal_sl:.4f})이 진입가({_entry_floor:.4f}) 미만 → 진입가로 강제 교정")
+                                                logger.warning(f"[{symbol}] 🛡️ [본전 보장] SL({_current_ideal_sl:.4f})이 수수료포함본전({_entry_floor:.4f}) 미만 → 강제 교정")
                                                 _current_ideal_sl = _entry_floor
                                             elif position_side == "SHORT" and _current_ideal_sl > _entry_floor:
-                                                logger.warning(f"[{symbol}] 🛡️ [본전 보장] SL({_current_ideal_sl:.4f})이 진입가({_entry_floor:.4f}) 초과 → 진입가로 강제 교정")
+                                                logger.warning(f"[{symbol}] 🛡️ [본전 보장] SL({_current_ideal_sl:.4f})이 수수료포함본전({_entry_floor:.4f}) 초과 → 강제 교정")
                                                 _current_ideal_sl = _entry_floor
 
                                     # 이상적인 손절가(real_sl)가 존재하고, 기존에 걸어둔 손절가가 있을 경우 비교

@@ -348,13 +348,15 @@ class TradingStrategy:
                 else:
                     effective_sl = min(hard_sl_price, trailing_target)
 
-        # [Breakeven Stop] 1계약 조기 본전 방어 — 래칫 보장 (max/min으로 유리한 방향만 선택)
-        # trailing_target이 entry보다 유리하면 trailing_target 유지, 아니면 entry가 최소 보장선
+        # [Breakeven Stop + 수수료 방어] 1계약 조기 본전 방어 — 수수료 포함 래칫 보장
+        # SL 최소선 = 진입가 + 수수료(fee_margin) → "본전 청산 = 순손실" 원천 차단
         if breakeven_stop_active and _is_single_contract and not partial_tp_executed:
+            _be_fee_floor_long = entry_price * (1.0 + self.fee_margin)
+            _be_fee_floor_short = entry_price * (1.0 - self.fee_margin)
             if position_side == "LONG":
-                effective_sl = max(effective_sl, entry_price)
+                effective_sl = max(effective_sl, _be_fee_floor_long)
             else:
-                effective_sl = min(effective_sl, entry_price)
+                effective_sl = min(effective_sl, _be_fee_floor_short)
 
         # ── 4. [최후 방어선] effective_sl 돌파 체크 — 소프트웨어 SL 사각지대 원천 제거 ──
         # 트레일링 비활성화 + 거래소 SL 미갱신 상태에서 가격이 effective_sl을 돌파하면
