@@ -356,6 +356,15 @@ class TradingStrategy:
             else:
                 effective_sl = min(effective_sl, entry_price)
 
+        # ── 4. [최후 방어선] effective_sl 돌파 체크 — 소프트웨어 SL 사각지대 원천 제거 ──
+        # 트레일링 비활성화 + 거래소 SL 미갱신 상태에서 가격이 effective_sl을 돌파하면
+        # hard_sl 체크와 trailing EXIT 체크 모두 놓치는 사각지대가 발생함
+        # effective_sl이 hard_sl보다 유리한(타이트한) 경우에만 발동
+        if position_side == "LONG" and effective_sl > hard_sl_price and current_price <= effective_sl:
+            return "STOP_LOSS", effective_sl, trailing_active, trailing_target
+        if position_side == "SHORT" and effective_sl < hard_sl_price and current_price >= effective_sl:
+            return "STOP_LOSS", effective_sl, trailing_active, trailing_target
+
         return "KEEP", effective_sl, trailing_active, trailing_target
 
     def recalculate_shadow_risk(self, shadow_entry_price: float, direction: str, current_atr: float):
