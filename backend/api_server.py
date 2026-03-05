@@ -2502,6 +2502,15 @@ async def async_trading_loop():
                                     send_telegram_sync(_be_msg)
                                     bot_global_state["logs"].append(f"🛡️ [{symbol}] SL → 진입가 업그레이드 (Breakeven Stop)")
 
+                                # [래칫 방어] 트레일링/본전방어 활성 후 SL은 이익 방향으로만 이동 (절대 후퇴 금지)
+                                _prev_real_sl = float(bot_global_state["symbols"][symbol].get("real_sl", 0.0))
+                                if _prev_real_sl > 0 and (_trailing_active or _breakeven_active):
+                                    if position_side == "LONG" and _real_sl < _prev_real_sl:
+                                        _emit_thought(symbol, f"🔒 래칫 방어: SL 후퇴 차단 ${_real_sl:,.2f} → ${_prev_real_sl:,.2f} 유지", throttle_key=f"ratchet_{symbol}", throttle_sec=30.0)
+                                        _real_sl = _prev_real_sl
+                                    elif position_side == "SHORT" and _real_sl > _prev_real_sl:
+                                        _emit_thought(symbol, f"🔒 래칫 방어: SL 후퇴 차단 ${_real_sl:,.2f} → ${_prev_real_sl:,.2f} 유지", throttle_key=f"ratchet_{symbol}", throttle_sec=30.0)
+                                        _real_sl = _prev_real_sl
                                 bot_global_state["symbols"][symbol]["real_sl"] = round(_real_sl, 4)
                                 bot_global_state["symbols"][symbol]["trailing_active"] = _trailing_active
                                 bot_global_state["symbols"][symbol]["trailing_target"] = round(_trailing_target, 4) if _trailing_target else 0.0
@@ -2699,6 +2708,27 @@ async def async_trading_loop():
                                     _last_sl = float(bot_global_state["symbols"][symbol].get("last_placed_sl_price", 0.0))
                                     _active_sl_id = bot_global_state["symbols"][symbol].get("active_sl_order_id")
 
+                                    # [래칫 방어] 거래소 SL은 이익 방향으로만 이동 (후퇴 원천 차단)
+                                    if _current_ideal_sl > 0 and _last_sl > 0:
+                                        if position_side == "LONG" and _current_ideal_sl < _last_sl:
+                                            logger.info(f"[{symbol}] 🔒 [Smart Amend 래칫] SL 후퇴 차단: {_current_ideal_sl:.4f} → {_last_sl:.4f} 유지")
+                                            _current_ideal_sl = _last_sl
+                                        elif position_side == "SHORT" and _current_ideal_sl > _last_sl:
+                                            logger.info(f"[{symbol}] 🔒 [Smart Amend 래칫] SL 후퇴 차단: {_current_ideal_sl:.4f} → {_last_sl:.4f} 유지")
+                                            _current_ideal_sl = _last_sl
+
+                                    # [본전 보장] breakeven 활성 시 거래소 SL 최소 진입가 강제
+                                    _be_floor_active = bot_global_state["symbols"][symbol].get("breakeven_stop_active", False)
+                                    if _be_floor_active and _current_ideal_sl > 0:
+                                        _entry_floor = float(bot_global_state["symbols"][symbol].get("entry_price", 0.0))
+                                        if _entry_floor > 0:
+                                            if position_side == "LONG" and _current_ideal_sl < _entry_floor:
+                                                logger.warning(f"[{symbol}] 🛡️ [본전 보장] SL({_current_ideal_sl:.4f})이 진입가({_entry_floor:.4f}) 미만 → 진입가로 강제 교정")
+                                                _current_ideal_sl = _entry_floor
+                                            elif position_side == "SHORT" and _current_ideal_sl > _entry_floor:
+                                                logger.warning(f"[{symbol}] 🛡️ [본전 보장] SL({_current_ideal_sl:.4f})이 진입가({_entry_floor:.4f}) 초과 → 진입가로 강제 교정")
+                                                _current_ideal_sl = _entry_floor
+
                                     # 이상적인 손절가(real_sl)가 존재하고, 기존에 걸어둔 손절가가 있을 경우 비교
                                     if _current_ideal_sl > 0 and _last_sl > 0 and _active_sl_id:
                                         # [방어막] SL이 진입가 방향으로 비정상적으로 이동하는 것 차단
@@ -2716,8 +2746,10 @@ async def async_trading_loop():
                                         # 오차율 계산 (절대값(목표가 - 기존가) / 기존가)
                                         _diff_ratio = abs(_current_ideal_sl - _last_sl) / _last_sl if _current_ideal_sl > 0 and _last_sl > 0 else 0
 
-                                        # 0.05% 이상 목표가가 변동되었을 때만 거래소 주문 갱신 (API Rate Limit 및 DDoS 오인 방어)
-                                        if _diff_ratio >= 0.0005:
+                                        # [트레일링 공격적 추적] 트레일링 활성 시 갱신 임계값 5배 하향 (0.05% → 0.01%)
+                                        _trailing_active_amend = bot_global_state["symbols"][symbol].get("trailing_active", False)
+                                        _amend_threshold = 0.0001 if _trailing_active_amend else 0.0005
+                                        if _diff_ratio >= _amend_threshold:
                                             try:
                                                 # 1. 기존 거미줄(주문) 취소
                                                 await asyncio.to_thread(engine_api.exchange.cancel_order, _active_sl_id, symbol)
