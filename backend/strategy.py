@@ -295,6 +295,15 @@ class TradingStrategy:
         else:
             return "KEEP", 0.0, False, 0.0
 
+        # ── [방어막] SL 방향 산정(Sanity Check) — partial_tp 오탐 시 역방향 SL 원천 차단 ──
+        # SHORT SL은 반드시 진입가 이상, LONG SL은 반드시 진입가 이하 (partial_tp 제외)
+        # partial_tp_executed인데 아직 수익이 없으면 → 오탐이므로 일반 SL로 강제 교정
+        if partial_tp_executed and profit_usdt <= 0:
+            if position_side == "LONG":
+                hard_sl_price = entry_price - (entry_price * self.hard_stop_loss_rate)
+            else:
+                hard_sl_price = entry_price + (entry_price * self.hard_stop_loss_rate)
+
         # ── 1. 하드 스탑로스 ──
         if position_side == "LONG" and current_price <= hard_sl_price:
             return "STOP_LOSS", hard_sl_price, False, 0.0

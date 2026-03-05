@@ -586,9 +586,14 @@ async def _apply_position_ws_update(pos: dict):
         # [TP Split] 거래소 TP 부분 체결 감지 — 포지션 수량 감소 시 플래그
         stored_contracts = float(bot_global_state["symbols"][symbol].get("contracts", 0))
         if stored_contracts > 0 and pos_qty < stored_contracts and not bot_global_state["symbols"][symbol].get("partial_tp_executed", False):
-            bot_global_state["symbols"][symbol]["contracts"] = int(pos_qty)
-            bot_global_state["symbols"][symbol]["exchange_tp_filled"] = True
-            logger.info(f"[{symbol}] 📋 거래소 TP 부분 체결 감지 | {int(stored_contracts)} → {int(pos_qty)}계약")
+            # [방어막] 진입 후 10초 이내 WebSocket 업데이트는 이전 포지션 잔류 데이터일 수 있으므로 무시
+            _ws_entry_ts = bot_global_state["symbols"][symbol].get("entry_timestamp", 0)
+            if _time.time() - _ws_entry_ts > 10:
+                bot_global_state["symbols"][symbol]["contracts"] = int(pos_qty)
+                bot_global_state["symbols"][symbol]["exchange_tp_filled"] = True
+                logger.info(f"[{symbol}] 📋 거래소 TP 부분 체결 감지 | {int(stored_contracts)} → {int(pos_qty)}계약")
+            else:
+                logger.warning(f"[{symbol}] ⏳ [WebSocket Guard] 진입 후 10초 이내 수량 변동 무시 — 잔류 데이터 방어 ({int(stored_contracts)} → {int(pos_qty)})")
 
 async def private_ws_loop():
     """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
@@ -2555,6 +2560,15 @@ async def async_trading_loop():
                                     else:
                                         partial_profit = entry - current_price
 
+                                    # [방어막] exchange_tp_filled 오탐 차단: 진입 후 10초 이내 or 수익 0 이하면 거래소 신호 무시
+                                    if _exchange_tp_filled:
+                                        _tp_entry_ts = bot_global_state["symbols"][symbol].get("entry_timestamp", 0)
+                                        _tp_age = _time.time() - _tp_entry_ts
+                                        if partial_profit <= 0 or _tp_age < 10:
+                                            logger.warning(f"[{symbol}] 🚨 [TP Guard] 거래소 TP 신호 오탐 차단 — 수익 ${partial_profit:.2f} / 진입경과 {_tp_age:.1f}초")
+                                            bot_global_state["symbols"][symbol]["exchange_tp_filled"] = False
+                                            _exchange_tp_filled = False
+
                                     if _exchange_tp_filled or partial_profit >= partial_tp_threshold:
                                         # [Consciousness] 1차 타겟 도달
                                         _emit_thought(symbol, f"🎯 1차 타겟 도달! 수익 ${partial_profit:,.2f} >= 임계값 ${partial_tp_threshold:,.2f} → 분할 익절 실행!")
@@ -3994,6 +4008,10 @@ async def fetch_current_status():
                         if entry > 0 and sym_state.get("entry_price", 0) == 0:
                             sym_state["entry_price"] = entry
                             sym_state["position"] = side
+                            # [방어막] 헬스체크 동기화 시 이전 포지션 잔류 플래그 강제 초기화
+                            sym_state["partial_tp_executed"] = False
+                            sym_state["breakeven_stop_active"] = False
+                            sym_state["exchange_tp_filled"] = False
 
             except Exception as pe:
                 logger.error(f"[헬스체크] OKX 포지션 API 핑 실패 — RAW 원인: {pe}")
