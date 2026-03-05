@@ -230,7 +230,8 @@ async def broadcast_dashboard_state():
                     "is_running": bot_global_state["is_running"],
                     "balance": bot_global_state["balance"],
                     "symbols": bot_global_state["symbols"],
-                    "logs": list(bot_global_state["logs"][-10:])
+                    "logs": list(bot_global_state["logs"][-10:]),
+                    "is_demo": os.getenv("OKX_DEMO", "false").strip().lower() in ("true", "1", "yes"),
                 }
                 await manager.broadcast_json(state_to_send)
         except Exception as e:
@@ -601,7 +602,10 @@ async def _apply_position_ws_update(pos: dict):
 async def private_ws_loop():
     """OKX 프라이빗 WebSocket - positions 채널로 펀딩피 포함 정확한 PnL 실시간 수신"""
     import websockets
-    WS_URL = "wss://ws.okx.com:8443/ws/v5/private"  # 실전 환경
+    # [데모 모드] OKX_DEMO=true 시 데모 WebSocket URL 사용
+    _is_demo = os.getenv("OKX_DEMO", "false").strip().lower() in ("true", "1", "yes")
+    WS_URL = "wss://wspap.okx.com:8443/ws/v5/private?brokerId=9999" if _is_demo else "wss://ws.okx.com:8443/ws/v5/private"
+    logger.info(f"[Private WS] {'🧪 DEMO' if _is_demo else '⚡ LIVE'} 모드 — {WS_URL}")
     _ws_backoff = 5  # 지수 백오프 초기값
     while True:
         try:
@@ -4100,6 +4104,9 @@ async def fetch_current_status():
             except Exception:
                 _margin_guard[_mg_sym] = {"feasible": True, "needs_change": False}
 
+    # [데모 모드] 프론트엔드에 데모 여부 전달
+    _is_demo_mode = os.getenv("OKX_DEMO", "false").strip().lower() in ("true", "1", "yes")
+
     return {
         "is_running": bot_global_state["is_running"],
         "balance": bot_global_state["balance"],
@@ -4111,6 +4118,7 @@ async def fetch_current_status():
             "risk": active_risk,
         },
         "margin_guard": _margin_guard,
+        "is_demo": _is_demo_mode,
     }
 
 @app_server.get("/api/v1/brain")

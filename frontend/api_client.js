@@ -1,4 +1,5 @@
 const API_URL = `/api/v1`;
+let _isDemoMode = false; // [데모 모드] 백엔드 status.is_demo에서 동기화
 let chart = null;
 let candleSeries = null;
 let volumeSeries = null;
@@ -575,6 +576,10 @@ async function syncBotStatus() {
         }
 
         // 3. Status Info
+        // [데모 모드] 백엔드에서 is_demo 동기화
+        if (typeof data.is_demo !== 'undefined') _isDemoMode = data.is_demo;
+        const _demoTag = _isDemoMode ? '🧪 DEMO | ' : '';
+
         const statusDot = document.getElementById('status-dot');
         const statusPing = document.getElementById('status-ping');
         const statusText = document.getElementById('bot-status-text');
@@ -583,14 +588,14 @@ async function syncBotStatus() {
         if (data.is_running) {
             statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-neon-green';
             statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-green opacity-75';
-            statusText.textContent = '🟢 시스템 가동 중';
+            statusText.textContent = `${_demoTag}🟢 시스템 가동 중`;
             statusText.className = 'font-mono text-sm tracking-widest text-neon-green uppercase';
             toggleBtn.textContent = '🛑 시스템 중지';
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-red hover:bg-neon-red hover:text-white text-neon-red text-sm font-bold rounded transition-all font-mono tracking-widest';
         } else {
             statusDot.className = 'relative inline-flex rounded-full h-3 w-3 bg-neon-red';
             statusPing.className = 'animate-ping absolute inline-flex h-full w-full rounded-full bg-neon-red opacity-75';
-            statusText.textContent = '🛑 시스템 중지';
+            statusText.textContent = `${_demoTag}🛑 시스템 중지`;
             statusText.className = 'font-mono text-sm tracking-widest text-gray-400 uppercase';
             toggleBtn.textContent = '🟢 시스템 가동';
             toggleBtn.className = 'px-6 py-2 bg-navy-800 border border-neon-green hover:bg-neon-green hover:text-navy-900 text-neon-green text-sm font-bold rounded transition-all font-mono tracking-widest';
@@ -3748,8 +3753,10 @@ let priceWs = null;
 let _wsManualRestart = false; // 수동 재시작 시 onclose 자동 재연결 타이머 중복 방지
 
 function initPriceWebSocket() {
-    // OKX Public Demo Trading WebSocket URL
-    const wsUrl = "wss://ws.okx.com:8443/ws/v5/public";
+    // [데모 모드] 백엔드 is_demo 상태에 따라 OKX WebSocket URL 분기
+    const wsUrl = _isDemoMode
+        ? "wss://wspap.okx.com:8443/ws/v5/public?brokerId=9999"
+        : "wss://ws.okx.com:8443/ws/v5/public";
 
     if (priceWs) {
         _wsManualRestart = true; // onclose에서 5초 타이머 건너뜀

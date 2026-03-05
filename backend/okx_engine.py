@@ -11,7 +11,7 @@ class OKXEngine:
         """OKX API 인스턴스 초기화 및 강력한 환경변수 검증"""
         current_dir = os.path.dirname(os.path.abspath(__file__))
         env_path = os.path.join(current_dir, '.env')
-        
+
         if not os.path.exists(env_path):
             print(f"[시스템 경고] .env 파일을 찾을 수 없습니다! (경로: {env_path})")
         else:
@@ -20,6 +20,8 @@ class OKXEngine:
         self.api_key = os.getenv("OKX_API_KEY")
         self.secret_key = os.getenv("OKX_SECRET_KEY")
         self.password = os.getenv("OKX_PASSWORD")
+        # [데모 모드] .env에서 OKX_DEMO=true 시 데모 트레이딩 서버 사용
+        self.is_demo = os.getenv("OKX_DEMO", "false").strip().lower() in ("true", "1", "yes")
 
         if not self.api_key or not self.secret_key or not self.password:
             print("[치명적 오류] OKX API 키가 누락되었습니다.")
@@ -27,7 +29,9 @@ class OKXEngine:
             return
 
         try:
+            _mode_label = "🧪 DEMO" if self.is_demo else "⚡ LIVE"
             print(f"[OKX 엔진] .env 로딩 경로: {env_path}")
+            print(f"[OKX 엔진] 모드: {_mode_label}")
             print(f"[OKX 엔진] API Key 앞 6자: {str(self.api_key)[:6]}***")
 
             self.exchange = ccxt.okx({
@@ -40,6 +44,11 @@ class OKXEngine:
                     'defaultType': 'swap',
                 }
             })
+
+            # [데모 모드] sandbox 활성화 → API URL이 demo-trading.okx.com으로 전환
+            if self.is_demo:
+                self.exchange.set_sandbox_mode(True)
+                print("[OKX 엔진] 🧪 Sandbox(Demo) 모드 활성화 — demo-trading.okx.com 연결")
 
             # [진단 Step 1] 필수 credential 누락 검증
             self.exchange.check_required_credentials()
