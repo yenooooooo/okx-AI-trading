@@ -1998,18 +1998,40 @@ async def async_trading_loop():
                                     continue  # 이 심볼 진입 건너뛰기
                                 _pipeline.append({"step": "margin_check", "status": "PASS", "detail": f"증거금 ${_margin_needed:.2f} OK"})
                                 # 레버리지 거래소 적용 (실패 시 진입 차단 — 잘못된 레버리지로 주문 방지)
-                                # [59669 방어] 레버리지 변경 전 잔여 주문(TP/SL·트레일링) 선취소
+                                # [59669 방어] 레버리지 변경 전 일반 주문 + 알고 주문(TP/SL·트레일링·트리거) 전량 취소
                                 try:
+                                    # ① 일반 미체결 주문 취소
                                     _open_orders = await asyncio.to_thread(engine_api.exchange.fetch_open_orders, symbol)
                                     if _open_orders:
-                                        logger.info(f"[{symbol}] 레버리지 변경 전 잔여 주문 {len(_open_orders)}건 취소 시작")
+                                        logger.info(f"[{symbol}] 레버리지 변경 전 일반 주문 {len(_open_orders)}건 취소")
                                         for _ord in _open_orders:
                                             try:
                                                 await asyncio.to_thread(engine_api.exchange.cancel_order, _ord['id'], symbol)
                                             except Exception:
                                                 pass
                                 except Exception as _cancel_err:
-                                    logger.warning(f"[{symbol}] 잔여 주문 취소 중 오류 (계속 진행): {_cancel_err}")
+                                    logger.warning(f"[{symbol}] 일반 주문 취소 오류 (계속 진행): {_cancel_err}")
+                                try:
+                                    # ② 알고 주문(TP/SL·트레일링·트리거) 취소 — OKX 전용 엔드포인트
+                                    _inst_id = symbol.split(':')[0].replace('/', '-') + '-SWAP'
+                                    for _algo_type in ('conditional', 'oco', 'trigger', 'move_order_stop'):
+                                        try:
+                                            _algo_res = await asyncio.to_thread(
+                                                engine_api.exchange.private_get_trade_orders_algo_pending,
+                                                {'instId': _inst_id, 'ordType': _algo_type}
+                                            )
+                                            _algo_list = (_algo_res or {}).get('data', [])
+                                            if _algo_list:
+                                                logger.info(f"[{symbol}] 알고 주문({_algo_type}) {len(_algo_list)}건 취소")
+                                                _cancel_ids = [{'algoId': a['algoId'], 'instId': _inst_id} for a in _algo_list]
+                                                await asyncio.to_thread(
+                                                    engine_api.exchange.private_post_trade_cancel_algos,
+                                                    {'algoIds': _cancel_ids}
+                                                )
+                                        except Exception:
+                                            pass
+                                except Exception as _algo_err:
+                                    logger.warning(f"[{symbol}] 알고 주문 취소 오류 (계속 진행): {_algo_err}")
                                 try:
                                     await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
                                 except Exception as lev_err:
