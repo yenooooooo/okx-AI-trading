@@ -1998,6 +1998,18 @@ async def async_trading_loop():
                                     continue  # 이 심볼 진입 건너뛰기
                                 _pipeline.append({"step": "margin_check", "status": "PASS", "detail": f"증거금 ${_margin_needed:.2f} OK"})
                                 # 레버리지 거래소 적용 (실패 시 진입 차단 — 잘못된 레버리지로 주문 방지)
+                                # [59669 방어] 레버리지 변경 전 잔여 주문(TP/SL·트레일링) 선취소
+                                try:
+                                    _open_orders = await asyncio.to_thread(engine_api.exchange.fetch_open_orders, symbol)
+                                    if _open_orders:
+                                        logger.info(f"[{symbol}] 레버리지 변경 전 잔여 주문 {len(_open_orders)}건 취소 시작")
+                                        for _ord in _open_orders:
+                                            try:
+                                                await asyncio.to_thread(engine_api.exchange.cancel_order, _ord['id'], symbol)
+                                            except Exception:
+                                                pass
+                                except Exception as _cancel_err:
+                                    logger.warning(f"[{symbol}] 잔여 주문 취소 중 오류 (계속 진행): {_cancel_err}")
                                 try:
                                     await asyncio.to_thread(engine_api.exchange.set_leverage, trade_leverage, symbol)
                                 except Exception as lev_err:
