@@ -30,7 +30,7 @@ def auth_required(func):
 
 @auth_required
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from api_server import bot_global_state
+    from core.state import bot_global_state
     from database import get_config
     
     is_running = bot_global_state.get("is_running", False)
@@ -75,7 +75,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @auth_required
 async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from api_server import bot_global_state
+    from core.state import bot_global_state
     if not bot_global_state["is_running"]:
         await update.effective_message.reply_text("⚠️ 이미 매매 루프가 일시정지 상태입니다.")
         return
@@ -86,25 +86,25 @@ async def cmd_pause(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @auth_required
 async def cmd_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from api_server import bot_global_state
-    import api_server
-    import asyncio
-    
+    from core.state import bot_global_state, _g
+
     if bot_global_state["is_running"]:
         await update.effective_message.reply_text("⚠️ 시스템이 이미 가동 중입니다.")
         return
-        
+
     bot_global_state["is_running"] = True
     bot_global_state["logs"].append("[봇] 텔레그램 명령으로 매매 루프 재가동")
-    
-    if getattr(api_server, '_trading_task', None) is None or api_server._trading_task.done():
-        api_server._trading_task = asyncio.create_task(api_server.async_trading_loop())
-        
+
+    if _g["trading_task"] is None or _g["trading_task"].done():
+        from core.trading_loop import async_trading_loop
+        _g["trading_task"] = asyncio.create_task(async_trading_loop())
+
     await update.effective_message.reply_text("▶️ *매매 루프 재가동 완료*\n정상적으로 타점 탐색을 시작합니다.", parse_mode="Markdown")
 
 @auth_required
 async def cmd_panic(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    from api_server import bot_global_state, _engine
+    from core.state import bot_global_state, _g
+    _engine = _g["engine"]
 
     bot_global_state["is_running"] = False
     bot_global_state["logs"].append("🚨 [긴급] [PANIC] 텔레그램 긴급 킬스위치 발동!")
