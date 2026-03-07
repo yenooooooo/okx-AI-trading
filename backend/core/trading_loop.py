@@ -18,6 +18,7 @@ from core.state import (
     bot_global_state, ai_brain_state, _g, state_lock,
     _loop_xray_state, BALANCE_TIERS,
     PRESET_GATE_CONFIGS, PRESET_DISPLAY, _PRESET_PRIORITY, _scalp_fitness_alert_state,
+    _decision_trail_log,
 )
 from core.helpers import (
     _reset_position_state, _emit_thought, _is_bypass_active, _save_strategy_state,
